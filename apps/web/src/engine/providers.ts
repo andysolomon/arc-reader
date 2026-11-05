@@ -204,6 +204,13 @@ const sleep = (ms: number, signal?: AbortSignal) =>
   });
 
 export const BUSY_RETRIES = 4;
+/**
+ * VoiceStudio answers a saturated pool with Retry-After: 30, sized for batch
+ * clients. Someone listening cannot wait minutes: the web server pauses its own
+ * preparation as soon as a live request arrives, so the pool frees within one
+ * passage and a short retry is enough.
+ */
+export const BUSY_RETRY_CAP_MS = 5000;
 
 export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<Chunk> {
   const run = async () => {
@@ -219,7 +226,7 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
         return chunk;
       } catch (e) {
         if (!(e instanceof ApiBusy) || attempt >= BUSY_RETRIES) throw e;
-        await sleep(e.retryAfterMs || 400 * 2 ** attempt, req.signal);
+        await sleep(Math.min(e.retryAfterMs || 400 * 2 ** attempt, BUSY_RETRY_CAP_MS), req.signal);
       }
     }
   };

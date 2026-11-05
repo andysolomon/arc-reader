@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PreparationService } from "./vite.prepare";
 import { PreparationWorkers } from "./vite.preparation-workers";
+import { SpeechActivity } from "./vite.speech-activity";
 import type { PreparationRequest } from "./src/engine/preparation";
 
 const item = (text: string): PreparationRequest => ({ key: text, text, voice: "v", engine: "kittentts", protocol: "openai" });
@@ -132,6 +133,37 @@ describe("server-owned audio preparation", () => {
     expect(await service.get(job.id)).toMatchObject({ state: "cancelled", done: 1 });
     await expect(service.audio(job.id, 1)).rejects.toThrow("cancelled");
     expect(calls).toHaveLength(1);
+  });
+
+  it("pauses background passages while someone is listening on the same machine", async () => {
+    const activity = new SpeechActivity(150);
+    const service = new PreparationService(env, directory, activity);
+    gate = deferred();
+    const job = await service.submit({ requests: [item("first"), item("second"), item("third")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    // A reader's live request arrives through the proxy while the first passage renders.
+    const end = activity.begin(env.VOICESTUDIO_URL);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(job.id)).done).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(calls).toHaveLength(1);
+    // Playback of this job's own passages is never held back.
+    expect((await service.audio(job.id, 0)).body.toString()).toBe("audio:first");
+    expect(calls).toHaveLength(1);
+    end();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(calls).toHaveLength(1);
+    await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["first", "second", "third"]);
+  });
+
+  it("does not pause for listening on a different machine", async () => {
+    const activity = new SpeechActivity(10_000);
+    const service = new PreparationService(env, directory, activity);
+    activity.begin("http://127.0.0.1:1");
+    const job = await service.submit({ requests: [item("first"), item("second")], start: 0 });
+    await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(calls).toHaveLength(2);
   });
 
   it("finishes one whole reading before starting another voice on the same machine", async () => {

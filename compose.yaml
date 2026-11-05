@@ -48,6 +48,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       FISH_API_KEY: ${FISH_API_KEY:-}
       PREPARATION_DATA_DIR: /app/preparations
+      PREPARATION_YIELD_MS: ${PREPARATION_YIELD_MS:-}
       LIBRARY_DATA_DIR: /app/library
     volumes:
       - preparation-data:/app/preparations

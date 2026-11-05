@@ -111,7 +111,9 @@ test("a fresh device sees server audio and queue status without downloading or g
     await page.goto("/library");
     const item = page.getByRole("listitem").filter({ has: page.getByRole("button", { name: id, exact: true }) });
     await expect(item.getByRole("img", { name: /100% prepared/ })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Audio preparation queue" }).getByText("Prepared on server", { exact: true })).toBeVisible();
+    // Other tests' documents share this server, so read this document's own row.
+    const row = page.getByRole("region", { name: "Audio preparation queue" }).getByRole("listitem").filter({ hasText: id });
+    await expect(row.getByText("Prepared on server", { exact: true })).toBeVisible();
     expect(requests).toEqual([]);
     const downloaded = await page.evaluate(async () => {
       const d = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open("readaloud"); r.onsuccess = () => resolve(r.result); });

@@ -11,6 +11,7 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
+import { ApiBusy, ApiRejected, ApiUnreachable } from "../engine/types";
 import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
@@ -38,6 +39,7 @@ export function VoicesPage() {
   const hasDoc = !!loadedDoc;
   const [docTitle, setDocTitle] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
   const [filters, setFilters] = useState<VoiceFilters>(NO_VOICE_FILTERS);
   const setFilter = (key: keyof VoiceFilters, value: string) => setFilters((f) => ({ ...f, [key]: value }));
   const shown = useMemo(() => filterVoices(VOICES, filters), [VOICES, filters]);
@@ -63,6 +65,7 @@ export function VoicesPage() {
     audio.current = null;
     window.speechSynthesis?.cancel();
     setPreviewing(null);
+    setGenerating(false);
   };
   useEffect(() => stopPreview, []);
   useEffect(() => {
@@ -74,6 +77,7 @@ export function VoicesPage() {
     usePlayer.getState().clearOffline();
     const v = getVoice(id);
     setPreviewing(id);
+    setGenerating(true);
     let text = `Hi, I'm ${v.name}. This is how I sound at your current speed.`;
     const ac = new AbortController();
     abort.current = ac;
@@ -86,6 +90,8 @@ export function VoicesPage() {
         return;
       }
     }
+    // A preview exists to hear this voice: when the server cannot render it, say
+    // so rather than quietly substituting the browser voice (which may be silent).
     const chunk = await synthesize({
       text,
       voice: v.id,
@@ -94,15 +100,26 @@ export function VoicesPage() {
       profile: v.kind === "profile",
       signal: ac.signal,
       forceLocal: isLocalVoice(v.id) || (v.kind === "profile" && engineId === LOCAL_ENGINE),
-      onOffline: () => {
-        // No document is open here, so the offline banner can't explain the fallback: say it.
+      fallbackLocal: false,
+    }).catch((error: unknown) => {
+      if (ac.signal.aborted) return null;
+      if (error instanceof ApiUnreachable) {
+        // No document is open here, so the offline banner can't explain it: say it.
         usePlayer.setState({ offline: true });
-        toast("Speech server unreachable — previewing with the browser voice, so every voice sounds alike");
-      },
-      onRejected: (m) => toast(m),
-    }).catch(() => null);
+        toast(`Speech server unreachable — can't preview ${v.name} right now`);
+      } else if (error instanceof ApiBusy) {
+        toast("VoiceStudio is busy with other speech. Try the preview again in a moment.");
+      } else if (error instanceof ApiRejected) {
+        toast(error.message);
+      } else {
+        toast(`Could not preview ${v.name}`);
+      }
+      return null;
+    });
     if (ac.signal.aborted) return;
-    if (chunk?.audio) {
+    if (!chunk) { stopPreview(); return; }
+    setGenerating(false);
+    if (chunk.audio) {
       const a = new Audio(URL.createObjectURL(chunk.audio));
       a.playbackRate = speed;
       a.onended = stopPreview;
@@ -188,7 +205,7 @@ export function VoicesPage() {
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
               {voices.map((v) => (
-                <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
+                <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} generating={previewing === v.id && generating} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
               ))}
             </div>
           </section>

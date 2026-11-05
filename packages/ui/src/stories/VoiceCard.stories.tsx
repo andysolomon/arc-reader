@@ -9,6 +9,7 @@ type S = StoryObj<typeof VoiceCard>;
 export const Idle: S = { render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Selected: S = { args: { selected: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Previewing: S = { args: { previewing: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
+export const Generating: S = { args: { previewing: true, generating: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Local: S = { args: { voice: VOICES[2] }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Grid: S = {
   render: () => {

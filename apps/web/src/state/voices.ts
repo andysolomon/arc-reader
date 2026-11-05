@@ -46,6 +46,8 @@ export const engineLabel = (id: string) => ENGINE_LABELS[id] ?? id;
 
 function langLabel(l: string | null | undefined): string {
   if (!l) return "EN-US";
+  // VoiceStudio stores "Auto" for cloned voices that detect the language of each text.
+  if (/^auto/i.test(l)) return "Auto";
   const m = l.match(/^([a-z]{2})(?:[-_]([a-zA-Z]{2}))?/i);
   if (!m) return l.toUpperCase();
   return m[2] ? `${m[1].toUpperCase()}-${m[2].toUpperCase()}` : m[1].toUpperCase();
