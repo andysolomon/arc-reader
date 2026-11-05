@@ -52,6 +52,19 @@ docker compose up -d
 
 If you already have `apps/web/.env.local`, `ln -s apps/web/.env.local .env` uses it as-is; the variable names match. The app is at http://127.0.0.1:4179 and VoiceStudio at http://127.0.0.1:3900, both on loopback only. Both containers restart with Docker. OpenAI and Fish voices appear when their keys are set. Model names and the default engine (`VITE_DEFAULT_ENGINE`, `VITE_OPENAI_TTS_MODEL`, `VITE_PATOIS_MODEL`, `VITE_FISH_TTS_MODEL`) can also go in `.env`. Provider choices are baked in at build time, so run `docker compose up -d --build` after changing `.env` or pulling new code. To publish on the tailnet, run `tailscale serve --bg --https=<port> http://127.0.0.1:4179`.
 
+#### VoiceStudio on another machine
+
+Cloned and designed voices use OmniVoice, which runs about 10× slower than real time on a laptop CPU. On an Apple Silicon Mac it uses the GPU (MPS) and runs faster than real time. To use VoiceStudio on such a machine, run its backend there from source with the same API key, and publish it on the tailnet:
+
+```sh
+git clone --depth 1 --branch v0.5.7 https://github.com/debpalash/VoiceStudio.git && cd VoiceStudio
+uv sync --locked --python 3.11 --managed-python && uv run --no-sync python scripts/setup.py
+OMNIVOICE_API_KEY=<VOICESTUDIO_API_KEY> OMNIVOICE_SERVER_MODE=1 .venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 3900
+tailscale serve --bg --https=3900 http://127.0.0.1:3900
+```
+
+Then set `VOICESTUDIO_REMOTE_URL=https://<machine>.<tailnet>.ts.net:3900` in `.env` and run `docker compose up -d`. The web container uses the remote server; the local VoiceStudio container still starts but receives no requests (`docker compose stop voicestudio` frees its memory). For `npm run dev`, set `VOICESTUDIO_URL` to the same address. The remote server keeps its own voices and licence acceptances: accept the OmniVoice licences there and recreate any designed or cloned voices.
+
 The volume has a fixed name, so models downloaded by an earlier `docker run -v voicestudio-data:…` carry over. Remove the old container first (`docker rm -f voicestudio`). Compose then warns once that the volume already exists; that is expected.
 
 Open http://127.0.0.1:3900, pick **KittenTTS** in the Model Manager (about 80 MB, runs on any CPU), and let it download. Pin the image with `VOICESTUDIO_TAG=sha-…` in `.env` once it works; the project ships often.
