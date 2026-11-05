@@ -58,7 +58,7 @@ export function Compose() {
     try {
       const rec = await create({ text: t, title, source: t === SAMPLE ? "sample" : "paste", domain: t === SAMPLE ? "Sample" : undefined });
       sessionStorage.removeItem(DRAFT_KEY);
-      await openDocument(rec, navigate, { autoplay: true, resume: false });
+      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
     } finally {
       setBusy(null);
     }
@@ -79,7 +79,7 @@ export function Compose() {
     try {
       const f = await fetchReadable(url);
       const rec = await create({ text: f.text, title: f.title, source: "url", domain: f.domain });
-      await openDocument(rec, navigate, { autoplay: true, resume: false });
+      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
     } catch {
       toast(`Couldn't read ${hostOf(url)} — try pasting the text`);
     } finally {

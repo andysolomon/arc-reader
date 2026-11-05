@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
-import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground } from "../engine/providers";
+import { API_BASE, hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground } from "../engine/providers";
 import { hasActivePreparation } from "../engine/preparation";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { segment } from "../lib/segment";
@@ -36,7 +36,7 @@ export interface PlayerState extends EngineSnapshot {
 
 interface Actions {
   /** `persist` saves the record (e.g. a voice change) once preparation succeeds. */
-  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean }) => Promise<boolean>;
+  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean; prepare?: boolean }) => Promise<boolean>;
   cancelPreparation: () => void;
   retryPreparation: () => Promise<boolean>;
   /** Try the speech server again for the current sentence. */
@@ -157,7 +157,9 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
       set({ doc, record: prepared, voiceId: voice.id, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
       const requests = engine.passages.map((p) => ({ text: p.text, voice: voice.id, engine: voice.engine, profile: voice.kind === "profile" }));
-      if (hasActivePreparation(preparationRequests(requests))) void get().prerender();
+      const autoPrepare = opts.prepare && API_BASE === "/api/vs" && voice.engine !== LOCAL_ENGINE
+        && !isPaidEngine(voice.engine) && useSettings.getState().engine !== LOCAL_ENGINE && !get().offline;
+      if (autoPrepare || hasActivePreparation(preparationRequests(requests))) void get().prerender();
       if (opts.autoplay) void engine.play();
       retryPreparation = null;
       return true;
