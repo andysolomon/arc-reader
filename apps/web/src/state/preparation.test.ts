@@ -1,12 +1,12 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JAMAICAN_PATOIS_VOICE_ID, FISH_PRESET_VOICES, PRESET_VOICES } from "../data/voices";
-import { cacheKey, synthesize } from "../engine/providers";
+import { cacheKey, prepareInBackground, synthesize } from "../engine/providers";
 import { audioCache, db, docs, type DocRecord } from "../lib/db";
 import { preparePatois } from "../lib/patois";
 import { isPreparing, usePreparation } from "./preparation";
 
-vi.mock("../engine/providers", async (original) => ({ ...await original<typeof import("../engine/providers")>(), synthesize: vi.fn() }));
+vi.mock("../engine/providers", async (original) => ({ ...await original<typeof import("../engine/providers")>(), synthesize: vi.fn(), prepareInBackground: vi.fn() }));
 vi.mock("../lib/patois", async (original) => ({ ...await original<typeof import("../lib/patois")>(), preparePatois: vi.fn() }));
 const [bella, jasper] = PRESET_VOICES;
 const record = (id: string): DocRecord => ({ id, title: id, text: `First ${id}.\n\nSecond ${id}.`, voice: null, chars: 20, source: "paste", domain: "Text", createdAt: 0, updatedAt: 0 });
@@ -35,6 +35,7 @@ describe("Library preparation queue", () => {
       ["a", bella.id, "ready", 2, 2], ["a", jasper.id, "ready", 2, 2], ["b", bella.id, "ready", 2, 2], ["b", jasper.id, "ready", 2, 2],
     ]);
     expect(await audioCache.keys()).toHaveLength(8);
+    expect(prepareInBackground).toHaveBeenCalledTimes(4);
     expect((await docs.get("a"))?.voice).toBeNull();
   });
 
@@ -71,5 +72,6 @@ describe("Library preparation queue", () => {
     await settled();
     expect(await docs.get("a")).toMatchObject({ voice: null, patois: { text: "Wah gwaan." } });
     expect(synthesize).toHaveBeenCalledWith(expect.objectContaining({ text: "Wah gwaan.", voice: JAMAICAN_PATOIS_VOICE_ID }));
+    expect(prepareInBackground).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
 import { OPENAI_ACCENTS, STEADY_NARRATION } from "../data/voices";
+import { hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest } from "./preparation";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
@@ -333,6 +334,20 @@ export interface SynthOptions extends TtsRequest {
   onRejected?: (message: string) => void;
 }
 
+export const preparationRequests = (requests: SynthOptions[]): PreparationRequest[] => requests.map((r) => ({ key: cacheKey(r), text: r.text, voice: r.voice, engine: r.engine, profile: r.profile, protocol: API_KIND }));
+
+export async function prepareInBackground(requests: SynthOptions[], start: number, progress?: (done: number, total: number) => void, signal?: AbortSignal) {
+  if (API_BASE !== "/api/vs") throw new Error("Background preparation needs the built-in /api/vs connection.");
+  const items = preparationRequests(requests);
+  await Promise.all(items.map(async (item, index) => { item.cached = !!await fromCache(requests[index]); }));
+  signal?.throwIfAborted();
+  if (items.every((item) => item.cached) && !hasActivePreparation(items)) {
+    progress?.(items.length, items.length);
+    return;
+  }
+  return prepareAudio(items, start, progress, signal);
+}
+
 /**
  * Before passages, every sentence was its own request and clip. When each sentence
  * of a passage is still cached that way, the clips are joined instead of paying for
@@ -363,7 +378,15 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
   const reused = await fromSentenceClips(opts);
   if (reused) return reused;
   try {
-    const chunk = await apiSynthesize(opts);
+    const prepared = !isPaidEngine(opts.engine) && API_BASE === "/api/vs" ? await preparedAudio(cacheKey(opts), opts.signal) : null;
+    let chunk: Chunk;
+    if (prepared) {
+      // Feed stored responses through the same parsers as fresh speech, including
+      // the legacy JSON contract, without issuing another synthesis request.
+      chunk = await preparedChunk(prepared, opts);
+    } else {
+      chunk = await apiSynthesize(opts);
+    }
     opts.onOnline?.();
     if (opts.wordTimings && chunk.audio && opts.words?.length) {
       try {
@@ -384,6 +407,19 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
     else if (e instanceof ApiBusy) opts.onRejected?.("The speech server is busy; this passage uses the browser voice");
     return localChunk(opts.text, opts.parts);
   }
+}
+
+async function preparedChunk(response: Response, req: TtsRequest): Promise<Chunk> {
+  const estimate = estimateDuration(splitWords(req.text));
+  if (response.headers.get("content-type")?.includes("json")) {
+    const data = await response.json() as { audio: string; mime?: string; duration?: number; words?: unknown };
+    const mime = data.mime || "audio/mpeg";
+    return { source: "cache", audio: b64ToBlob(data.audio, mime), mime, duration: data.duration || estimate, words: parseWords(data.words) };
+  }
+  const audio = await response.blob();
+  let words: WordTiming[] | undefined;
+  try { words = parseWords(JSON.parse(response.headers.get("x-word-timings") || "null")); } catch { /* optional */ }
+  return { source: "cache", audio, mime: audio.type || "audio/mpeg", duration: Number(response.headers.get("x-duration")) || await measureDuration(audio, estimate), words };
 }
 
 /**

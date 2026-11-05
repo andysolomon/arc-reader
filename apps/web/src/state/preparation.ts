@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Voice } from "../data/voices";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { unavailableMessage } from "../engine/engine";
-import { baseFor, cacheKey, synthesize } from "../engine/providers";
+import { API_BASE, baseFor, cacheKey, isPaidEngine, prepareInBackground, synthesize } from "../engine/providers";
 import { LOCAL_ENGINE } from "../engine/types";
 import { audioCache, docs } from "../lib/db";
 import { preparePatois } from "../lib/patois";
@@ -93,6 +93,11 @@ async function drain() {
         const passages = planPassages(sentences);
         if (!passages.length) throw new Error("There is no text to prepare.");
         update(job.id, { total: passages.length, message: undefined });
+        if (API_BASE === "/api/vs" && !isPaidEngine(job.voice.engine)) {
+          await prepareInBackground(passages.map((passage) => ({
+            text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
+          })), 0, (done) => update(job.id, { done }), signal);
+        }
         for (const passage of passages) {
           signal.throwIfAborted();
           const req = {
@@ -107,7 +112,7 @@ async function drain() {
           if (!chunk.audio) throw new Error("This voice did not return audio to prepare.");
           // Older sentence clips can be joined in memory; those are already safely cached.
           if (chunk.source !== "cache" && !(await audioCache.get(cacheKey(req)))) throw new Error("Could not save prepared audio. Free some storage and retry.");
-          update(job.id, { done: passage.index + 1 });
+          update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, passage.index + 1) });
         }
         signal.throwIfAborted();
         update(job.id, { status: "ready" });

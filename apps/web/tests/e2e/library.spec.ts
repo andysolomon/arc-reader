@@ -28,7 +28,7 @@ async function seedLibrary(page: Page) {
 test("prepares multiple documents in multiple voices, reuses saved audio, and shows persisted coverage in both views", async ({ page }) => {
   await seedLibrary(page);
   let requests = 0;
-  page.on("request", (request) => { if (request.url().includes("/v1/audio/speech")) requests++; });
+  page.on("request", (request) => { if (/\/api\/preparations\/[^/]+\/audio\//.test(request.url())) requests++; });
   await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
@@ -40,7 +40,7 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   // Internal navigation keeps the preparation queue alive.
   await page.getByRole("link", { name: "Compose", exact: true }).click();
   await page.getByRole("link", { name: "Library", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished");
+  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished", { timeout: 15_000 });
   await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toHaveCount(2);
   await expect(page.getByRole("img", { name: "Jasper: 100% prepared", exact: true })).toHaveCount(2);
   expect(requests).toBe(8);

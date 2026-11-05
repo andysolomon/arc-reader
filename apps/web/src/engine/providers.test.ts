@@ -4,8 +4,10 @@ import { apiSynthesize, openaiSpeechSynthesize, synthesize, cacheKey, localChunk
 import { joinClips } from "./audio";
 import { addUsage } from "../lib/usage";
 import { audioCache } from "../lib/db";
+import { preparedAudio } from "./preparation";
 
 vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
+vi.mock("./preparation", () => ({ preparedAudio: vi.fn(async () => null) }));
 vi.mock("./audio", async (importOriginal) => ({ ...await importOriginal<typeof import("./audio")>(), joinClips: vi.fn(async () => null) }));
 vi.mock("../lib/usage", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/usage")>(), addUsage: vi.fn() }));
 
@@ -237,6 +239,17 @@ describe("generation accounting", () => {
     fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
     await synthesize({ ...req, openaiModel: "tts-1" });
     expect(addUsage).toHaveBeenCalledWith(expect.objectContaining({ engine: "openai", model: "tts-1", text: req.text }));
+  });
+
+  it("uses prepared audio without synthesizing or recording another generation", async () => {
+    const local = { text: "Prepared passage.", voice: "v", engine: "kittentts" };
+    vi.mocked(preparedAudio).mockResolvedValueOnce(new Response("audio", { headers: { "content-type": "audio/mpeg", "x-duration": "3" } }));
+    const chunk = await synthesize(local);
+    expect(chunk).toMatchObject({ source: "cache", duration: 3 });
+    expect(await chunk.audio?.text()).toBe("audio");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(addUsage).not.toHaveBeenCalled();
+    expect(audioCache.put).toHaveBeenCalledWith(expect.objectContaining({ key: cacheKey(local), duration: 3 }));
   });
 
   it("records only a successful retry", async () => {
