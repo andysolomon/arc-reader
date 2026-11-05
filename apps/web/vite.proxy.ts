@@ -12,8 +12,8 @@ function route(prefix: string, target: string, key: string, extra: Partial<Proxy
       target,
       changeOrigin: true,
       rewrite: (p) => p.slice(prefix.length),
-      timeout: 120_000,
-      proxyTimeout: 120_000,
+      timeout: 1_800_000,
+      proxyTimeout: 1_800_000,
       configure(proxy) {
         proxy.on("proxyReq", (req) => {
           req.removeHeader("origin");

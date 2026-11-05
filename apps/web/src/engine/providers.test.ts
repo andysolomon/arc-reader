@@ -28,8 +28,22 @@ describe("openaiSpeechSynthesize", () => {
 
   it("sends cloned profiles with the active-engine alias", async () => {
     fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    await openaiSpeechSynthesize({ text: "x", voice: "prof-1", engine: "kittentts", profile: true });
-    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)).model).toBe("tts-1");
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ tts: { active: "omnivoice", backends: [{ id: "omnivoice", supports_cloning: true }] } })))
+      .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" })));
+    await openaiSpeechSynthesize({ text: "x", voice: "prof-1", engine: "omnivoice", profile: true });
+    expect(JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body)).model).toBe("tts-1");
+  });
+
+  it("refuses to silently substitute a preset for a cloned profile", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ tts: { active: "kittentts", backends: [{ id: "kittentts", supports_cloning: false }] } })));
+    await expect(openaiSpeechSynthesize({ text: "x", voice: "prof-1", engine: "kittentts", profile: true })).rejects.toThrow("cloning-capable");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves model-license errors instead of blaming the API key", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ detail: { message: "Review model terms first" } }), { status: 403 }));
+    await expect(openaiSpeechSynthesize({ text: "x", voice: "v", engine: "omnivoice" })).rejects.toThrow("Review model terms first");
   });
 
   it("maps network failures and gateway errors to ApiUnreachable", async () => {
