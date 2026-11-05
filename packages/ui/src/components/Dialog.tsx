@@ -6,12 +6,13 @@ export interface DialogProps {
   onClose: () => void;
   title: string;
   hint?: string;
+  initialFocus?: "first" | "dialog";
   children: ReactNode;
   className?: string;
 }
 
 /** The only modal in the product (keyboard shortcuts). Esc and backdrop close it; focus is trapped. */
-export function Dialog({ open, onClose, title, hint = "Esc to close", children, className }: DialogProps) {
+export function Dialog({ open, onClose, title, hint = "Esc to close", initialFocus = "first", children, className }: DialogProps) {
   const ref = useRef<HTMLDivElement>(null);
   const prev = useRef<Element | null>(null);
 
@@ -21,7 +22,7 @@ export function Dialog({ open, onClose, title, hint = "Esc to close", children, 
     const el = ref.current;
     const focusables = () =>
       Array.from(el?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input,textarea,select,[tabindex]:not([tabindex="-1"])') ?? []);
-    (focusables()[0] ?? el)?.focus();
+    (initialFocus === "dialog" ? el : focusables()[0] ?? el)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -33,7 +34,7 @@ export function Dialog({ open, onClose, title, hint = "Esc to close", children, 
           return;
         }
         const first = f[0], last = f[f.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === el)) {
           e.preventDefault();
           last.focus();
         } else if (!e.shiftKey && document.activeElement === last) {
@@ -47,7 +48,7 @@ export function Dialog({ open, onClose, title, hint = "Esc to close", children, 
       document.removeEventListener("keydown", onKey, true);
       (prev.current as HTMLElement | null)?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open, onClose, initialFocus]);
 
   if (!open) return null;
   return (
