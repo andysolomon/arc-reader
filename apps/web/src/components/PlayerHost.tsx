@@ -108,7 +108,8 @@ export function PlayerHost() {
     onChangeVoice: () => navigate(`/voices?for=${p.doc!.id}`),
     menuOpen: p.menuOpen,
     onMenuOpenChange: p.setMenuOpen,
-    status: prerender ? `Preparing ${prerender.done}/${prerender.total}` : undefined,
+    // A passage still being generated: say so, so a wait mid-reading doesn't read as a stop.
+    status: prerender ? `Preparing ${prerender.done}/${prerender.total}` : p.loading ? "Generating…" : undefined,
     extraMenu,
   };
 
