@@ -136,6 +136,10 @@ Settings groups speech usage by provider and model, with monthly history and a d
 
 Daily aggregates live in `readaloud:usage` in this browser's local storage. They contain no API keys, document text, or audio. Keys used with the same provider share totals; other devices, apps, Studio operations (including dubbing/transcription), hosting costs, tax, and credits are excluded. Failed/interrupted requests may still incur provider charges. Account links lead to actual billing information. Clearing site data clears history. Existing character counters migrate with their original month; their missing model, token, and cost data stays unavailable. Estimates are saved when generated so changing a model or rate does not reprice history.
 
+### Slow engines (cloned voices on CPU)
+
+Cloning engines such as OmniVoice are built for a GPU. On a CPU they can take ten times longer to generate a sentence than to play it, so the reader pauses between sentences while the next one renders (the player's spinner shows the wait). The app detects this and points to **Prepare audio** in the player menu: it renders the whole document into the cache from the current sentence onward, with progress beside the time, and can run while paused or in the background. Playback from the cache is gapless, also on later visits. For live reading choose a KittenTTS voice (CPU-native, faster than real time) or an OpenAI voice.
+
 ### Without VoiceStudio
 
 `LIVE=1 pnpm test:e2e` runs the `@live` specs against a real server (URL and key from `.env.local`) and prints the measured first-sentence latency. Without the flag, `tests/stub-voicestudio.mjs` imitates the API (bearer check, two cloned profiles, sine-tone audio, word timings). Playwright starts it automatically. To develop against it:

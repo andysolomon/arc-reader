@@ -23,6 +23,8 @@ export interface PlayerState {
   remaining: number;
   /** When set, the voice avatar is wrapped by a hint badge (e.g. "local voice") */
   badge?: string;
+  /** Short live note beside the time, e.g. "Preparing 12/120" */
+  status?: string;
 }
 
 export interface PlayerActions {
@@ -65,10 +67,11 @@ export function PlayButton({ playing, loading, onToggle, size = 48 }: { playing:
   );
 }
 
-export function TimeReadout({ elapsed, remaining, className }: { elapsed: number; remaining: number; className?: string }) {
+export function TimeReadout({ elapsed, remaining, status, className }: { elapsed: number; remaining: number; status?: string; className?: string }) {
   return (
     <div className={cn("whitespace-nowrap font-mono text-[12px] text-fg2 tabular-nums", className)} aria-live="off">
       <span aria-label="Elapsed">{fmtTime(elapsed)}</span> <span className="text-fg3">/</span> <span aria-label="Remaining">−{fmtTime(remaining)}</span>
+      {status ? <span className="ml-2 font-sans text-fg3" aria-live="polite">{status}</span> : null}
     </div>
   );
 }
@@ -104,7 +107,7 @@ export function PlayerControls(p: PlayerProps & { children?: ReactNode }) {
         valueText={`${fmtTime(p.elapsed)} elapsed, ${fmtTime(p.remaining)} remaining`}
         className={cn(p.compact && "hidden")}
       />
-      <TimeReadout elapsed={p.elapsed} remaining={p.remaining} className={cn(p.compact && "hidden sm:block")} />
+      <TimeReadout elapsed={p.elapsed} remaining={p.remaining} status={p.status} className={cn(p.compact && "hidden sm:block")} />
       <div className="relative">
         <IconButton
           label="More"

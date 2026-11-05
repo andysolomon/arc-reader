@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 interface ToastState {
   message: string | null;
-  show: (m: string) => void;
+  show: (m: string, ms?: number) => void;
   clear: () => void;
 }
 
@@ -11,10 +11,10 @@ export const TOAST_MS = 2200;
 
 export const useToast = create<ToastState>((set) => ({
   message: null,
-  show: (m) => {
+  show: (m, ms = TOAST_MS) => {
     if (timer) clearTimeout(timer);
     set({ message: m });
-    timer = setTimeout(() => set({ message: null }), TOAST_MS);
+    timer = setTimeout(() => set({ message: null }), ms);
   },
   clear: () => {
     if (timer) clearTimeout(timer);
@@ -22,4 +22,4 @@ export const useToast = create<ToastState>((set) => ({
   },
 }));
 
-export const toast = (m: string) => useToast.getState().show(m);
+export const toast = (m: string, ms?: number) => useToast.getState().show(m, ms);
