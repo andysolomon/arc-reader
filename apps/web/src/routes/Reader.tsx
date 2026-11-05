@@ -5,6 +5,7 @@ import { ChevronLeft, Maximize2, Minimize2 } from "lucide-react";
 import { IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
+import { syncLibrary } from "../lib/librarySync";
 import { useSettings, useThemeId } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
@@ -31,16 +32,16 @@ export function Reader() {
   const [sheet, setSheet] = useState(false);
   const [missing, setMissing] = useState(false);
 
-  // Load from IndexedDB on deep links / reloads (no autoplay: there was no gesture).
+  // Pull the shared library first so deep links also work on a new device.
   useEffect(() => {
     if (!id || id === "new") return;
     if (doc?.id === id) return;
     let alive = true;
-    void docs.get(id).then((rec) => {
+    void syncLibrary().then(() => docs.get(id)).then((rec) => {
       if (!alive) return;
       if (!rec) {
         setMissing(true);
-        toast("That document isn't on this device");
+        toast("That document is unavailable. Reconnect to sync your library.");
         navigate("/", { replace: true });
         return;
       }

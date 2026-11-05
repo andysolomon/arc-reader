@@ -7,6 +7,7 @@ RUN corepack enable
 WORKDIR /app
 RUN chown node:node /app
 RUN mkdir /app/preparations && chown node:node /app/preparations
+RUN mkdir /app/library && chown node:node /app/library
 USER node
 
 COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./

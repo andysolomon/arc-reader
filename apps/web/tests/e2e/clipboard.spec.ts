@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { TEXT } from "./helpers";
 
 async function clipboard(page: Page, text: string, mode: "ok" | "denied" | "unavailable" = "ok") {
@@ -105,7 +105,7 @@ test("an unreadable copied URL reports the failure and allows another import", a
   await page.goto("/library");
   const read = page.getByRole("button", { name: "Read clipboard", exact: true });
   await read.click();
-  await expect(page.getByRole("status")).toContainText("Couldn't read example.com");
+  await expect(page.getByRole("status").filter({ hasText: "Couldn't read example.com" })).toBeVisible();
   await expect(read).toBeEnabled();
   await expect(page.getByText("Nothing here yet.", { exact: false })).toBeVisible();
   await paste(page, TEXT);
@@ -118,7 +118,7 @@ for (const mode of ["denied", "unavailable"] as const) {
     await page.goto("/library");
     const read = page.getByRole("button", { name: "Read clipboard", exact: true });
     await read.click();
-    await expect(page.getByRole("status")).toContainText(/outside a text field/);
+    await expect(page.getByRole("status").filter({ hasText: /outside a text field/ })).toBeVisible();
     await expect(read).toBeEnabled();
     await expect(page).toHaveURL(/\/library$/);
     await paste(page, TEXT);
@@ -130,7 +130,7 @@ test("an empty clipboard does not create a document", async ({ page }) => {
   await clipboard(page, " \n ");
   await page.goto("/library");
   await page.getByRole("button", { name: "Read clipboard", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Clipboard is empty");
+  await expect(page.getByRole("status").filter({ hasText: "Clipboard is empty" })).toBeVisible();
   await expect(page).toHaveURL(/\/library$/);
   await expect(page.getByText("Nothing here yet.", { exact: false })).toBeVisible();
 });

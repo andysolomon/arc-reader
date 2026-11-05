@@ -1,4 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import type { LibraryChange, PendingChange } from "./libraryProtocol";
+import { uid } from "./hash";
 
 export type DocSource = "paste" | "url" | "file" | "share" | "sample";
 
@@ -54,23 +56,40 @@ interface Schema extends DBSchema {
   docs: { key: string; value: DocRecord; indexes: { updatedAt: number } };
   positions: { key: string; value: PositionRecord };
   audio: { key: string; value: AudioRecord; indexes: { createdAt: number } };
+  outbox: { key: string; value: PendingChange };
+  meta: { key: string; value: boolean };
 }
 
 let dbp: Promise<IDBPDatabase<Schema>> | null = null;
 
 export function db(): Promise<IDBPDatabase<Schema>> {
   if (!dbp) {
-    dbp = openDB<Schema>("readaloud", 1, {
-      upgrade(d) {
-        const docs = d.createObjectStore("docs", { keyPath: "id" });
-        docs.createIndex("updatedAt", "updatedAt");
-        d.createObjectStore("positions", { keyPath: "docId" });
-        const audio = d.createObjectStore("audio", { keyPath: "key" });
-        audio.createIndex("createdAt", "createdAt");
+    dbp = openDB<Schema>("readaloud", 2, {
+      upgrade(d, oldVersion) {
+        if (oldVersion < 1) {
+          const docs = d.createObjectStore("docs", { keyPath: "id" });
+          docs.createIndex("updatedAt", "updatedAt");
+          d.createObjectStore("positions", { keyPath: "docId" });
+          const audio = d.createObjectStore("audio", { keyPath: "key" });
+          audio.createIndex("createdAt", "createdAt");
+        }
+        d.createObjectStore("outbox", { keyPath: "key" });
+        d.createObjectStore("meta");
       },
+      blocking() { void dbp?.then((d) => d.close()); dbp = null; },
     });
   }
   return dbp;
+}
+
+const libraryListeners = new Set<() => void>();
+export function subscribeLibraryWrites(listener: () => void) {
+  libraryListeners.add(listener);
+  return () => { libraryListeners.delete(listener); };
+}
+const notifyLibrary = () => libraryListeners.forEach((listener) => listener());
+export function pendingChange(key: string, change: LibraryChange): PendingChange {
+  return { key, token: uid(), change };
 }
 
 export const docs = {
@@ -80,17 +99,43 @@ export const docs = {
     return list.reverse();
   },
   get: async (id: string) => (await db()).get("docs", id),
-  put: async (rec: DocRecord) => (await db()).put("docs", rec),
+  async put(rec: DocRecord) {
+    const d = await db();
+    const tx = d.transaction(["docs", "outbox"], "readwrite");
+    const record = { ...rec, updatedAt: Math.max(Date.now(), rec.updatedAt) };
+    // Cache and outbox commit together, including offline writes.
+    await tx.objectStore("docs").put(record);
+    await tx.objectStore("outbox").put(pendingChange(`doc:${rec.id}`, { kind: "doc", record }));
+    await tx.done;
+    notifyLibrary();
+    return rec.id;
+  },
   async delete(id: string) {
     const d = await db();
-    await Promise.all([d.delete("docs", id), d.delete("positions", id)]);
+    const tx = d.transaction(["docs", "positions", "outbox"], "readwrite");
+    await tx.objectStore("docs").delete(id);
+    await tx.objectStore("positions").delete(id);
+    await tx.objectStore("outbox").delete(`position:${id}`);
+    await tx.objectStore("outbox").put(pendingChange(`doc:${id}`, { kind: "delete", docId: id }));
+    await tx.done;
+    notifyLibrary();
   },
 };
 
 export const positions = {
   get: async (docId: string) => (await db()).get("positions", docId),
   all: async () => (await db()).getAll("positions"),
-  put: async (rec: PositionRecord) => (await db()).put("positions", rec),
+  async put(rec: PositionRecord) {
+    const d = await db();
+    const tx = d.transaction(["docs", "positions", "outbox"], "readwrite");
+    if (await tx.objectStore("docs").get(rec.docId)) {
+      await tx.objectStore("positions").put(rec);
+      await tx.objectStore("outbox").put(pendingChange(`position:${rec.docId}`, { kind: "position", record: rec }));
+    }
+    await tx.done;
+    notifyLibrary();
+    return rec.docId;
+  },
 };
 
 const AUDIO_CACHE_MAX = 2000;
