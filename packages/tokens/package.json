@@ -1,0 +1,23 @@
+{
+  "name": "@readaloud/tokens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./themes.css": "./src/themes.css",
+    "./base.css": "./src/base.css",
+    "./tailwind-preset": "./tailwind-preset.cjs"
+  },
+  "scripts": {
+    "build": "echo 'tokens: nothing to build (source consumed directly)'",
+    "typecheck": "tsc -p tsconfig.json",
+    "contrast": "node scripts/contrast.mjs",
+    "test": "node scripts/contrast.mjs"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

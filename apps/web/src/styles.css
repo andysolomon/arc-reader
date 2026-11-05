@@ -1,0 +1,23 @@
+@import "@readaloud/tokens/base.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+.sr-only-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .scroll-smooth-pref {
+    scroll-behavior: smooth;
+  }
+}

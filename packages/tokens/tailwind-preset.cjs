@@ -1,0 +1,73 @@
+/** Tailwind preset mapping utilities to the ReadAloud CSS variables. */
+module.exports = {
+  darkMode: ["selector", '[data-theme="dark"]'],
+  theme: {
+    extend: {
+      colors: {
+        bg: "var(--bg)",
+        bg2: "var(--bg2)",
+        bg3: "var(--bg3)",
+        line: "var(--line)",
+        fg: "var(--fg)",
+        fg2: "var(--fg2)",
+        fg3: "var(--fg3)",
+        accent: "var(--accent)",
+        "accent-fg": "var(--accent-fg)",
+        hl: "var(--hl)",
+        danger: "var(--danger)",
+      },
+      fontFamily: {
+        serif: ["Literata", "Georgia", '"Times New Roman"', "serif"],
+        sans: ["system-ui", "-apple-system", '"Segoe UI"', "sans-serif"],
+        mono: ["ui-monospace", "Menlo", "Consolas", "monospace"],
+      },
+      fontSize: {
+        chrome: ["0.875rem", { lineHeight: "1.45" }],
+        reading: ["var(--reading-size)", { lineHeight: "var(--reading-leading)" }],
+        label: ["0.75rem", { lineHeight: "1.3", letterSpacing: ".08em" }],
+      },
+      borderRadius: {
+        control: "var(--radius-control)",
+        panel: "var(--radius-panel)",
+        card: "var(--radius-card)",
+        pill: "var(--radius-pill)",
+      },
+      boxShadow: {
+        overlay: "var(--shadow-overlay)",
+      },
+      spacing: {
+        rail: "216px",
+        "rail-collapsed": "64px",
+        header: "52px",
+        pill: "64px",
+        bar: "72px",
+        hit: "44px",
+      },
+      maxWidth: {
+        measure: "62ch",
+        "measure-wide": "72ch",
+        compose: "720px",
+        editorial: "960px",
+        pillmax: "760px",
+      },
+      transitionDuration: { fast: "150ms", base: "200ms", slow: "250ms" },
+      transitionTimingFunction: { out: "cubic-bezier(0.16, 1, 0.3, 1)" },
+      keyframes: {
+        rise: { from: { opacity: "0", transform: "translateY(10px)" }, to: { opacity: "1", transform: "none" } },
+        fadein: { from: { opacity: "0" }, to: { opacity: "1" } },
+        pulse: { "0%,100%": { opacity: ".4" }, "50%": { opacity: ".9" } },
+        wave: { "0%,100%": { transform: "scaleY(.25)" }, "50%": { transform: "scaleY(1)" } },
+        ping: { "0%": { transform: "scale(1)", opacity: ".6" }, "100%": { transform: "scale(1.8)", opacity: "0" } },
+      },
+      animation: {
+        rise: "rise .2s cubic-bezier(0.16,1,0.3,1)",
+        "rise-slow": "rise .3s cubic-bezier(0.16,1,0.3,1)",
+        fadein: "fadein .25s ease-out",
+        pulse: "pulse 1.1s ease-in-out infinite",
+        wave: "wave .7s ease-in-out infinite",
+        ping: "ping 1.6s ease-out infinite",
+      },
+    },
+  },
+  plugins: [],
+};

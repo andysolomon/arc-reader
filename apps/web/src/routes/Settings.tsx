@@ -1,0 +1,161 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ChevronRight, Copy, Check } from "lucide-react";
+import { THEMES } from "@readaloud/tokens";
+import { Chip, SectionLabel, Segmented, Switch, ThemeSwatch, UsageMeter, VoiceAvatar, Button } from "@readaloud/ui";
+import { getVoice } from "../data/voices";
+import { useSettings, useThemeId } from "../state/settings";
+import { usePlayer } from "../state/player";
+import { toast } from "../state/toast";
+import { getUsage, PLAN_LIMIT } from "../lib/usage";
+import { ShortcutsGrid } from "../components/ShortcutsDialog";
+import type { ProviderId } from "../engine/types";
+
+const PROVIDERS: { id: ProviderId; label: string }[] = [
+  { id: "auto", label: "Auto" },
+  { id: "openai", label: "OpenAI" },
+  { id: "elevenlabs", label: "ElevenLabs" },
+  { id: "piper", label: "Piper (local)" },
+];
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3.5">
+      <SectionLabel>{title}</SectionLabel>
+      {children}
+    </div>
+  );
+}
+
+function RowItem({ label, hint, children, last }: { label: string; hint?: string; children: React.ReactNode; last?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between gap-4 px-4 py-3.5 ${last ? "" : "border-b border-line"}`}>
+      <div>
+        <div>{label}</div>
+        {hint && <div className="text-[13px] text-fg2">{hint}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export function SettingsPage() {
+  const navigate = useNavigate();
+  const s = useSettings();
+  const theme = useThemeId();
+  const voice = getVoice(s.voice);
+  const hasDoc = usePlayer((st) => !!st.doc);
+  const [copied, setCopied] = useState(false);
+  const [usage, setUsage] = useState(getUsage());
+  useEffect(() => {
+    const on = () => setUsage(getUsage());
+    window.addEventListener("readaloud:usage", on);
+    return () => window.removeEventListener("readaloud:usage", on);
+  }, []);
+
+  const copyKey = async () => {
+    try {
+      await navigator.clipboard.writeText(s.apiKey);
+      setCopied(true);
+      toast("API key copied");
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      toast("Couldn't access the clipboard");
+    }
+  };
+  const masked = `${s.apiKey.slice(0, 8)}${"•".repeat(20)}${s.apiKey.slice(-4)}`;
+
+  return (
+    <section data-screen="settings" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
+      <div className="mx-auto flex max-w-[720px] flex-col gap-9">
+        <h1 className="m-0 font-serif text-[26px] font-medium">Settings</h1>
+
+        <Section title="Appearance">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">
+            {THEMES.map((t) => (
+              <ThemeSwatch key={t.id} theme={t} selected={theme === t.id} onSelect={() => s.set("theme", t.id)} />
+            ))}
+          </div>
+          <div className="text-[13px] text-fg2">
+            Themes are exposed as CSS variables and switched with a <code className="rounded-[4px] bg-bg3 px-[5px] py-px font-mono text-fg">data-theme</code> attribute. The Linux client follows Omarchy's current theme automatically.
+          </div>
+          <div className="flex flex-col rounded-panel border border-line bg-bg2">
+            <RowItem label="Player">
+              <Segmented value={s.playerStyle} onChange={(v) => s.set("playerStyle", v)} label="Player style" options={[{ value: "capsule", label: "Capsule" }, { value: "bar", label: "Bar" }]} />
+            </RowItem>
+            <RowItem label="Highlight">
+              <Segmented value={s.highlightStyle} onChange={(v) => s.set("highlightStyle", v)} label="Highlight style" options={[{ value: "block", label: "Block" }, { value: "dim", label: "Dim" }, { value: "underline", label: "Underline" }]} />
+            </RowItem>
+            <RowItem label="Compose layout" last>
+              <Segmented value={s.composeLayout} onChange={(v) => s.set("composeLayout", v)} label="Compose layout" options={[{ value: "centered", label: "Centered" }, { value: "editorial", label: "Editorial" }]} />
+            </RowItem>
+          </div>
+        </Section>
+
+        <Section title="Playback">
+          <div className="flex flex-col rounded-panel border border-line bg-bg2">
+            <RowItem label="Default voice">
+              <Chip size="sm" leading={<VoiceAvatar voice={voice} size={22} />} trailing={<ChevronRight size={16} strokeWidth={1.5} aria-hidden />} onClick={() => navigate("/voices")} className="bg-bg">
+                {voice.name}
+              </Chip>
+            </RowItem>
+            <RowItem label="Default speed">
+              <Segmented
+                value={s.defaultSpeed}
+                onChange={(v) => {
+                  s.set("defaultSpeed", v);
+                  usePlayer.getState().setSpeed(v);
+                }}
+                label="Default speed"
+                options={[0.75, 1, 1.25, 1.5, 2].map((v) => ({ value: v, label: `${v}×` }))}
+              />
+            </RowItem>
+            <RowItem label="Auto-play on share" hint="When text arrives from the share sheet, open the Reader already playing." last>
+              <Switch checked={s.autoplayShare} onChange={(v) => s.set("autoplayShare", v)} label="Auto-play on share" />
+            </RowItem>
+          </div>
+        </Section>
+
+        <Section title="Provider">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="TTS provider">
+            {PROVIDERS.map((p) => (
+              <Chip key={p.id} size="sm" selected={s.provider === p.id} onClick={() => s.set("provider", p.id)}>
+                {p.label}
+              </Chip>
+            ))}
+          </div>
+        </Section>
+
+        <Section title="Usage">
+          <UsageMeter
+            used={usage}
+            limit={PLAN_LIMIT}
+            footer={
+              <>
+                <span>{usage === 0 ? "No cloud characters used yet this month" : "Counted when a cloud voice synthesizes text"}</span>
+                <button type="button" onClick={() => toast("Billing opens on the web account page")} className="border-0 bg-transparent p-0 text-accent hover:text-fg">
+                  Manage billing
+                </button>
+              </>
+            }
+          />
+        </Section>
+
+        <Section title="API key · Linux client">
+          <div className="flex items-center gap-2.5 rounded-panel border border-line bg-bg2 py-2.5 pl-4 pr-2.5">
+            <code className="flex-1 truncate font-mono text-[13px] text-fg2" aria-label="API key, masked">
+              {masked}
+            </code>
+            <Button leading={copied ? <Check size={16} strokeWidth={1.5} /> : <Copy size={16} strokeWidth={1.5} />} onClick={copyKey} className="bg-bg" aria-live="polite">
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        </Section>
+
+        <Section title="Keyboard shortcuts">
+          <ShortcutsGrid />
+        </Section>
+      </div>
+    </section>
+  );
+}
