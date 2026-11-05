@@ -50,6 +50,14 @@ describe("shared server library", () => {
     expect(await readFile(join(directory, "library.json"), "utf8")).toBe("damaged");
   });
 
+  it("stores document summaries and rejects malformed ones", async () => {
+    const summary = { source: "abc:6", text: "Short.", model: "glm-5.3", version: 1, createdAt: 2 };
+    const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), summary } }] });
+    expect(result.docs[0].summary).toEqual(summary);
+    const bad = { ...doc("b"), summary: { ...summary, text: 5 } } as unknown as DocRecord;
+    expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
+  });
+
   it("serves JSON sync over HTTP and rejects cross-site writes and malformed requests", async () => {
     const handler = libraryMiddleware(service);
     server = createServer((req, res) => { req.url = req.url?.replace("/api/library", ""); handler(req, res, () => {}); });

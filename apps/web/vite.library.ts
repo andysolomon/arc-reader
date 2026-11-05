@@ -24,7 +24,11 @@ function validDoc(value: unknown): value is DocRecord {
     && number(value.createdAt) && number(value.updatedAt)
     && (value.patois === undefined || (object(value.patois) && typeof value.patois.sourceText === "string"
       && value.patois.sourceText.length <= 5_000_000 && typeof value.patois.text === "string"
-      && value.patois.text.length <= 5_000_000 && number(value.patois.version)));
+      && value.patois.text.length <= 5_000_000 && number(value.patois.version)))
+    && (value.summary === undefined || (object(value.summary) && typeof value.summary.source === "string"
+      && value.summary.source.length <= 100 && typeof value.summary.text === "string" && value.summary.text.length <= 100_000
+      && typeof value.summary.model === "string" && value.summary.model.length <= 200
+      && number(value.summary.version) && number(value.summary.createdAt)));
 }
 
 function validPosition(value: unknown): value is PositionRecord {

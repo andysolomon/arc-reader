@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Copy, Check } from "lucide-react";
 import { THEMES } from "@readaloud/tokens";
@@ -13,6 +13,9 @@ import { ShortcutsGrid } from "../components/ShortcutsDialog";
 import { studioJson, jsonBody } from "../lib/studio";
 import { DEFAULT_ENGINE, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL, hasApi, hasOpenAI } from "../engine/providers";
 import { LOCAL_ENGINE } from "../engine/types";
+import { SUMMARY_MODELS } from "../lib/summary";
+import { useLlm } from "../state/llm";
+import { LlmKeyField } from "../components/LlmKeyField";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -49,6 +52,9 @@ export function SettingsPage() {
   const browserOnly = s.engine === LOCAL_ENGINE;
   const [engineBusy, setEngineBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Hidden on static hosting, where the server has no /api/llm.
+  const llmAvailable = useLlm((st) => st.config !== null);
+  useEffect(() => { void useLlm.getState().load(); }, []);
 
   const copyKey = async () => {
     try {
@@ -126,6 +132,17 @@ export function SettingsPage() {
             </RowItem>
           </div>
         </Section>
+
+        {llmAvailable && (
+          <Section title="Summaries">
+            <div className="flex flex-col rounded-panel border border-line bg-bg2">
+              <LlmKeyField />
+              <RowItem label="Summary model" hint="Muse Spark is quick and uses little of your OpenCode Go allowance, but its provider may train on the text you send. GLM 5.3 takes about a minute and uses roughly 100× more allowance." last>
+                <Segmented value={s.summaryModel} onChange={(v) => s.set("summaryModel", v)} label="Summary model" options={SUMMARY_MODELS.map((m) => ({ value: m.id, label: m.label }))} className="shrink-0 whitespace-nowrap" />
+              </RowItem>
+            </div>
+          </Section>
+        )}
 
         <Section title="Engine">
           <div className="flex flex-col rounded-panel border border-line bg-bg2">

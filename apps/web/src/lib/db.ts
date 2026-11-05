@@ -10,6 +10,8 @@ export interface DocRecord {
   text: string;
   /** Cached adaptation; the original text remains intact. */
   patois?: { sourceText: string; text: string; version: number };
+  /** LLM summary of `text`; `source` fingerprints the text it was made from. */
+  summary?: { source: string; text: string; model: string; version: number; createdAt: number };
   source: DocSource;
   /** Hostname for URLs, file name for uploads, "Pasted text" otherwise */
   domain: string;

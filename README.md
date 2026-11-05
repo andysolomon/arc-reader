@@ -33,7 +33,7 @@ For parallel worktrees, give each Playwright run separate ports, for example `E2
 
 ## Shared library
 
-Documents, selected document voices, saved Patois adaptations, and listening progress are shared by all clients of the same web server through `/api/library/sync`. There are no separate user accounts or private libraries: everyone who can reach that server uses the same library. Keep using the same Tailscale URL on each device.
+Documents, selected document voices, saved Patois adaptations and summaries, and listening progress are shared by all clients of the same web server through `/api/library/sync`. There are no separate user accounts or private libraries: everyone who can reach that server uses the same library. Keep using the same Tailscale URL on each device.
 
 The server stores the library atomically in `LIBRARY_DATA_DIR/library.json` (default: `apps/web/.readaloud-library` when started from the app directory). The library has no expiry. Back up that directory; use a stable absolute `LIBRARY_DATA_DIR` when switching checkouts. Docker Compose mounts a persistent `library-data` volume.
 
@@ -209,6 +209,19 @@ The speech endpoint returns audio only, so the word underline is estimated. Sett
 ### Legacy contract
 
 With `VITE_TTS_PROVIDER=readaloud` the app instead calls `POST {VITE_API_BASE}/tts` with `{ text, voice, provider, format: "mp3" }` and accepts `audio/mpeg` (optional `X-Duration`, `X-Word-Timings` headers) or JSON `{ audio: <base64>, mime, duration, words }`. `POST /auth/magic-link` and `GET /auth/google` back the Auth screen in either mode.
+
+## Article summaries
+
+The Reader's **Summarize** button (sparkles, in the header) asks an LLM for a plain-prose summary of about 200 words and shows it above the text. Summaries are saved on the document and shared through library sync, so each article is summarized once; editing the text marks the summary out of date. The panel stays open across documents until you hide it, but only the button or **Summarize** starts a request.
+
+It uses [OpenCode Go](https://opencode.ai/docs/go/). Paste your Go API key in **Settings → Summaries** (it is the `key` under `opencode-go` in `~/.local/share/opencode/auth.json`). The server checks it with OpenCode, then saves it as `llm.json` (mode 600) in `LIBRARY_DATA_DIR`, so Compose keeps it in the library volume. The browser only ever sees its last four characters. A saved key takes precedence over the optional server-side `LLM_API_KEY`; **Remove** falls back to it. `LLM_URL` (default `https://opencode.ai/zen/go`) points at any OpenAI-compatible base, e.g. `https://opencode.ai/zen` for pay-as-you-go Zen. Anyone who can reach the server can replace or remove the key, as with the shared library.
+
+`/api/llm` forwards `POST /v1/chat/completions` only, adding the key, a `readaloud` user agent, and a per-document `x-opencode-session`, which Go requires. Settings → Summaries picks the model:
+
+- **Muse Spark** (`muse-spark-1.3-contributor`, default): about 20 s and about $0.002 of Go allowance for a 15,000-word essay. Go only serves it once **Allow paid endpoints that train on request data** is on in the OpenCode console, so the article text may be used for training.
+- **GLM 5.3** (`glm-5.3`): about a minute and about $0.20 for the same essay, against GLM 5.3's $15 monthly Go limit (shared with any coding use).
+
+Go is designed for coding agents and OpenCode monitors its traffic for abuse. Occasional summaries are light, but if that is a concern, point `LLM_URL` at Zen and pay per token. Article text is sent to OpenCode and the model provider.
 
 ## Themes
 
