@@ -25,6 +25,8 @@ export interface PreparationJob {
   total: number;
   message?: string;
   worker?: string;
+  /** Set when a queued reading can only run on one machine. */
+  waitingFor?: string;
   serverId?: string;
   remote?: boolean;
 }
@@ -118,7 +120,7 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   partialize: ({ jobs }) => ({ jobs: jobs.filter((job) => !job.remote) }),
   merge: (persisted, current) => {
     const { jobs = [] } = (persisted ?? {}) as { jobs?: PreparationJob[] };
-    return { ...current, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined } : job) };
+    return { ...current, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined, waitingFor: undefined } : job) };
   },
   // Local storage hydrates synchronously, before usePreparation is initialized.
   // Re-enter the worker afterwards; server jobs reconnect and saved audio is reused.
@@ -141,7 +143,7 @@ function drain() {
     const controller = new AbortController();
     active.set(job.id, { controller, provider });
     counts.set(provider, (counts.get(provider) || 0) + 1);
-    update(job.id, { status: background ? "queued" : "preparing", worker: undefined });
+    update(job.id, { status: background ? "queued" : "preparing", worker: undefined, waitingFor: undefined });
     void run(job, controller.signal).finally(() => {
       active.delete(job.id);
       drain();
@@ -171,10 +173,10 @@ async function run(job: PreparationJob, signal: AbortSignal) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {
-        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker, serverId: status?.id });
+        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor, serverId: status?.id });
       }, signal);
       signal.throwIfAborted();
-      update(job.id, { status: "saving", worker: undefined });
+      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined });
     }
     for (const passage of passages) {
       signal.throwIfAborted();
@@ -196,7 +198,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     update(job.id, { status: "ready" });
   } catch (error) {
     if (!signal.aborted && (isTransientPreparationError(error) || error instanceof ApiUnreachable || error instanceof ApiBusy)) {
-      update(job.id, { status: "queued", worker: undefined, message: "Waiting for the speech server to reconnect…" });
+      update(job.id, { status: "queued", worker: undefined, waitingFor: undefined, message: "Waiting for the speech server to reconnect…" });
       await new Promise<void>((resolve) => {
         const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
         const timer = setTimeout(finish, 1500);
