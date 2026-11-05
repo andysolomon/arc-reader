@@ -194,8 +194,10 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
     for (let attempt = 0; ; attempt++) {
       if (req.signal?.aborted) throw new DOMException("Aborted", "AbortError");
       try {
+        const started = Date.now();
         const chunk = await rawSynthesize(req);
         if (!chunk.audio?.size) throw new ApiRejected(502, "Empty audio from the speech server");
+        chunk.renderSeconds = (Date.now() - started) / 1000;
         await addUsage({ engine: req.engine, model: req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.engine === FISH_ENGINE ? FISH_MODEL : req.engine,
           text: req.text, audioSeconds: chunk.duration, tokens: chunk.tokens });
         return chunk;

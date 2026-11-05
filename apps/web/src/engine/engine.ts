@@ -48,6 +48,8 @@ export interface EngineOptions {
    * Playback stops; the host decides whether to retry or switch to the browser voice.
    */
   onUnavailable: (message: string) => void;
+  /** Once per load: the voice generates slower than it plays (factor = render seconds ÷ audio seconds), so playback will stall between sentences. */
+  onSlow: (factor: number) => void;
 }
 
 type Listener = (s: EngineSnapshot) => void;
@@ -61,6 +63,8 @@ export function unavailableMessage(e: unknown): string {
 }
 
 const PREFETCH = 2;
+/** Render time ÷ audio time above which a voice cannot keep up with playback. */
+export const SLOW_FACTOR = 1.5;
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 /**
@@ -81,6 +85,7 @@ export class PlaybackEngine {
   private playing = false;
   private loading = false;
   private ended = false;
+  private slowNoted = false;
   private speed = 1;
   private audio: HTMLAudioElement | null = null;
   private audioUrl: string | null = null;
@@ -127,6 +132,7 @@ export class PlaybackEngine {
     this.playing = false;
     this.loading = false;
     this.ended = false;
+    this.slowNoted = false;
     this.emit();
   }
 
@@ -153,6 +159,7 @@ export class PlaybackEngine {
     this.chunks.clear();
     this.stopMedia();
     this.current = null;
+    this.slowNoted = false;
     if (wasPlaying) void this.play();
     else this.emit();
   }
@@ -282,6 +289,23 @@ export class PlaybackEngine {
     this.seek(this.index + 1);
   }
 
+  /**
+   * Render every sentence into the cache, from the current one to the end and then
+   * from the start, so a slow engine never stalls playback. Safe alongside playback:
+   * both share the chunk promises and the provider's request queue.
+   */
+  async prepare(onProgress?: (done: number, total: number) => void, signal?: AbortSignal): Promise<void> {
+    const doc = this.doc;
+    if (!doc) return;
+    const n = doc.sentences.length;
+    const start = this.index;
+    for (let k = 0; k < n; k++) {
+      if (signal?.aborted || this.doc !== doc) return;
+      await this.ensureChunk((start + k) % n).catch(() => {});
+      onProgress?.(k + 1, n);
+    }
+  }
+
   /** Fetch every chunk (for download). Resolves to the audio blobs in order, or null when a sentence has no audio. */
   async collectAudio(onProgress?: (done: number, total: number) => void): Promise<(Blob | null)[]> {
     if (!this.doc) return [];
@@ -318,13 +342,24 @@ export class PlaybackEngine {
         onOnline: this.opts.onOnline,
         onRejected: this.opts.onRejected,
       }).then((c) => {
-        if (c.duration > 0 && this.doc === doc) this.durations[i] = c.duration;
+        if (this.doc === doc) {
+          if (c.duration > 0) this.durations[i] = c.duration;
+          this.noteSpeed(c);
+        }
         return c;
       });
       this.chunks.set(i, p);
       p.catch(() => this.chunks.delete(i));
     }
     return p;
+  }
+
+  private noteSpeed(c: Chunk) {
+    if (this.slowNoted || !c.renderSeconds || c.duration <= 0) return;
+    const factor = c.renderSeconds / c.duration;
+    if (factor < SLOW_FACTOR) return;
+    this.slowNoted = true;
+    this.opts.onSlow(Math.round(factor));
   }
 
   private prefetch() {

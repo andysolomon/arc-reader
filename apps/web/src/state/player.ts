@@ -11,6 +11,7 @@ import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { hasPatois, preparePatois } from "../lib/patois";
 
 let opening: AbortController | null = null;
+let prerendering: AbortController | null = null;
 let retryPreparation: (() => Promise<boolean>) | null = null;
 const variant = (id: string) => id === JAMAICAN_PATOIS_VOICE_ID ? "patois" : "original";
 
@@ -28,6 +29,8 @@ export interface PlayerState extends EngineSnapshot {
   preparationError: string | null;
   /** The chosen voice could not be generated; playback is stopped until the user retries or switches voice. */
   speechError: string | null;
+  /** "Prepare audio" in progress: sentences rendered into the cache so far */
+  prerendering: { done: number; total: number } | null;
 }
 
 interface Actions {
@@ -40,6 +43,9 @@ interface Actions {
   /** Read with the browser voice until the server is back (same as going offline). */
   useBrowserVoice: () => void;
   dismissSpeechError: () => void;
+  /** Render the whole document ahead of playback (for engines slower than real time). */
+  prerender: () => Promise<void>;
+  cancelPrerender: () => void;
   close: () => void;
   toggle: () => void;
   play: () => void;
@@ -83,6 +89,10 @@ export const engine = new PlaybackEngine({
   },
   onError: (m) => toast(m),
   onUnavailable: (m) => usePlayer.setState({ speechError: m }),
+  onSlow: (factor) => {
+    const name = getVoice(usePlayer.getState().voiceId).name;
+    toast(`${name} takes ~${factor}× longer to generate than to play on this server, so reading pauses between sentences. Choose “Prepare audio” in the player menu, or a faster voice.`, 8000);
+  },
 });
 
 export function clampSpeed(v: number) {
@@ -103,9 +113,11 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
     preparing: null,
     preparationError: null,
     speechError: null,
+    prerendering: null,
 
     async open(rec, opts = {}) {
       opening?.abort();
+      get().cancelPrerender();
       const controller = new AbortController();
       opening = controller;
       const { signal } = controller;
@@ -171,8 +183,31 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       void engine.play();
     },
     dismissSpeechError: () => set({ speechError: null }),
+    async prerender() {
+      const { doc } = get();
+      if (prerendering || !doc) return;
+      const controller = new AbortController();
+      prerendering = controller;
+      const total = doc.sentences.length;
+      set({ prerendering: { done: 0, total } });
+      try {
+        await engine.prepare((done) => { if (prerendering === controller) set({ prerendering: { done, total } }); }, controller.signal);
+        if (!controller.signal.aborted && get().doc === doc) toast("Audio prepared — playback no longer waits on the server");
+      } finally {
+        if (prerendering === controller) {
+          prerendering = null;
+          set({ prerendering: null });
+        }
+      }
+    },
+    cancelPrerender() {
+      prerendering?.abort();
+      prerendering = null;
+      set({ prerendering: null });
+    },
     close() {
       get().cancelPreparation();
+      get().cancelPrerender();
       engine.unload();
       set({ doc: null, record: null, focus: false, menuOpen: false, speechError: null });
     },
@@ -198,6 +233,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       const wasPlaying = get().playing;
       get().cancelPreparation();
       set({ speechError: null });
+      get().cancelPrerender();
       if (record) {
         const next = { ...record, voice: voiceId, updatedAt: Date.now() };
         if (variant(v.id) !== variant(get().voiceId) || v.id === JAMAICAN_PATOIS_VOICE_ID) {

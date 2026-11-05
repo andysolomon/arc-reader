@@ -1,89 +1,129 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PlaybackEngine, SLOW_FACTOR, type EngineDoc } from "./engine";
+import { synthesize } from "./providers";
 import { ApiUnreachable, type Chunk } from "./types";
 
-const synthesize = vi.fn<(opts: { text: string }) => Promise<Chunk>>();
-vi.mock("./providers", () => ({ synthesize: (opts: { text: string }) => synthesize(opts) }));
+vi.mock("./providers", () => ({ synthesize: vi.fn() }));
+vi.stubGlobal("requestAnimationFrame", () => 0);
+vi.stubGlobal("cancelAnimationFrame", () => {});
 
-const { PlaybackEngine } = await import("./engine");
+const synth = vi.mocked(synthesize);
+const doc = (n: number): EngineDoc => ({
+  id: "d", title: "t", voice: "v", lang: "en",
+  sentences: Array.from({ length: n }, (_, i) => ({ text: `s${i}`, words: [`s${i}`], start: i, end: i + 1 })),
+  words: n,
+} as unknown as EngineDoc);
+const chunk = (extra: Partial<Chunk> = {}): Chunk => ({ source: "api", audio: new Blob([new Uint8Array(4)]), duration: 2, ...extra });
+
+function make(onSlow = vi.fn(), onUnavailable = vi.fn()) {
+  const e = new PlaybackEngine({
+    engine: () => "omnivoice", wordTimings: () => false, isProfileVoice: () => true, offline: () => false,
+    onRejected: () => {}, onOffline: () => {}, onOnline: () => {}, onPersist: () => {}, onError: () => {}, onSlow, onUnavailable,
+  });
+  return { e, onSlow, onUnavailable };
+}
 
 function deferred<T>() {
   let resolve!: (v: T) => void, reject!: (e: unknown) => void;
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
-
 const tick = () => new Promise((r) => setTimeout(r, 0));
-const doc = {
-  id: "d1", title: "T", voice: "v", lang: "en",
-  sentences: [
-    { text: "One two three.", words: ["One", "two", "three."] },
-    { text: "Four five six.", words: ["Four", "five", "six."] },
-  ],
-  paragraphs: [{ start: 0, sentences: [{ text: "One two three.", words: ["One", "two", "three."] }, { text: "Four five six.", words: ["Four", "five", "six."] }] }],
-};
 
-function make() {
-  const onUnavailable = vi.fn();
-  const engine = new PlaybackEngine({
-    engine: () => "kittentts",
-    wordTimings: () => false,
-    isProfileVoice: () => false,
-    offline: () => false,
-    onRejected: vi.fn(),
-    onOffline: vi.fn(),
-    onOnline: vi.fn(),
-    onPersist: vi.fn(),
-    onError: vi.fn(),
-    onUnavailable,
+beforeEach(() => synth.mockReset());
+
+describe("prepare", () => {
+  it("renders from the current sentence to the end, then the start, reporting progress", async () => {
+    synth.mockImplementation(async () => chunk());
+    const { e } = make();
+    e.load(doc(4), 2);
+    const progress: number[] = [];
+    await e.prepare((done) => progress.push(done));
+    expect(synth.mock.calls.map((c) => c[0].text)).toEqual(["s2", "s3", "s0", "s1"]);
+    expect(progress).toEqual([1, 2, 3, 4]);
+    // Already-rendered sentences are reused, not requested again.
+    await e.prepare();
+    expect(synth).toHaveBeenCalledTimes(4);
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  engine.load(doc as any);
-  return { engine, onUnavailable };
-}
 
-describe("PlaybackEngine start-up", () => {
-  beforeEach(() => {
-    synthesize.mockReset();
-    vi.stubGlobal("requestAnimationFrame", () => 0);
-    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+  it("stops when aborted or when another document is loaded", async () => {
+    synth.mockImplementation(async () => chunk());
+    const { e } = make();
+    e.load(doc(3));
+    const controller = new AbortController();
+    const run = e.prepare((done) => { if (done === 1) controller.abort(); }, controller.signal);
+    await run;
+    expect(synth).toHaveBeenCalledTimes(1);
+
+    synth.mockClear();
+    e.load(doc(3));
+    const swap = e.prepare((done) => { if (done === 1) e.load(doc(2)); });
+    await swap;
+    expect(synth).toHaveBeenCalledTimes(1);
   });
-  afterEach(() => vi.unstubAllGlobals());
+});
 
+describe("slow voice detection", () => {
+  it("reports once per load when rendering takes longer than playback", async () => {
+    synth.mockImplementation(async () => chunk({ renderSeconds: 2 * SLOW_FACTOR * 10 }));
+    const { e, onSlow } = make();
+    e.load(doc(2));
+    await e.prepare();
+    expect(onSlow).toHaveBeenCalledTimes(1);
+    expect(onSlow).toHaveBeenCalledWith(SLOW_FACTOR * 10);
+    e.load(doc(1));
+    await e.prepare();
+    expect(onSlow).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores fast and cached chunks", async () => {
+    synth.mockResolvedValueOnce(chunk({ renderSeconds: 1 })).mockResolvedValueOnce(chunk({ source: "cache" }));
+    const { e, onSlow } = make();
+    e.load(doc(2));
+    await e.prepare();
+    expect(onSlow).not.toHaveBeenCalled();
+  });
+});
+
+describe("start-up", () => {
   it("does not report playing until the first sentence's audio exists", async () => {
     const first = deferred<Chunk>();
-    synthesize.mockReturnValueOnce(first.promise).mockResolvedValue({ source: "estimate", duration: 1 });
-    const { engine } = make();
-    const play = engine.play();
+    synth.mockReturnValueOnce(first.promise).mockResolvedValue(chunk({ source: "estimate", audio: undefined, duration: 1 }));
+    const { e } = make();
+    e.load(doc(2));
+    const play = e.play();
     await tick();
-    expect(engine.getSnapshot()).toMatchObject({ playing: false, loading: true, offset: 0 });
-    first.resolve({ source: "estimate", duration: 2 });
+    expect(e.getSnapshot()).toMatchObject({ playing: false, loading: true, offset: 0 });
+    first.resolve(chunk({ source: "estimate", audio: undefined }));
     await play;
-    expect(engine.getSnapshot()).toMatchObject({ playing: true, loading: false });
+    expect(e.getSnapshot()).toMatchObject({ playing: true, loading: false });
   });
 
   it("pausing while a sentence is generating cancels the start", async () => {
     const first = deferred<Chunk>();
-    synthesize.mockReturnValueOnce(first.promise);
-    const { engine } = make();
-    const play = engine.play();
+    synth.mockReturnValueOnce(first.promise);
+    const { e } = make();
+    e.load(doc(1));
+    const play = e.play();
     await tick();
-    engine.toggle();
-    expect(engine.getSnapshot()).toMatchObject({ playing: false, loading: false });
-    first.resolve({ source: "estimate", duration: 2 });
+    e.toggle();
+    expect(e.getSnapshot()).toMatchObject({ playing: false, loading: false });
+    first.resolve(chunk({ source: "estimate", audio: undefined }));
     await play;
-    expect(engine.getSnapshot().playing).toBe(false);
+    expect(e.getSnapshot().playing).toBe(false);
   });
 
   it("stops and reports when the voice cannot be generated instead of substituting another voice", async () => {
-    synthesize.mockRejectedValueOnce(new ApiUnreachable());
-    const { engine, onUnavailable } = make();
-    await engine.play();
-    expect(engine.getSnapshot()).toMatchObject({ playing: false, loading: false });
+    synth.mockRejectedValueOnce(new ApiUnreachable());
+    const { e, onUnavailable } = make();
+    e.load(doc(2));
+    await e.play();
+    expect(e.getSnapshot()).toMatchObject({ playing: false, loading: false });
     expect(onUnavailable).toHaveBeenCalledWith("Speech server unreachable.");
-    expect(synthesize.mock.calls[0][0]).toMatchObject({ fallbackLocal: false });
+    expect(synth.mock.calls[0][0]).toMatchObject({ fallbackLocal: false });
     // A retry asks the server again rather than reusing the failed attempt.
-    synthesize.mockResolvedValue({ source: "estimate", duration: 1 });
-    await engine.play();
-    expect(engine.getSnapshot().playing).toBe(true);
+    synth.mockResolvedValue(chunk({ source: "estimate", audio: undefined, duration: 1 }));
+    await e.play();
+    expect(e.getSnapshot().playing).toBe(true);
   });
 });
