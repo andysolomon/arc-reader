@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest } from "./preparation";
+import { hasActivePreparation, prepareAudio, preparedAudio, refreshPreparationCatalog, serverPreparedKeys, type PreparationRequest } from "./preparation";
 
 const requests: PreparationRequest[] = ["first", "second"].map((text) => ({ key: text, text, engine: "kittentts", voice: "v", protocol: "openai" }));
 const response = (data: unknown) => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
@@ -165,5 +165,17 @@ describe("background preparation client", () => {
     expect(hasActivePreparation(requests)).toBe(false);
     fetchMock.mockResolvedValueOnce(new Response("", { status: 404 }));
     expect(await preparedAudio("first")).toBeNull();
+  });
+
+  it("discovers another device's server audio and reuses it without submitting generation", async () => {
+    fetchMock.mockResolvedValueOnce(response({ jobs: [{ ...status("done", 2), keys: ["first", "second"], available: [0, 1], engine: "kittentts", voice: "v", createdAt: 1 }] }));
+    await refreshPreparationCatalog();
+    expect(serverPreparedKeys()).toEqual(["first", "second"]);
+    fetchMock.mockResolvedValueOnce(new Response("shared-audio", { headers: { "content-type": "audio/mpeg" } }));
+    expect(await (await preparedAudio("second"))?.text()).toBe("shared-audio");
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("/api/preparations/job-id/audio/1");
+    fetchMock.mockResolvedValueOnce(response(status("done", 2)));
+    await prepareAudio(requests, 0);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 });

@@ -107,6 +107,7 @@ test("shows live server progress before audio is downloaded, then distinguishes 
   const status = { id: "", state: "running", done: 0, total: 2, queued: true, worker: undefined as string | undefined };
   let submissions = 0;
   await page.route("**/api/preparations", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
     submissions++;
     const response = await route.fetch();
     status.id = (await response.json()).id;
@@ -153,6 +154,7 @@ test("shows one reading per machine, waiting readings, and restores their assign
   await seedLibrary(page);
   const jobs: { id: string; state: string; done: number; total: number; queued: boolean; worker?: string }[] = [];
   await page.route("**/api/preparations", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
     const index = jobs.length;
     const job = { id: `00000000-0000-0000-0000-${String(index).padStart(12, "0")}`, state: "running", done: 0, total: 2,
       queued: index >= 2, ...(index < 2 ? { worker: ["Mac", "Omarchy"][index] } : {}) };

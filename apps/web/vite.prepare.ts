@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
-import type { PreparationRequest, PreparationStatus } from "./src/engine/preparation";
+import type { PreparationRequest, PreparationStatus, SharedPreparation } from "./src/engine/preparation";
 import { PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
 
 interface Job extends PreparationStatus {
@@ -33,6 +33,7 @@ export class PreparationService {
   private changes = new Map<string, Set<() => void>>();
   private scheduling = new Map<string, Promise<void>>();
   private retryTimer?: ReturnType<typeof setTimeout>;
+  private uploaded = new Set<string>();
   private discovery: PreparationWorkers;
   private ready: Promise<void>;
   constructor(env: Record<string, string>, private directory = resolve(env.PREPARATION_DATA_DIR || ".readaloud-preparations")) {
@@ -42,10 +43,12 @@ export class PreparationService {
 
   private async restore() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    for (const file of await readdir(this.directory)) {
+    const files = await readdir(this.directory);
+    for (const file of files) {
       const path = resolve(this.directory, file);
       const info = await stat(path);
       if (Date.now() - info.mtimeMs > RETENTION_MS) { await rm(path, { force: true }); continue; }
+      if (/^shared-[a-f0-9]{64}\.json$/.test(file) && files.includes(file.replace(/\.json$/, ".bin"))) this.uploaded.add(file.slice(7, -5));
       if (!file.startsWith("job-") || !file.endsWith(".json")) continue;
       try {
         const job = JSON.parse(await readFile(path, "utf8")) as Job;
@@ -186,6 +189,16 @@ export class PreparationService {
   }
 
   async get(id: string): Promise<PreparationStatus> { return this.status(await this.job(id)); }
+  async list(): Promise<{ jobs: SharedPreparation[] }> {
+    await this.ready;
+    return { jobs: [...this.jobs.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((job) => ({
+      ...this.status(job), keys: job.requests.map((item) => item.key),
+      available: job.requests.flatMap((request, index) => (this.uploaded.has(digest(request.key)) || (!request.cached && job.completed.includes(index))) ? [index] : []),
+      deviceOnly: job.requests.flatMap((request, index) => request.cached && !this.uploaded.has(digest(request.key)) ? [index] : []),
+      voice: job.requests[0].voice, engine: job.requests[0].engine, profile: job.requests[0].profile,
+      createdAt: job.createdAt || 0,
+    })) };
+  }
   private async job(id: string) {
     await this.ready;
     const job = this.jobs.get(id);
@@ -239,6 +252,13 @@ export class PreparationService {
   async audio(id: string, index: number): Promise<Audio> {
     const job = await this.job(id);
     if (!Number.isInteger(index) || index < 0 || index >= job.total) throw new HttpError(404, "Passage not found.");
+    const uploaded = digest(job.requests[index].key);
+    if (this.uploaded.has(uploaded)) {
+      try {
+        const metadata = JSON.parse(await readFile(resolve(this.directory, `shared-${uploaded}.json`), "utf8"));
+        return { ...metadata, body: await readFile(resolve(this.directory, `shared-${uploaded}.bin`)) };
+      } catch { this.uploaded.delete(uploaded); }
+    }
     if (job.requests[index].cached) throw new HttpError(410, "This passage was already cached on the device.");
     // Playback can observe queued work, but cannot bypass the reading's machine
     // reservation by starting a second voice on an occupied worker.
@@ -247,6 +267,27 @@ export class PreparationService {
     if (job.state === "error" && !job.completed.includes(index)) throw new HttpError(410, "This passage was not prepared. Retry speech generation.");
     const worker = this.discovery.workers.find((worker) => worker.id === job.workerId) || this.discovery.workers[0];
     return this.audioFor(job.requests[index], () => job.state === "running" && this.active.has(job.id), worker);
+  }
+
+  /** Adopt an existing device clip; this never starts synthesis or changes job assignments. */
+  async publish(id: string, index: number, audio: Audio) {
+    const job = await this.job(id);
+    if (!Number.isInteger(index) || index < 0 || index >= job.total) throw new HttpError(404, "Passage not found.");
+    if (!audio.body.length || audio.body.length > 32 * 1024 * 1024) throw new HttpError(413, "Audio clip must be between 1 byte and 32 MB.");
+    if (!audio.type.startsWith("audio/") && audio.type !== "application/octet-stream") throw new HttpError(415, "Expected an audio clip.");
+    const key = digest(job.requests[index].key);
+    const writeKey = `shared:${key}`;
+    const write = (this.writes.get(writeKey) || Promise.resolve()).catch(() => {}).then(async () => {
+      if (this.uploaded.has(key)) return;
+      const { body, ...metadata } = audio;
+      await this.atomic(`shared-${key}.bin`, body);
+      await this.atomic(`shared-${key}.json`, JSON.stringify(metadata));
+      this.uploaded.add(key);
+    });
+    this.writes.set(writeKey, write);
+    try { await write; }
+    finally { if (this.writes.get(writeKey) === write) this.writes.delete(writeKey); }
+    return { shared: true };
   }
 
   private audioFor(item: PreparationRequest, allowed: () => boolean, worker: PreparationWorker): Promise<Audio> {
@@ -352,9 +393,26 @@ export function audioPreparation(env: Record<string, string>): Plugin {
           throw new HttpError(403, "Use the app to prepare audio.");
         }
         const path = new URL(req.url || "/", "http://localhost").pathname;
+        if (req.method === "GET" && path === "/") return send(res, 200, await service.list());
         if (req.method === "POST" && path === "/") return send(res, 202, await service.submit(await body(req)));
         const match = /^\/([a-f0-9-]{36})(?:\/audio\/(\d+))?$/.exec(path);
         if (!match) throw new HttpError(404, "Not found.");
+        if (req.method === "PUT" && match[2] !== undefined) {
+          const chunks: Buffer[] = [];
+          let bytes = 0;
+          for await (const chunk of req) {
+            bytes += chunk.length;
+            if (bytes > 32 * 1024 * 1024) throw new HttpError(413, "Audio clip exceeds 32 MB.");
+            chunks.push(Buffer.from(chunk));
+          }
+          const duration = req.headers["x-duration"];
+          const words = req.headers["x-word-timings"];
+          return send(res, 200, await service.publish(match[1], Number(match[2]), {
+            body: Buffer.concat(chunks), type: req.headers["content-type"] || "application/octet-stream",
+            ...(typeof duration === "string" && Number.isFinite(Number(duration)) && Number(duration) > 0 ? { duration } : {}),
+            ...(typeof words === "string" ? { words } : {}),
+          }));
+        }
         if (req.method === "GET" && match[2] !== undefined) {
           const audio = await service.audio(match[1], Number(match[2]));
           res.writeHead(200, { "content-type": audio.type, "cache-control": "no-store", ...(audio.duration ? { "x-duration": audio.duration } : {}), ...(audio.words ? { "x-word-timings": audio.words } : {}) });

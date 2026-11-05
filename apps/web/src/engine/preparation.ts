@@ -1,4 +1,5 @@
 import { hash } from "../lib/hash";
+import { audioCache } from "../lib/db";
 
 export interface PreparationRequest {
   key: string;
@@ -19,6 +20,54 @@ export interface PreparationStatus {
   queued?: boolean;
   worker?: string;
 }
+export interface SharedPreparation extends PreparationStatus {
+  keys: string[];
+  /** Indices actually rendered on the server; device-only cache hits are excluded. */
+  available: number[];
+  deviceOnly?: number[];
+  voice: string;
+  engine: string;
+  profile?: boolean;
+  createdAt: number;
+}
+let shared: SharedPreparation[] = [];
+let sharing = 0;
+export const sharedAudioRemaining = () => sharing;
+export async function refreshPreparationCatalog(): Promise<SharedPreparation[]> {
+  const result = await json<{ jobs: SharedPreparation[] }>("", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+  if (!Array.isArray(result.jobs)) throw new Error("Server audio status is unavailable.");
+  shared = result.jobs;
+  const local = new Set(await audioCache.keys().catch(() => []));
+  const uploads = new Map<string, { id: string; index: number }>();
+  for (const job of shared) for (const index of job.deviceOnly || []) {
+    const key = job.keys[index];
+    if (local.has(key) && !uploads.has(key)) uploads.set(key, { id: job.id, index });
+  }
+  sharing = uploads.size;
+  let sent = 0;
+  // Share a small batch of existing clips each poll, keeping mobile memory/network bounded.
+  for (const [key, target] of [...uploads].slice(0, 8)) {
+    const clip = await audioCache.get(key);
+    if (!clip) continue;
+    const response = await fetch(`${BASE}/${target.id}/audio/${target.index}`, {
+      method: "PUT", headers: { "content-type": clip.mime, "x-duration": String(clip.duration), ...(clip.words ? { "x-word-timings": JSON.stringify(clip.words) } : {}) },
+      body: clip.blob, signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error("Could not share saved audio. It remains on this device; sync will retry.");
+    sent++;
+  }
+  if (sent) {
+    const updated = await json<{ jobs: SharedPreparation[] }>("", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    if (!Array.isArray(updated.jobs)) throw new Error("Server audio status is unavailable.");
+    shared = updated.jobs;
+    sharing = Math.max(0, sharing - sent);
+  }
+  return shared;
+}
+export function serverPreparedKeys(): string[] {
+  return [...new Set(shared.flatMap((job) => job.available.map((index) => job.keys[index])))];
+}
+const matches = (job: SharedPreparation, requests: PreparationRequest[]) => job.keys.length === requests.length && job.keys.every((key, i) => key === requests[i].key);
 interface SavedPreparation {
   id: string;
   signature: string;
@@ -55,7 +104,8 @@ function save(entries: SavedPreparation[]) {
 const signature = (requests: PreparationRequest[]) => hash(JSON.stringify(requests.map(({ cached: _, ...request }) => request)));
 
 export function hasActivePreparation(requests: PreparationRequest[]): boolean {
-  return saved().some((job) => job.signature === signature(requests) && job.active);
+  return saved().some((job) => job.signature === signature(requests) && job.active)
+    || shared.some((job) => job.state === "running" && matches(job, requests));
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -79,6 +129,13 @@ function delay(signal?: AbortSignal): Promise<void> {
 
 async function submit(requests: PreparationRequest[], start: number, fingerprint: string, signal: AbortSignal): Promise<SavedPreparation> {
   let entry = saved().find((job) => job.signature === fingerprint && job.active);
+  if (!entry) {
+    const existing = shared.find((job) => (job.state === "running" || job.available.length === job.total) && matches(job, requests));
+    if (existing) {
+      entry = { id: existing.id, signature: fingerprint, keys: existing.keys, active: existing.state === "running" };
+      save([...saved().filter((job) => job.signature !== fingerprint), entry]);
+    }
+  }
   if (!entry) {
     // Do not abort the submission: if Cancel races the response, obtain the job id
     // first so the server job can be cancelled explicitly.
@@ -162,7 +219,9 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
 
 /** Fetch a server-rendered clip before attempting another generation. */
 export async function preparedAudio(key: string, signal?: AbortSignal): Promise<Response | null> {
-  const entry = saved().slice().reverse().find((job) => job.keys.includes(key));
+  const ready = shared.find((job) => job.available.some((index) => job.keys[index] === key));
+  const running = shared.find((job) => job.state === "running" && job.keys.includes(key));
+  const entry = ready || saved().slice().reverse().find((job) => job.keys.includes(key)) || running;
   if (!entry) return null;
   const response = await fetch(`${BASE}/${entry.id}/audio/${entry.keys.indexOf(key)}`, { signal });
   // The server cache may have expired. Ordinary generation remains available.

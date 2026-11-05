@@ -70,6 +70,7 @@ export default defineConfig({
         VITE_FISH_BASE: LIVE ? process.env.VITE_FISH_BASE || localEnv.VITE_FISH_BASE || "" : "",
         FISH_API_KEY: LIVE ? process.env.FISH_API_KEY || localEnv.FISH_API_KEY || "" : "",
         LIBRARY_DATA_DIR: join(tmpdir(), `readaloud-e2e-library-${process.pid}`),
+        PREPARATION_DATA_DIR: join(tmpdir(), `readaloud-e2e-preparations-${process.pid}`),
       },
     },
   ],

@@ -6,6 +6,7 @@ import { preparedVoices, type PreparedVoice } from "../lib/prepared";
 import { useVoices } from "./voices";
 import { useSettings } from "./settings";
 import { usePreparation } from "./preparation";
+import { serverPreparedKeys } from "../engine/preparation";
 
 export interface LibraryItem {
   rec: DocRecord;
@@ -35,10 +36,11 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       const [all, pos, keys] = await Promise.all([docStore.all(), positions.all(), audioCache.keys()]);
       if (version !== refreshVersion) return;
       const byId = new Map(pos.map((p) => [p.docId, p]));
-      const cached = new Set(keys);
+      const allKeys = [...keys, ...serverPreparedKeys()];
+      const cached = new Set(allKeys);
       const voices = [...useVoices.getState().voices];
       // Saved voices can outlive a catalogue page or an unavailable speech server.
-      for (const key of keys) {
+      for (const key of allKeys) {
         const [engine, id] = key.split("|");
         if (id && !voices.some((v) => v.id === id)) voices.push({ id, name: id, engine: engine.split(":")[0], kind: "preset", lang: "", hue: null, tags: [] });
       }

@@ -83,11 +83,13 @@ describe("offline library synchronization", () => {
       await gate;
       return Response.json(snapshot);
     });
+    // The immediate follow-up upload also has to survive losing the connection.
+    network.mockRejectedValueOnce(new Error("offline"));
     const syncing = syncLibrary();
     await receiving;
     await docs.put({ ...doc("a", Date.now() + 1), title: "New title" });
     release();
-    await syncing;
+    expect(await syncing).toBe(false);
     expect((await docs.get("a"))?.title).toBe("New title");
     expect(await (await db()).count("outbox")).toBe(1);
     await syncLibrary();
@@ -111,5 +113,31 @@ describe("offline library synchronization", () => {
     expect(useLibrarySync.getState()).toMatchObject({ status: "offline", pending: 1, error: "Disk unavailable" });
     expect((await docs.get("a"))?.id).toBe("a");
     expect(await syncLibrary()).toBe(true);
+  });
+
+  it("repairs missing server documents even after the one-time import is marked complete", async () => {
+    const d = await db();
+    await d.put("meta", true, "shared-library-imported");
+    await d.put("docs", doc("phone-only"));
+    await d.put("positions", position("phone-only"));
+    await service.sync({ changes: [{ kind: "doc", record: doc("desktop-only") }] });
+    expect(await syncLibrary()).toBe(true);
+    const snapshot = await service.sync({ changes: [] });
+    expect(snapshot.docs.map((r) => r.id).sort()).toEqual(["desktop-only", "phone-only"]);
+    expect(snapshot.positions[0].docId).toBe("phone-only");
+    expect(useLibrarySync.getState().status).toBe("synced");
+    expect(await d.count("outbox")).toBe(0);
+  });
+
+  it("recovers newer local edits and positions that have no outgoing queue entry", async () => {
+    await service.sync({ changes: [{ kind: "doc", record: doc("a", 10) }, { kind: "position", record: position("a", 10) }] });
+    const d = await db();
+    await d.put("meta", true, "shared-library-imported");
+    await d.put("docs", { ...doc("a", 20), title: "Phone title" });
+    await d.put("positions", { ...position("a", 20), fraction: 0.75 });
+    await syncLibrary();
+    const snapshot = await service.sync({ changes: [] });
+    expect(snapshot.docs[0]).toMatchObject({ title: "Phone title", updatedAt: 20 });
+    expect(snapshot.positions[0]).toMatchObject({ fraction: 0.75, updatedAt: 20 });
   });
 });

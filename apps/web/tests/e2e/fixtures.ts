@@ -11,6 +11,10 @@ export const test = base.extend<{ isolatedLibrary: void }>({
   isolatedLibrary: [async ({ context }, use) => {
     const directory = await mkdtemp(join(tmpdir(), "readaloud-ui-library-"));
     const library = new LibraryService(directory);
+    await context.route("**/api/preparations", async (route) => {
+      if (route.request().method() === "GET") return route.fulfill({ json: { jobs: [] } });
+      await route.fallback();
+    });
     await context.route("**/api/library/sync", async (route) => {
       await route.fulfill({ json: await library.sync(route.request().postDataJSON()) });
     });

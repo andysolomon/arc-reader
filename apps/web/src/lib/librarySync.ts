@@ -5,9 +5,10 @@ import type { LibrarySnapshot, PendingChange } from "./libraryProtocol";
 interface SyncState {
   status: "syncing" | "synced" | "offline";
   pending: number;
+  documents: number;
   error: string | null;
 }
-export const useLibrarySync = create<SyncState>(() => ({ status: "syncing", pending: 0, error: null }));
+export const useLibrarySync = create<SyncState>(() => ({ status: "syncing", pending: 0, documents: 0, error: null }));
 
 /** Import legacy browser records once. The server merges IDs and newest edits; nothing is cleared. */
 async function migrate() {
@@ -37,6 +38,30 @@ async function apply(snapshot: LibrarySnapshot, sent: PendingChange[]) {
     if ((await outbox.get(item.key))?.token === item.token) await outbox.delete(item.key);
   }
   const pending = new Set(await outbox.getAllKeys());
+  const remoteDocs = new Map(snapshot.docs.map((record) => [record.id, record]));
+  const remotePositions = new Map(snapshot.positions.map((record) => [record.docId, record]));
+  const deleted = new Set(snapshot.deleted);
+  const localDocs = await tx.objectStore("docs").getAll();
+  const localIds = new Set(localDocs.map((record) => record.id));
+  // An import marker or an empty queue is not proof that the server has a record.
+  // Recover records left by an older client, a lost queue, or a server restore.
+  for (const record of localDocs) {
+    const key = `doc:${record.id}`;
+    const remote = remoteDocs.get(record.id);
+    if (!pending.has(key) && !deleted.has(record.id) && (!remote || record.updatedAt > remote.updatedAt)) {
+      await outbox.put(pendingChange(key, { kind: "doc", record }));
+      pending.add(key);
+    }
+  }
+  for (const record of await tx.objectStore("positions").getAll()) {
+    const key = `position:${record.docId}`;
+    const remote = remotePositions.get(record.docId);
+    if (!pending.has(key) && !deleted.has(record.docId) && localIds.has(record.docId)
+      && (!remote || record.updatedAt > remote.updatedAt)) {
+      await outbox.put(pendingChange(key, { kind: "position", record }));
+      pending.add(key);
+    }
+  }
   for (const record of snapshot.docs) {
     if (!pending.has(`doc:${record.id}`)) await tx.objectStore("docs").put(record);
   }
@@ -62,30 +87,38 @@ export function syncLibrary(): Promise<boolean> {
     try {
       await migrate();
       const d = await db();
-      // Snapshot the queue: new writes can wait for the next sync, avoiding starvation during playback.
-      const queued = await d.getAll("outbox");
-      if (queued.length) useLibrarySync.setState({ status: "syncing", pending: queued.length });
-      const batches: PendingChange[][] = [[]];
-      let size = 0;
-      for (const item of queued) {
-        const bytes = new TextEncoder().encode(JSON.stringify(item.change)).length;
-        if (size + bytes > 8 * 1024 * 1024 || batches.at(-1)!.length >= 100) { batches.push([]); size = 0; }
-        batches.at(-1)!.push(item);
-        size += bytes;
-      }
-      for (const sent of batches) {
-        const response = await fetch("/api/library/sync", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ changes: sent.map((item) => item.change) }),
-          signal: AbortSignal.timeout(20_000), cache: "no-store",
-        });
-        if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Library server unavailable.");
-        const snapshot = await response.json() as LibrarySnapshot;
-        if (!Array.isArray(snapshot.docs) || !Array.isArray(snapshot.positions) || !Array.isArray(snapshot.deleted)) throw new Error("Library server unavailable.");
-        await apply(snapshot, sent);
+      let snapshot: LibrarySnapshot | undefined;
+      // A second round immediately uploads any local records recovered during reconciliation.
+      for (let round = 0; round < 2; round++) {
+        // Bound each round so continuous playback writes cannot starve completion.
+        const queued = await d.getAll("outbox");
+        if (queued.length) useLibrarySync.setState({ status: "syncing", pending: queued.length });
+        const batches: PendingChange[][] = [[]];
+        let size = 0;
+        for (const item of queued) {
+          const bytes = new TextEncoder().encode(JSON.stringify(item.change)).length;
+          if (size + bytes > 8 * 1024 * 1024 || batches.at(-1)!.length >= 100) { batches.push([]); size = 0; }
+          batches.at(-1)!.push(item);
+          size += bytes;
+        }
+        for (const sent of batches) {
+          const response = await fetch("/api/library/sync", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ changes: sent.map((item) => item.change) }),
+            signal: AbortSignal.timeout(20_000), cache: "no-store",
+          });
+          if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Library server unavailable.");
+          snapshot = await response.json() as LibrarySnapshot;
+          if (!Array.isArray(snapshot.docs) || !Array.isArray(snapshot.positions) || !Array.isArray(snapshot.deleted)) throw new Error("Library server unavailable.");
+          await apply(snapshot, sent);
+        }
+        if (!await d.count("outbox")) break;
       }
       const pending = await d.count("outbox");
-      useLibrarySync.setState({ status: pending ? "syncing" : "synced", pending, error: null });
+      const localIds = (await d.getAllKeys("docs")).sort();
+      const serverIds = snapshot!.docs.map((record) => record.id).sort();
+      if (!pending && JSON.stringify(localIds) !== JSON.stringify(serverIds)) throw new Error("The library has not finished syncing. Try syncing again.");
+      useLibrarySync.setState({ status: pending ? "syncing" : "synced", pending, documents: localIds.length, error: null });
       return true;
     } catch (error) {
       const pending = await db().then((d) => d.count("outbox")).catch(() => 0);

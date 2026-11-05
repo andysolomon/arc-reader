@@ -7,6 +7,7 @@ import { getVoice, useVoices } from "../state/voices";
 import { useLibrary, type LibraryItem } from "../state/library";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
+import { usePreparation } from "../state/preparation";
 import { toast } from "../state/toast";
 import { dateLabel } from "../lib/dates";
 import { openDocument } from "../lib/openDoc";
@@ -103,7 +104,9 @@ export function LibraryPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[13px] text-fg2" role="status" aria-label="Library sync">
           <span>{sync.status === "synced" ? "Shared library · Synced" : sync.status === "syncing" ? "Shared library · Syncing…" : sync.pending ? "Saved on this device · Waiting to sync" : "Server unavailable · Showing saved library"}</span>
-          {sync.status === "offline" && <button type="button" title={sync.error ?? undefined} className="text-accent hover:text-fg" onClick={() => { void syncLibrary().then(() => refresh()); }}>Retry sync</button>}
+          {sync.status === "synced" && <span aria-label="Synced document count">· {sync.documents} {sync.documents === 1 ? "document" : "documents"}</span>}
+          <button type="button" disabled={sync.status === "syncing"} className="text-accent hover:text-fg disabled:opacity-50" onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}>{sync.status === "offline" ? "Retry sync" : "Sync now"}</button>
+          {sync.status === "offline" && sync.error && <span className="basis-full">{sync.error}</span>}
         </div>
         {items.length > 0 && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by voice">
