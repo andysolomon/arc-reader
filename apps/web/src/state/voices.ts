@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
-import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, DEFAULT_ENGINE, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
+import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
 import { studioJson, type Profile } from "../lib/studio";
 import { LOCAL_ENGINE } from "../engine/types";
 
@@ -8,11 +8,16 @@ export interface EngineOption {
   id: string;
   label: string;
   available: boolean;
+  /** Can speak cloned and designed (profile) voices. */
+  cloning: boolean;
 }
 
 interface VoicesState {
   voices: Voice[];
+  /** TTS backends reported by the speech server (installed or not). */
   engines: EngineOption[];
+  /** The server's active engine, which speaks profile voices; null until known. */
+  activeEngine: string | null;
   loaded: boolean;
   fishError: string | null;
   /** Fetch voices/engines from the speech server; keeps the defaults when it is unreachable. */
@@ -27,6 +32,7 @@ const ENGINE_LABELS: Record<string, string> = {
   pockettts: "PocketTTS",
   "moss-tts-nano": "MOSS-TTS-Nano",
   omnivoice: "OmniVoice",
+  "omnivoice-subprocess": "OmniVoice (isolated)",
   voxcpm2: "VoxCPM2",
   cosyvoice: "CosyVoice 3",
   [LOCAL_ENGINE]: "Browser voice",
@@ -38,12 +44,6 @@ const cloud = () => [...(hasOpenAI() ? [...OPENAI_ACCENT_VOICES, ...OPENAI_VOICE
 
 export const engineLabel = (id: string) => ENGINE_LABELS[id] ?? id;
 
-function defaultEngines(): EngineOption[] {
-  const ids = hasApi() ? [DEFAULT_ENGINE, "kittentts", "supertonic3"] : [];
-  const uniq = Array.from(new Set(ids));
-  return [...uniq.map((id) => ({ id, label: engineLabel(id), available: true })), { id: LOCAL_ENGINE, label: engineLabel(LOCAL_ENGINE), available: true }];
-}
-
 function langLabel(l: string | null | undefined): string {
   if (!l) return "EN-US";
   const m = l.match(/^([a-z]{2})(?:[-_]([a-zA-Z]{2}))?/i);
@@ -53,7 +53,8 @@ function langLabel(l: string | null | undefined): string {
 
 export const useVoices = create<VoicesState>()((set, get) => ({
   voices: [...cloud(), ...(hasApi() ? PRESET_VOICES : []), LOCAL_VOICE],
-  engines: defaultEngines(),
+  engines: [],
+  activeEngine: null,
   loaded: false,
   fishError: null,
   async load() {
@@ -86,17 +87,17 @@ export const useVoices = create<VoicesState>()((set, get) => ({
         studioJson<{ tts: { active: string } }>("/engines"),
       ]);
       const profileMap = new Map(metadata.status === "fulfilled" ? metadata.value.map((p) => [p.id, p]) : []);
-      const profileEngine = capabilities.status === "fulfilled" ? capabilities.value.tts.active : "omnivoice";
+      const activeEngine = capabilities.status === "fulfilled" ? capabilities.value.tts.active : null;
+      const profileEngine = activeEngine ?? "omnivoice";
       const available = new Set((engines as ServerEngine[]).filter((e) => e.available !== false).map((e) => e.id));
       const presets = available.size ? PRESET_VOICES.filter((v) => available.has(v.engine)) : PRESET_VOICES;
       const profiles: Voice[] = voices
         .filter((v) => v.type === "profile")
         .map((v) => ({ id: v.id, name: v.name, lang: langLabel(v.language), tags: [profileMap.get(v.id)?.kind === "design" ? "designed" : "cloned"], hue: hueFor(v.id), engine: profileEngine, kind: "profile" as const }));
       const engineOpts: EngineOption[] = (engines as ServerEngine[])
-        .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false }))
-        .concat([{ id: LOCAL_ENGINE, label: engineLabel(LOCAL_ENGINE), available: true }]);
+        .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false, cloning: e.supports_cloning === true }));
       const clouds = get().voices.filter((v) => v.engine === OPENAI_ENGINE || v.engine === FISH_ENGINE);
-      set({ voices: [...clouds, ...profiles, ...presets, LOCAL_VOICE], engines: engineOpts.length > 1 ? engineOpts : get().engines });
+      set({ voices: [...clouds, ...profiles, ...presets, LOCAL_VOICE], engines: engineOpts.length ? engineOpts : get().engines, activeEngine: activeEngine ?? get().activeEngine });
     } catch {
       // Keep available voices if the local speech server is offline.
     }

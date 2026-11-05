@@ -81,21 +81,43 @@ test.describe("VoiceStudio provider (stub server)", () => {
     await expect(page.locator('article [data-i="0"] span.decoration-accent').first()).toBeVisible();
   });
 
-  test("engine chips reflect the server; the browser voice is always offered", async ({ page }) => {
+  test("saved-voice engine chips offer cloning engines and show the server's active one", async ({ page }) => {
     await page.goto("/settings");
-    const group = page.getByRole("group", { name: "TTS engine" });
-    await expect(group.getByRole("button", { name: "KittenTTS" })).toBeEnabled();
-    // Not installed on the server: hidden from the chips, counted in the note
-    await expect(group.getByRole("button", { name: "Supertonic-3" })).toHaveCount(0);
+    const group = page.getByRole("group", { name: "Saved-voice engine" });
+    await expect(group.getByRole("button", { name: "OmniVoice", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(group.getByRole("button", { name: "OmniVoice (isolated)" })).toHaveAttribute("aria-pressed", "false");
+    // Preset-only engines can't speak saved voices, so they are not offered
+    await expect(group.getByRole("button", { name: "KittenTTS" })).toHaveCount(0);
+    // Cloning engines not installed on the server are counted in the note
     await expect(page.getByText(/1 more can be installed/)).toBeVisible();
-    await expect(group.getByRole("button", { name: "Browser voice" })).toBeEnabled();
+    await expect(page.getByRole("switch", { name: "Browser voice only" })).toHaveAttribute("aria-checked", "false");
   });
 
-  test("switching engine changes the cache key, so the server is asked again", async ({ page }) => {
+  test("choosing a saved-voice engine switches the server and follows its answer", async ({ page }) => {
+    let active = "omnivoice";
+    const selected: string[] = [];
+    await page.route(/\/api\/vs\/engines(\/select)?$/, async (route) => {
+      if (route.request().url().endsWith("/select")) {
+        active = JSON.parse(route.request().postData() ?? "{}").backend_id;
+        selected.push(active);
+        return route.fulfill({ json: { family: "tts", active } });
+      }
+      return route.fulfill({ json: { tts: { active, backends: [] } } });
+    });
+    await page.goto("/settings");
+    const group = page.getByRole("group", { name: "Saved-voice engine" });
+    await expect(group.getByRole("button", { name: "OmniVoice", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await group.getByRole("button", { name: "OmniVoice (isolated)" }).click();
+    await expect(group.getByRole("button", { name: "OmniVoice (isolated)" })).toHaveAttribute("aria-pressed", "true");
+    await expect(group.getByRole("button", { name: "OmniVoice", exact: true })).toHaveAttribute("aria-pressed", "false");
+    expect(selected).toEqual(["omnivoice-subprocess"]);
+  });
+
+  test("browser voice only reads without the server", async ({ page }) => {
     await composeAndListen(page);
     await page.keyboard.press("Space");
     await page.goto("/settings");
-    await page.getByRole("group", { name: "TTS engine" }).getByRole("button", { name: "Browser voice" }).click();
+    await page.getByRole("switch", { name: "Browser voice only" }).click();
     await page.goto("/");
     await page.getByLabel("Text to read").fill(TEXT);
     let calls = 0;

@@ -56,6 +56,18 @@ describe("voice providers", () => {
     expect(voices.map((v) => v.id)).toEqual(expect.arrayContaining(["fish:narrator", "profile", "nova", "local"]));
     expect(getVoice("fish:narrator")).toMatchObject({ name: "Narrator", engine: "fish", kind: "preset" });
   });
+  it("records the server's active engine and which engines can clone", async () => {
+    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [], engines: [
+      { id: "omnivoice", available: true, supports_cloning: true },
+      { id: "kittentts", available: true, supports_cloning: false },
+      { id: "cosyvoice", available: false, supports_cloning: true },
+    ] });
+    expect(useVoices.getState().activeEngine).toBeNull();
+    await useVoices.getState().loadServer();
+    const { activeEngine, engines } = useVoices.getState();
+    expect(activeEngine).toBe("omnivoice");
+    expect(engines.map((e) => [e.id, e.available, e.cloning])).toEqual([["omnivoice", true, true], ["kittentts", true, false], ["cosyvoice", false, true]]);
+  });
   it("keeps existing voices and surfaces an error when Fish fails", async () => {
     vi.mocked(fetchFishVoices).mockRejectedValue(new Error("Invalid key"));
     vi.mocked(fetchServerVoices).mockResolvedValue(local);
