@@ -6,6 +6,7 @@ import { getVoice } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
 import { usePlayer, engine } from "../state/player";
+import { unavailableMessage } from "../engine/engine";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { useBreakpoint } from "../hooks/useMedia";
@@ -26,7 +27,13 @@ export function PlayerHost() {
     const d = p.doc;
     if (!d) return;
     toast("Preparing audio…");
-    const blobs = await engine.collectAudio();
+    let blobs: (Blob | null)[];
+    try {
+      blobs = await engine.collectAudio();
+    } catch (e) {
+      toast(`Download failed: ${unavailableMessage(e)}`);
+      return;
+    }
     if (blobs.some((b) => !b)) {
       toast("Download needs a cloud voice — the local voice has no audio file");
       return;

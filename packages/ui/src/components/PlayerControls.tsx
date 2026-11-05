@@ -58,9 +58,13 @@ export function PlayButton({ playing, loading, onToggle, size = 48 }: { playing:
       }}
       aria-busy={loading || undefined}
       data-playing={playing}
+      data-loading={loading || undefined}
     >
       <PlayPauseIcon playing={playing} size={Math.round(size / 2)} />
-      {playing ? (
+      {loading ? (
+        // Generating this sentence: a spinning arc inside the button, no pulse.
+        <span aria-hidden className="pointer-events-none absolute inset-[3px] rounded-full border-2 border-transparent border-t-accent-fg animate-spin motion-reduce:animate-pulse" />
+      ) : playing ? (
         <span aria-hidden className="pointer-events-none absolute inset-0 rounded-full border-[1.5px] border-accent animate-ping motion-reduce:hidden" />
       ) : null}
     </IconButton>

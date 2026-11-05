@@ -27,6 +27,8 @@ export interface PlayerState extends EngineSnapshot {
   voiceId: string;
   preparing: string | null;
   preparationError: string | null;
+  /** The chosen voice could not be generated; playback is stopped until the user retries or switches voice. */
+  speechError: string | null;
   /** "Prepare audio" in progress: sentences rendered into the cache so far */
   prerendering: { done: number; total: number } | null;
 }
@@ -36,6 +38,11 @@ interface Actions {
   open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean }) => Promise<boolean>;
   cancelPreparation: () => void;
   retryPreparation: () => Promise<boolean>;
+  /** Try the speech server again for the current sentence. */
+  retrySpeech: () => void;
+  /** Read with the browser voice until the server is back (same as going offline). */
+  useBrowserVoice: () => void;
+  dismissSpeechError: () => void;
   /** Render the whole document ahead of playback (for engines slower than real time). */
   prerender: () => Promise<void>;
   cancelPrerender: () => void;
@@ -81,6 +88,7 @@ export const engine = new PlaybackEngine({
     void positions.put({ docId: snap.docId, variant: variant(doc.voice), index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() });
   },
   onError: (m) => toast(m),
+  onUnavailable: (m) => usePlayer.setState({ speechError: m }),
   onSlow: (factor) => {
     const name = getVoice(usePlayer.getState().voiceId).name;
     toast(`${name} takes ~${factor}× longer to generate than to play on this server, so reading pauses between sentences. Choose “Prepare audio” in the player menu, or a faster voice.`, 8000);
@@ -104,6 +112,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
     voiceId: useSettings.getState().voice,
     preparing: null,
     preparationError: null,
+    speechError: null,
     prerendering: null,
 
     async open(rec, opts = {}) {
@@ -113,7 +122,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       opening = controller;
       const { signal } = controller;
       retryPreparation = () => get().open(rec, opts);
-      set({ preparationError: null });
+      set({ preparationError: null, speechError: null });
       try {
       const voiceId = rec.voice ?? useSettings.getState().voice;
       const voice = getVoice(voiceId);
@@ -165,6 +174,15 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       set({ preparing: null, preparationError: null });
     },
     retryPreparation: async () => retryPreparation ? retryPreparation() : false,
+    retrySpeech() {
+      set({ speechError: null });
+      void engine.play();
+    },
+    useBrowserVoice() {
+      set({ speechError: null, offline: true });
+      void engine.play();
+    },
+    dismissSpeechError: () => set({ speechError: null }),
     async prerender() {
       const { doc } = get();
       if (prerendering || !doc) return;
@@ -191,7 +209,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       get().cancelPreparation();
       get().cancelPrerender();
       engine.unload();
-      set({ doc: null, record: null, focus: false, menuOpen: false });
+      set({ doc: null, record: null, focus: false, menuOpen: false, speechError: null });
     },
     toggle: () => { if (!get().preparing) engine.toggle(); },
     play: () => { if (!get().preparing) void engine.play(); },
@@ -214,6 +232,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       const v = getVoice(voiceId ?? useSettings.getState().voice);
       const wasPlaying = get().playing;
       get().cancelPreparation();
+      set({ speechError: null });
       get().cancelPrerender();
       if (record) {
         const next = { ...record, voice: voiceId, updatedAt: Date.now() };
