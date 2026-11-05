@@ -12,6 +12,7 @@ import type { LibraryItem } from "../state/library";
 
 export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryItem; defaultVoice: string; onPrepare: () => void }) {
   const jobs = usePreparation((s) => s.jobs);
+  const openaiModel = useSettings((s) => s.openaiModel);
   useVoices((s) => s.voices);
   const voiceId = it.rec.voice ?? defaultVoice;
   const prepared = [...it.prepared];
@@ -27,12 +28,18 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
       {prepared.length > 0 && <span className="text-[11px] text-fg2">Prepared</span>}
       {prepared.length === 0 && <span className="text-[12px] text-fg2">Browser voice · live audio</span>}
       {prepared.map((voice) => {
-        const job = jobs.find((j) => j.docId === it.rec.id && j.voice.id === voice.voiceId && isPreparing(j));
-        const percent = Math.floor(voice.fraction * 100);
+        const job = jobs.find((j) => j.docId === it.rec.id && j.voice.id === voice.voiceId && j.voice.engine === voice.engine && (voice.engine !== "openai" || j.openaiModel === openaiModel) && isPreparing(j));
+        // Server generation precedes downloading into the browser's audio cache.
+        // While a job is active, its confirmed passage count is the live progress.
+        const fraction = job && job.total > 0 ? Math.max(0, Math.min(1, job.done / job.total)) : voice.fraction;
+        const percent = Math.floor(fraction * 100);
+        const stage = job && (job.message ?? (job.status === "queued" ? "Queued" : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing"));
+        const progress = job && job.total > 0 ? `${percent}% generated · ${job.done}/${job.total} passages` : `${percent}% prepared`;
+        const label = `${voice.name}: ${progress}${stage ? ` · ${stage}` : ""}`;
         return (
-          <button key={voice.voiceId} type="button" onClick={onPrepare} className="inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[12px] text-fg2 hover:text-fg" title={`${voice.name}: ${percent}% prepared${job ? ` · ${job.status}` : ""}`}>
-            <ProgressRing value={voice.fraction} size={24} stroke={2} label={`${voice.name}: ${percent}% prepared`} />
-            <span>{voice.name} <span className="tabular-nums">· {percent}%</span>{job && <span className="text-accent"> · {job.status === "queued" ? "Queued" : job.status === "saving" ? "Saving" : job.worker ? `Preparing on ${job.worker}` : "Preparing"}</span>}</span>
+          <button key={voice.voiceId} type="button" onClick={onPrepare} className="inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[12px] text-fg2 hover:text-fg" title={label}>
+            <ProgressRing value={fraction} size={24} stroke={2} label={label} />
+            <span>{voice.name} <span className="tabular-nums">· {progress}</span>{stage && <span className="text-accent"> · {stage}</span>}</span>
             <VoiceSourceBadge source={voiceSource(voice)} />
           </button>
         );

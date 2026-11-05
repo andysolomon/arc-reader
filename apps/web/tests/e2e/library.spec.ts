@@ -102,6 +102,53 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
 
+test("shows live server progress before audio is downloaded, then distinguishes saving from prepared audio", async ({ page }) => {
+  await seedLibrary(page, [null]);
+  const status = { id: "", state: "running", done: 0, total: 2, queued: true, worker: undefined as string | undefined };
+  let submissions = 0;
+  await page.route("**/api/preparations", async (route) => {
+    submissions++;
+    const response = await route.fetch();
+    status.id = (await response.json()).id;
+    await route.fulfill({ response, json: status });
+  });
+  await page.route("**/api/preparations/*", (route) => route.fulfill({ json: status }));
+  let downloads = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/preparations/*/audio/*", async (route) => {
+    downloads++;
+    await gate;
+    await route.continue();
+  });
+  try {
+    await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+    await page.getByRole("button", { name: "Prepare selected" }).click();
+    await page.getByRole("dialog", { name: "Prepare audio", exact: true }).getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
+    await expect(page.getByRole("img", { name: "Bella: 0% generated · 0/2 passages · Queued", exact: true })).toBeVisible();
+
+    Object.assign(status, { done: 1, queued: false, worker: "Mac" });
+    const live = page.getByRole("img", { name: "Bella: 50% generated · 1/2 passages · Preparing on Mac", exact: true });
+    await expect(live).toBeVisible();
+    const halfRing = await live.locator("circle").nth(1).getAttribute("stroke-dasharray");
+    expect(Number(halfRing!.split(" ")[0]) / Number(halfRing!.split(" ")[1])).toBeCloseTo(0.5);
+    expect(downloads).toBe(0);
+    await page.getByRole("button", { name: "Cards", exact: true }).click();
+    await expect(live).toBeVisible();
+    await page.reload();
+    await expect(live).toBeVisible();
+    expect(submissions).toBe(1);
+
+    Object.assign(status, { done: 2, state: "done" });
+    await expect(page.getByRole("img", { name: "Bella: 100% generated · 2/2 passages · Saving audio on this device", exact: true })).toBeVisible();
+    await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toHaveCount(0);
+    release();
+    await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
+  } finally { release(); }
+});
+
 test("shows one reading per machine, waiting readings, and restores their assignments after reload", async ({ page }) => {
   await seedLibrary(page);
   const jobs: { id: string; state: string; done: number; total: number; queued: boolean; worker?: string }[] = [];

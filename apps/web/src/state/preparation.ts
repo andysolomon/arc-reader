@@ -123,8 +123,8 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     if (API_BASE === "/api/vs" && !isPaidEngine(job.voice.engine)) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
-      })), 0, (done, _total, status) => {
-        if (!signal.aborted) update(job.id, { done, status: status?.queued ? "queued" : "preparing", worker: status?.worker });
+      })), 0, (done, total, status) => {
+        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker });
       }, signal);
       signal.throwIfAborted();
       update(job.id, { status: "saving", worker: undefined });
