@@ -5,6 +5,7 @@ import type { HighlightMode } from "@readaloud/ui";
 import { LOCAL_ENGINE, type EngineId } from "../engine/types";
 import { DEFAULT_ENGINE, OPENAI_MODEL, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL } from "../engine/providers";
 import { DEFAULT_VOICE_ID } from "../data/voices";
+import { DEFAULT_SUMMARY_MODEL, isSummaryModel, type SummaryModel } from "../lib/summary";
 
 export type PlayerStyle = "capsule" | "bar";
 export type ComposeLayout = "centered" | "editorial";
@@ -24,6 +25,10 @@ export interface Settings {
   wordTimings: boolean;
   /** OpenAI reading model: the steady model, or the cheaper standard one */
   openaiModel: string;
+  /** LLM that writes article summaries */
+  summaryModel: SummaryModel;
+  /** Show the summary panel above the text in the Reader */
+  showSummary: boolean;
   fontSize: number;
   wide: boolean;
   railOpen: boolean;
@@ -59,6 +64,8 @@ export const useSettings = create<Settings & Actions>()(
       engine: DEFAULT_ENGINE,
       wordTimings: false,
       openaiModel: OPENAI_MODEL,
+      summaryModel: DEFAULT_SUMMARY_MODEL,
+      showSummary: false,
       fontSize: 19,
       wide: false,
       railOpen: typeof window === "undefined" ? true : window.innerWidth > 1024,
@@ -87,7 +94,8 @@ export const useSettings = create<Settings & Actions>()(
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<Settings>;
         const openaiModel = p.openaiModel === OPENAI_STEADY_MODEL || p.openaiModel === OPENAI_STANDARD_MODEL ? p.openaiModel : current.openaiModel;
-        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null, openaiModel };
+        const summaryModel = isSummaryModel(p.summaryModel) ? p.summaryModel : current.summaryModel;
+        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null, openaiModel, summaryModel };
       },
     },
   ),

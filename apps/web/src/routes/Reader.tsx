@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ChevronLeft, Maximize2, Minimize2 } from "lucide-react";
+import { ChevronLeft, Maximize2, Minimize2, Sparkles } from "lucide-react";
 import { IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
@@ -12,6 +12,10 @@ import { toast } from "../state/toast";
 import { useBreakpoint } from "../hooks/useMedia";
 import { useCycleTheme } from "../components/Rail";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
+import { hasSummary } from "../lib/summary";
+import { useLlm } from "../state/llm";
+import { useSummaries } from "../state/summaries";
+import { ArticleSummary } from "../components/ArticleSummary";
 
 export function Reader() {
   const { id } = useParams();
@@ -25,7 +29,8 @@ export function Reader() {
   const setFocus = usePlayer((s) => s.setFocus);
   const seek = usePlayer((s) => s.seek);
   const setShortcuts = usePlayer((s) => s.setShortcutsOpen);
-  const { fontSize, wide, highlightStyle, set } = useSettings();
+  const record = usePlayer((s) => s.record);
+  const { fontSize, wide, highlightStyle, showSummary, set } = useSettings();
   const theme = getTheme(useThemeId());
   const cycleTheme = useCycleTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -56,6 +61,14 @@ export function Reader() {
 
   const ready = doc && doc.id === id;
   const title = ready ? doc.title : "";
+  const llmReady = useLlm((s) => !!s.config?.configured);
+  useEffect(() => { void useLlm.getState().load(); }, []);
+  // Saved summaries stay readable even without a key on this server.
+  const summaryRecord = ready && record?.id === id && (llmReady || hasSummary(record)) ? record : null;
+  const toggleSummary = () => {
+    if (!showSummary && summaryRecord && !hasSummary(summaryRecord)) void useSummaries.getState().request(summaryRecord);
+    set("showSummary", !showSummary);
+  };
 
   const textControls = (
     <>
@@ -90,6 +103,11 @@ export function Reader() {
           <h1 className="min-w-0 flex-1 truncate px-1.5 text-[13px] font-normal text-fg2" title={title}>
             {title}
           </h1>
+          {summaryRecord && (
+            <IconButton label={showSummary ? "Hide summary" : "Summarize"} active={showSummary} onClick={toggleSummary}>
+              <Sparkles size={20} strokeWidth={1.5} />
+            </IconButton>
+          )}
           {bp === "sm" ? (
             <IconButton label="Text settings" onClick={() => setSheet(true)} className="font-serif text-[15px]">
               Aa
@@ -115,6 +133,7 @@ export function Reader() {
         )}
         <motion.div layoutId="doc-surface" className="mx-auto" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
           {ready && doc.voice === JAMAICAN_PATOIS_VOICE_ID && <p className="mb-6 text-sm text-fg2">Jamaican Patois adaptation · Your original is saved. Choose another voice to read the original.</p>}
+          {summaryRecord && showSummary && <ArticleSummary record={summaryRecord} />}
           {ready ? (
             <SentenceText
               paragraphs={doc.paragraphs}
