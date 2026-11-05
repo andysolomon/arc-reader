@@ -3,7 +3,7 @@ import { hash } from "../lib/hash";
 import { estimateDuration, splitWords } from "../lib/segment";
 import { addUsage } from "../lib/usage";
 import { measureDuration } from "./audio";
-import { ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
+import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
@@ -40,6 +40,7 @@ async function doFetch(url: string, init: RequestInit): Promise<Response> {
   // 404 on the route itself, gateway errors, and proxy failures all mean "no server"
   if (r.status === 404 || r.status === 408 || r.status >= 500) throw new ApiUnreachable(`HTTP ${r.status}`);
   if (r.status === 401 || r.status === 403) throw new ApiRejected(r.status, "The speech server rejected the API key");
+  if (r.status === 429) throw new ApiBusy(Number(r.headers.get("retry-after")) || 0);
   if (!r.ok) {
     let detail = "";
     try {
@@ -106,7 +107,38 @@ export async function readaloudSynthesize(req: TtsRequest): Promise<Chunk> {
   return { source: "api", audio: blob, mime: blob.type || "audio/mpeg", duration: dur > 0 ? dur : await measureDuration(blob, est), words };
 }
 
-export const apiSynthesize = (req: TtsRequest & { profile?: boolean }) => (API_KIND === "readaloud" ? readaloudSynthesize(req) : openaiSpeechSynthesize(req));
+const rawSynthesize = (req: TtsRequest & { profile?: boolean }) => (API_KIND === "readaloud" ? readaloudSynthesize(req) : openaiSpeechSynthesize(req));
+
+/**
+ * VoiceStudio runs one CPU worker and queues at most one more request; a third
+ * concurrent request is refused with 429. The engine prefetches two sentences
+ * ahead, so speech requests are serialized here (one in flight) and a 429 from
+ * another client is retried with backoff instead of falling back to the local voice.
+ */
+let chain: Promise<unknown> = Promise.resolve();
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((res, rej) => {
+    const t = setTimeout(res, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(t); rej(new DOMException("Aborted", "AbortError")); }, { once: true });
+  });
+
+export const BUSY_RETRIES = 4;
+
+export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<Chunk> {
+  const run = async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await rawSynthesize(req);
+      } catch (e) {
+        if (!(e instanceof ApiBusy) || attempt >= BUSY_RETRIES) throw e;
+        await sleep(e.retryAfterMs || 400 * 2 ** attempt, req.signal);
+      }
+    }
+  };
+  const p = chain.then(run, run);
+  chain = p.catch(() => undefined);
+  return p;
+}
 
 /** Cache key: engine + voice + text. Switching engines never replays another engine's audio. */
 export function cacheKey(req: Pick<TtsRequest, "text" | "voice" | "engine">): string {
@@ -175,6 +207,7 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
     if ((e as Error).name === "AbortError") throw e;
     if (e instanceof ApiUnreachable) opts.onOffline?.();
     else if (e instanceof ApiRejected) opts.onRejected?.(e.message);
+    else if (e instanceof ApiBusy) opts.onRejected?.("The speech server is busy; this sentence uses the browser voice");
     return localChunk(opts.text);
   }
 }

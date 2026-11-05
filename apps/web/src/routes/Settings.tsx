@@ -38,7 +38,9 @@ export function SettingsPage() {
   const theme = useThemeId();
   const voice = getVoice(s.voice);
   const hasDoc = usePlayer((st) => !!st.doc);
-  const engines = useVoices((v) => v.engines);
+  const allEngines = useVoices((v) => v.engines);
+  const engines = allEngines.filter((e) => e.available || e.id === s.engine);
+  const notInstalled = allEngines.length - engines.length;
   const [copied, setCopied] = useState(false);
   const [usage, setUsage] = useState(getUsage());
   useEffect(() => {
@@ -123,7 +125,7 @@ export function SettingsPage() {
           </div>
           <div className="text-[13px] text-fg2">
             {hasApi()
-              ? "Engines come from the speech server. Preset voices name their own engine; cloned voices use this one."
+              ? `Installed engines reported by the speech server${notInstalled > 0 ? `; ${notInstalled} more can be installed from VoiceStudio's Model Catalogue` : ""}. Preset voices name their own engine; cloned voices use this one.`
               : "No speech server configured, so only the browser voice is available. Set VITE_API_BASE to use VoiceStudio."}
           </div>
         </Section>

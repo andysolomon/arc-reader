@@ -78,7 +78,9 @@ test.describe("VoiceStudio provider (stub server)", () => {
     await page.goto("/settings");
     const group = page.getByRole("group", { name: "TTS engine" });
     await expect(group.getByRole("button", { name: "KittenTTS" })).toBeEnabled();
-    await expect(group.getByRole("button", { name: "Supertonic-3" })).toBeDisabled();
+    // Not installed on the server: hidden from the chips, counted in the note
+    await expect(group.getByRole("button", { name: "Supertonic-3" })).toHaveCount(0);
+    await expect(page.getByText(/1 more can be installed/)).toBeVisible();
     await expect(group.getByRole("button", { name: "Browser voice" })).toBeEnabled();
   });
 

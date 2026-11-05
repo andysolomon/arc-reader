@@ -103,7 +103,7 @@
 <div class="plan" id="plan">
   <h1>ReadAloud × VoiceStudio</h1>
   <p class="sub">Integration plan: replace the browser speech engine with local, high-quality voices served by VoiceStudio.</p>
-  <div class="meta"><span>Drafted <b>4 Nov 2026</b></span><span>Target <b>9 working days</b></span><span>Host <b>Intel i7 laptop · 12 threads · 15 GB · no NVIDIA driver</b></span><span>Status <b>phases 1–5 built · phase 0 waits on Docker access</b></span></div>
+  <div class="meta"><span>Drafted <b>4 Nov 2026</b></span><span>Target <b>9 working days</b></span><span>Host <b>Intel i7 laptop · 12 threads · 15 GB · no NVIDIA driver</b></span><span>Status <b>all phases built · VoiceStudio running with KittenTTS · first byte 0.9–2.3 s by sentence length</b></span></div>
 
   <nav role="tablist" aria-label="Plan sections">
     <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
@@ -387,7 +387,7 @@
 
   // ---- risks
   const risks = [
-    ["First chunk slower than the 1 s target on CPU", "serious", "Measure in P0. KittenTTS is the lightest engine; keep two sentences prefetched; show the skeleton, never a spinner. If it misses, a shorter first sentence can be sent first."],
+    ["First chunk slower than the 1 s target on CPU", "serious", "Measured: 0.9 s for 3 words, 2.3 s for 22 words (KittenTTS, warm). KittenTTS is the lightest engine; keep two sentences prefetched; show the skeleton, never a spinner. If it misses, a shorter first sentence can be sent first."],
     ["VoiceStudio rejects browser requests (origin, host, bearer)", "warning", "Proxy is the only caller, from loopback, with the key injected server-side. Add the proxy origin to OMNIVOICE_ALLOWED_ORIGINS anyway."],
     ["No word timings from the speech endpoint", "warning", "Sentence highlight is exact; word underline stays estimated. P4 derives timings from transcription behind a flag."],
     ["API churn: the project pushed today and ships weekly", "warning", "Pin the Docker image tag. Adapter speaks only the OpenAI-shaped subset, which the project treats as a compatibility contract."],

@@ -58,12 +58,25 @@ echo "$OMNIVOICE_API_KEY"
 
 Open http://127.0.0.1:3900, pick **KittenTTS** in the Model Manager (about 80 MB, runs on any CPU), and let it download. Pin the image to a `:sha-…` tag once it works; the project ships often.
 
-Measure the first byte before judging quality:
+Measured on this laptop (Intel i7, 12 threads, CPU only, KittenTTS warm; the first request after a cold start also downloads the 80 MB model and took about 19 s):
+
+| Sentence | Words | First byte | MP3 size |
+|---|---|---|---|
+| "Simplicity, simplicity, simplicity!" | 3 | 0.87 s | 60 KB |
+| "I went to the woods because I wished to live deliberately." | 11 | 1.2 s | 240 KB (WAV) |
+| "The quick brown fox … begin to call." | 22 | 2.3 s | 156 KB |
+
+Generation runs at roughly 3–4× real time, so the two-sentence prefetch keeps up once playback starts. MP3 is the cheapest format; WAV and PCM save nothing on latency. Cloned profiles play in the active engine's default voice unless a cloning engine (OmniVoice, VoxCPM2, CosyVoice, PocketTTS, MOSS) is selected; KittenTTS cannot clone. Re-measure with `apps/web/scripts/measure-tts.sh`:
 
 ```sh
-curl -s -o /dev/null -w "%{time_starttransfer}s\n" -H "Authorization: Bearer $OMNIVOICE_API_KEY" \
-  -H "Content-Type: application/json" -d '{"model":"kittentts","input":"The quick brown fox jumps over the lazy dog near the quiet river bank at dusk.","voice":"expr-voice-2-f","response_format":"mp3"}' \
-  http://127.0.0.1:3900/v1/audio/speech
+apps/web/scripts/measure-tts.sh            # three runs, first-byte and total time
+```
+
+Select the engine without the UI if you prefer:
+
+```sh
+curl -X POST -H "Authorization: Bearer $OMNIVOICE_API_KEY" -H "Content-Type: application/json" \
+  -d '{"family":"tts","backend_id":"kittentts"}' http://127.0.0.1:3900/engines/select
 ```
 
 ### 2. Point ReadAloud at it
@@ -82,7 +95,7 @@ Then `npm run dev` (or `pnpm build && pnpm --filter @readaloud/web preview` for 
 
 ### Without VoiceStudio
 
-`tests/stub-voicestudio.mjs` imitates the API (bearer check, two cloned profiles, sine-tone audio, word timings). Playwright starts it automatically. To develop against it:
+`LIVE=1 pnpm test:e2e` runs the `@live` specs against a real server (URL and key from `.env.local`) and prints the measured first-sentence latency. Without the flag, `tests/stub-voicestudio.mjs` imitates the API (bearer check, two cloned profiles, sine-tone audio, word timings). Playwright starts it automatically. To develop against it:
 
 ```sh
 node apps/web/tests/stub-voicestudio.mjs 3999 test-key &

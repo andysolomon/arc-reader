@@ -73,3 +73,33 @@ describe("alignWords", () => {
     expect(alignWords([{ word: "something", start: 0, end: 1 }], ["entirely", "different"])).toBeNull();
   });
 });
+
+describe("apiSynthesize queue", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("runs speech requests one at a time", async () => {
+    const { apiSynthesize } = await import("./providers");
+    let inFlight = 0, maxInFlight = 0;
+    fetchMock.mockImplementation(async () => {
+      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 });
+    });
+    await Promise.all([1, 2, 3].map((i) => apiSynthesize({ text: `s${i}`, voice: "v", engine: "kittentts" })));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(maxInFlight).toBe(1);
+  });
+
+  it("retries a 429 with backoff instead of failing", async () => {
+    const { apiSynthesize } = await import("./providers");
+    fetchMock
+      .mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "0" } }))
+      .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    const c = await apiSynthesize({ text: "x", voice: "v", engine: "kittentts" });
+    expect(c.source).toBe("api");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

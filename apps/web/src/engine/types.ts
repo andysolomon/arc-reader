@@ -33,6 +33,16 @@ export class ApiUnreachable extends Error {
   }
 }
 
+/** 429: the server's worker pool is saturated. Retried by the adapter. */
+export class ApiBusy extends Error {
+  retryAfterMs: number;
+  constructor(retryAfterSeconds = 0) {
+    super("Speech server busy");
+    this.name = "ApiBusy";
+    this.retryAfterMs = retryAfterSeconds * 1000;
+  }
+}
+
 export class ApiRejected extends Error {
   constructor(public status: number, msg: string) {
     super(msg);
