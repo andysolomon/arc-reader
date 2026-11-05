@@ -21,18 +21,22 @@ test.describe("OpenAI voices (stub server)", () => {
     expect(auth).toEqual([]);
   });
 
-  test("OpenAI requests are not serialized behind the local server", async ({ page }) => {
+  test("OpenAI generates only one passage ahead and offers no Prepare audio", async ({ page }) => {
     await page.goto("/voices");
     await page.locator('[data-voice="sage"]').getByRole("button", { name: "Use" }).click();
     await page.goto("/");
-    // Three paragraphs → three passages: the current one, then two prefetches
+    // Three paragraphs → three passages: the current one, then a single prefetch
     await page.getByLabel("Text to read").fill(`${TEXT}\n\nA third paragraph makes a third passage.`);
-    const starts: number[] = [];
-    page.on("request", (q) => { if (q.url().includes("/api/oa/v1/audio/speech")) starts.push(Date.now()); });
+    let requests = 0;
+    page.on("request", (q) => { if (q.url().includes("/api/oa/v1/audio/speech")) requests++; });
     await page.getByTestId("listen").click();
-    await expect.poll(() => starts.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
-    // The two prefetches are issued together (within 300 ms), not one after another
-    expect(starts[2] - starts[1]).toBeLessThan(300);
+    await expect(page.getByRole("button", { name: /^(Play|Pause)/ })).toHaveAttribute("data-playing", "true");
+    await expect.poll(() => requests, { timeout: 10_000 }).toBe(2);
+    await page.waitForTimeout(1000);
+    expect(requests).toBe(2);
+    await page.getByRole("button", { name: "More" }).first().click();
+    await expect(page.getByRole("menuitem", { name: "Change voice for this document" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Prepare audio" })).toHaveCount(0);
   });
 
   test("usage counts OpenAI characters separately", async ({ page }) => {

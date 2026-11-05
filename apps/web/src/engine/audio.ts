@@ -138,20 +138,101 @@ export function analyzePcm(samples: Float32Array, sampleRate: number, partWords:
   return { duration, starts, lead, tail, loudness: Number.isFinite(loudness) ? loudness : undefined };
 }
 
+function mono(buf: AudioBuffer): Float32Array {
+  if (buf.numberOfChannels === 1) return buf.getChannelData(0);
+  const out = new Float32Array(buf.length);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const data = buf.getChannelData(c);
+    for (let i = 0; i < out.length; i++) out[i] += data[i] / buf.numberOfChannels;
+  }
+  return out;
+}
+
 /** Decode a clip and locate its sentences; falls back to word-share estimates when decoding is unavailable. */
 export async function analyzeClip(blob: Blob, fallbackDuration: number, partWords: number[]): Promise<ClipAnalysis> {
   const buf = await decode(blob);
   if (!buf || !(buf.duration > 0) || !buf.length) {
     return { duration: fallbackDuration, starts: proportionalStarts(fallbackDuration, partWords), lead: 0, tail: 0 };
   }
-  let mono: Float32Array;
-  if (buf.numberOfChannels === 1) mono = buf.getChannelData(0);
-  else {
-    mono = new Float32Array(buf.length);
-    for (let c = 0; c < buf.numberOfChannels; c++) {
-      const data = buf.getChannelData(c);
-      for (let i = 0; i < mono.length; i++) mono[i] += data[i] / buf.numberOfChannels;
-    }
+  return analyzePcm(mono(buf), buf.sampleRate, partWords);
+}
+
+/** Silence kept before a joined sentence's first voiced frame, and after its last (as between passages). */
+const JOIN_LEAD = 0.05;
+const JOIN_TAIL = 0.25;
+
+export interface JoinedPcm {
+  samples: Float32Array;
+  /** Where each clip starts in the joined audio, in seconds; `starts[0]` is 0. */
+  starts: number[];
+  /** Seconds cut from the front of each clip. */
+  trims: number[];
+}
+
+/**
+ * Join sentence clips into one passage. Each clip carries its own edge silence, so
+ * the pause between two sentences is cut back to a natural length, and every
+ * sentence after the first starts a hair before its first word.
+ */
+export function joinPcm(clips: Float32Array[], sampleRate: number): JoinedPcm {
+  const spans = clips.map((samples, k) => {
+    const a = analyzePcm(samples, sampleRate, [1]);
+    const from = k > 0 ? Math.max(0, a.lead - JOIN_LEAD) : 0;
+    const to = k < clips.length - 1 ? Math.min(a.duration, a.duration - a.tail + JOIN_TAIL) : a.duration;
+    return { samples, from: Math.round(from * sampleRate), to: Math.max(Math.round(from * sampleRate), Math.round(to * sampleRate)) };
+  });
+  const out = new Float32Array(spans.reduce((n, s) => n + s.to - s.from, 0));
+  const starts: number[] = [];
+  const trims: number[] = [];
+  let at = 0;
+  for (const s of spans) {
+    starts.push(at / sampleRate);
+    trims.push(s.from / sampleRate);
+    out.set(s.samples.subarray(s.from, s.to), at);
+    at += s.to - s.from;
   }
-  return analyzePcm(mono, buf.sampleRate, partWords);
+  return { samples: out, starts, trims };
+}
+
+/** 16-bit PCM WAV: decodes everywhere and seeks exactly, unlike concatenated MP3 files. */
+export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
+  const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const text = (at: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i)); };
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  text(8, "WAVE");
+  text(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const v = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+  }
+  return new Blob([view.buffer], { type: "audio/wav" });
+}
+
+export interface JoinedClip extends Omit<ClipAnalysis, "starts">, Pick<JoinedPcm, "starts" | "trims"> {
+  audio: Blob;
+}
+
+/** Decode sentence clips and join them into one passage clip; null when any clip cannot be decoded. */
+export async function joinClips(blobs: Blob[]): Promise<JoinedClip | null> {
+  const bufs: AudioBuffer[] = [];
+  for (const blob of blobs) {
+    const buf = await decode(blob);
+    if (!buf || !buf.length) return null;
+    bufs.push(buf);
+  }
+  const rate = bufs[0].sampleRate;
+  if (bufs.some((b) => b.sampleRate !== rate)) return null;
+  const joined = joinPcm(bufs.map(mono), rate);
+  const a = analyzePcm(joined.samples, rate, [1]);
+  return { audio: encodeWav(joined.samples, rate), duration: a.duration, starts: joined.starts, trims: joined.trims, lead: a.lead, tail: a.tail, loudness: a.loudness };
 }

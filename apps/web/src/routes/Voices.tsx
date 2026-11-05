@@ -89,6 +89,7 @@ export function VoicesPage() {
       text,
       voice: v.id,
       engine: v.engine,
+      openaiModel: useSettings.getState().openaiModel,
       profile: v.kind === "profile",
       signal: ac.signal,
       forceLocal: isLocalVoice(v.id) || (v.kind === "profile" && engineId === LOCAL_ENGINE),

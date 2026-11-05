@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import { type ThemeId, isThemeId, systemTheme } from "@readaloud/tokens";
 import type { HighlightMode } from "@readaloud/ui";
 import { LOCAL_ENGINE, type EngineId } from "../engine/types";
-import { DEFAULT_ENGINE } from "../engine/providers";
+import { DEFAULT_ENGINE, OPENAI_MODEL, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL } from "../engine/providers";
 import { DEFAULT_VOICE_ID } from "../data/voices";
 
 export type PlayerStyle = "capsule" | "bar";
@@ -22,6 +22,8 @@ export interface Settings {
   engine: EngineId;
   /** Phase 4: derive word timings from the server's transcription endpoint (extra request per passage) */
   wordTimings: boolean;
+  /** OpenAI reading model: the steady model, or the cheaper standard one */
+  openaiModel: string;
   fontSize: number;
   wide: boolean;
   railOpen: boolean;
@@ -56,6 +58,7 @@ export const useSettings = create<Settings & Actions>()(
       autoplayShare: true,
       engine: DEFAULT_ENGINE,
       wordTimings: false,
+      openaiModel: OPENAI_MODEL,
       fontSize: 19,
       wide: false,
       railOpen: typeof window === "undefined" ? true : window.innerWidth > 1024,
@@ -83,7 +86,8 @@ export const useSettings = create<Settings & Actions>()(
       },
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<Settings>;
-        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null };
+        const openaiModel = p.openaiModel === OPENAI_STEADY_MODEL || p.openaiModel === OPENAI_STANDARD_MODEL ? p.openaiModel : current.openaiModel;
+        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null, openaiModel };
       },
     },
   ),

@@ -2,7 +2,7 @@ import { audioCache } from "../lib/db";
 import { hash } from "../lib/hash";
 import { estimateDuration, splitWords } from "../lib/segment";
 import { addUsage, isTokenSpeechModel } from "../lib/usage";
-import { analyzeClip, measureDuration, proportionalStarts } from "./audio";
+import { analyzeClip, joinClips, measureDuration, proportionalStarts } from "./audio";
 import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
@@ -21,6 +21,15 @@ export const hasApi = () => API_BASE.length > 0;
 export const hasOpenAI = () => OPENAI_BASE.length > 0;
 export const hasFish = () => FISH_BASE.length > 0;
 export const hasSpeechApi = () => hasApi() || hasOpenAI() || hasFish();
+/** Cloud engines that bill per request; nothing is generated for them ahead of need. */
+export const isPaidEngine = (engine: string) => engine === OPENAI_ENGINE || engine === FISH_ENGINE;
+/** Follows the narration prompt (steady delivery, accent voices). */
+export const OPENAI_STEADY_MODEL = isTokenSpeechModel(OPENAI_MODEL) ? OPENAI_MODEL : "gpt-4o-mini-tts";
+/** Billed by character, about a third less for ordinary reading, but ignores `instructions`. */
+export const OPENAI_STANDARD_MODEL = "tts-1";
+/** The OpenAI model a request goes to: accent voices need `instructions`, so they always use the steady model. */
+export const openaiModelFor = (req: Pick<TtsRequest, "voice" | "openaiModel">) =>
+  OPENAI_ACCENTS[req.voice] ? OPENAI_STEADY_MODEL : req.openaiModel || OPENAI_MODEL;
 /** Which server an engine lives on. */
 export const baseFor = (engine: string) => engine === FISH_ENGINE ? FISH_BASE : engine === OPENAI_ENGINE ? OPENAI_BASE : API_BASE;
 
@@ -82,7 +91,7 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
     if (capabilities.tts.active !== req.engine) throw new ApiRejected(409, "The VoiceStudio engine changed. Refresh Voices before playing this saved voice. Using the browser voice for now.");
   }
   const accent = req.engine === OPENAI_ENGINE ? OPENAI_ACCENTS[req.voice] : undefined;
-  const model = req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
+  const model = req.engine === OPENAI_ENGINE ? openaiModelFor(req) : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
   const steerable = req.engine === OPENAI_ENGINE && isTokenSpeechModel(model);
   const streamUsage = steerable;
   // Only gpt-4o-mini-tts follows `instructions`; an accent voice adds its own on top of the steady delivery.
@@ -177,7 +186,7 @@ const rawSynthesize = (req: TtsRequest & { profile?: boolean }) => {
 
 /**
  * VoiceStudio runs one CPU worker and queues at most one more request; a third
- * concurrent request is refused with 429. The engine prefetches two sentences
+ * concurrent request is refused with 429. The engine prefetches two passages
  * ahead, so speech requests are serialized here (one in flight) and a 429 from
  * another client is retried with backoff instead of falling back to the local voice.
  */
@@ -201,7 +210,7 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
         const chunk = await rawSynthesize(req);
         if (!chunk.audio?.size) throw new ApiRejected(502, "Empty audio from the speech server");
         chunk.renderSeconds = (Date.now() - started) / 1000;
-        await addUsage({ engine: req.engine, model: req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.engine === FISH_ENGINE ? FISH_MODEL : req.engine,
+        await addUsage({ engine: req.engine, model: req.engine === OPENAI_ENGINE ? openaiModelFor(req) : req.engine === FISH_ENGINE ? FISH_MODEL : req.engine,
           text: req.text, audioSeconds: chunk.duration, tokens: chunk.tokens });
         return chunk;
       } catch (e) {
@@ -217,9 +226,13 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
   return p;
 }
 
-/** Cache key: engine + voice + text. Switching engines never replays another engine's audio. */
-export function cacheKey(req: Pick<TtsRequest, "text" | "voice" | "engine">): string {
-  const engine = req.engine === FISH_ENGINE ? `${FISH_ENGINE}:${FISH_MODEL}` : req.engine;
+/**
+ * Cache key: engine + voice + text. Switching engines never replays another engine's audio.
+ * OpenAI's steady model keeps the plain engine key that its clips were cached under before the model could change.
+ */
+export function cacheKey(req: Pick<TtsRequest, "text" | "voice" | "engine" | "openaiModel">): string {
+  const openai = req.engine === OPENAI_ENGINE ? openaiModelFor(req) : "";
+  const engine = req.engine === FISH_ENGINE ? `${FISH_ENGINE}:${FISH_MODEL}` : openai && !isTokenSpeechModel(openai) ? `${OPENAI_ENGINE}:${openai}` : req.engine;
   return `${engine}|${req.voice}|${hash(req.text)}`;
 }
 
@@ -301,6 +314,8 @@ export interface SynthOptions extends TtsRequest {
   words?: string[];
   /** The words of each sentence in the text, when it holds more than one; playback follows them inside the clip */
   parts?: string[][];
+  /** The text of each sentence, matching `parts`; lets a passage reuse clips cached sentence by sentence */
+  sentences?: string[];
   /** Cloned profile voice (sent with the active-engine alias) */
   profile?: boolean;
   /**
@@ -315,11 +330,35 @@ export interface SynthOptions extends TtsRequest {
   onRejected?: (message: string) => void;
 }
 
-/** Cache → API → local fallback. */
+/**
+ * Before passages, every sentence was its own request and clip. When each sentence
+ * of a passage is still cached that way, the clips are joined instead of paying for
+ * the passage again. The join is not cached: it is cheap to redo and much larger as PCM.
+ */
+export async function fromSentenceClips(opts: SynthOptions): Promise<Chunk | null> {
+  const texts = opts.sentences;
+  if (!texts || texts.length < 2) return null;
+  const clips: Chunk[] = [];
+  for (const text of texts) {
+    const c = await fromCache({ ...opts, text });
+    if (!c?.audio) return null;
+    clips.push(c);
+  }
+  const joined = await joinClips(clips.map((c) => c.audio!));
+  if (!joined) return null;
+  const words = clips.every((c) => c.words?.length)
+    ? clips.flatMap((c, k) => c.words!.map((w) => ({ start: w.start - joined.trims[k] + joined.starts[k], end: w.end - joined.trims[k] + joined.starts[k] })))
+    : undefined;
+  return { source: "cache", audio: joined.audio, mime: joined.audio.type, duration: joined.duration, starts: joined.starts, lead: joined.lead, tail: joined.tail, loudness: joined.loudness, words };
+}
+
+/** Cache → sentence clips already paid for → API → local fallback. */
 export async function synthesize(opts: SynthOptions): Promise<Chunk> {
   if (opts.forceLocal || opts.engine === LOCAL_ENGINE) return localChunk(opts.text, opts.parts);
   const cached = await fromCache(opts);
   if (cached) return locateSentences(cached, opts.parts);
+  const reused = await fromSentenceClips(opts);
+  if (reused) return reused;
   try {
     const chunk = await apiSynthesize(opts);
     opts.onOnline?.();
