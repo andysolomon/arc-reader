@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap } from "lucide-react";
-import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceSourceBadge, fmtTime, cn } from "@readaloud/ui";
+import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
 import { useLibrary, type LibraryItem } from "../state/library";
@@ -112,8 +112,7 @@ export function LibraryPage() {
             </Chip>
             {usedVoices.map((id) => (
               <Chip key={id} size="sm" selected={vf === id} onClick={() => setVf(id)}>
-                {voiceName(id)}
-                <VoiceSourceBadge source={voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id))} />
+                <VoiceServiceName source={voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id))} inherit={vf === id}>{voiceName(id)}</VoiceServiceName>
               </Chip>
             ))}
           </div>
@@ -209,10 +208,7 @@ function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: s
         {it.rec.domain}
       </span>
       <span className="tabular-nums">{fmtTime(it.duration)}</span>
-      <span className="inline-flex items-center gap-1.5">
-        {prepared?.name ?? voice.name}
-        <VoiceSourceBadge source={voiceSource(prepared ?? voice)} />
-      </span>
+      <VoiceServiceName source={voiceSource(prepared ?? voice)}>{prepared?.name ?? voice.name}</VoiceServiceName>
       {withDate && <span>{dateLabel(it.rec.updatedAt)}</span>}
     </div>
   );
