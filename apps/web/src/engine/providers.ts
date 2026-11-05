@@ -50,17 +50,16 @@ async function doFetch(url: string, init: RequestInit): Promise<Response> {
   }
   // 404 on the route itself, gateway errors, and proxy failures all mean "no server"
   if (r.status === 404 || r.status === 408 || r.status >= 500) throw new ApiUnreachable(`HTTP ${r.status}`);
-  if (r.status === 401 || r.status === 403) throw new ApiRejected(r.status, "The speech server rejected the API key");
   if (r.status === 429) throw new ApiBusy(Number(r.headers.get("retry-after")) || 0);
   if (!r.ok) {
     let detail = "";
     try {
-      const j = (await r.clone().json()) as { error?: { message?: string }; detail?: string; message?: string };
-      detail = j.error?.message || j.detail || j.message || "";
+      const j = (await r.clone().json()) as { error?: { message?: string }; detail?: string | { message?: string }; message?: string };
+      detail = j.error?.message || (typeof j.detail === "string" ? j.detail : j.detail?.message) || j.message || "";
     } catch {
       /* not json */
     }
-    throw new ApiRejected(r.status, detail || `Speech request failed (HTTP ${r.status})`);
+    throw new ApiRejected(r.status, detail || (r.status === 401 || r.status === 403 ? "The speech server rejected the API key" : `Speech request failed (HTTP ${r.status})`));
   }
   return r;
 }
@@ -73,6 +72,13 @@ async function doFetch(url: string, init: RequestInit): Promise<Response> {
 export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boolean }): Promise<Chunk> {
   const base = baseFor(req.engine);
   if (!base) throw new ApiUnreachable("No API configured");
+  if (req.profile) {
+    const response = await doFetch(`${base}/engines`, { signal: req.signal });
+    const capabilities = await response.json() as { tts: { active: string; backends: { id: string; supports_cloning?: boolean }[] } };
+    const active = capabilities.tts.backends.find((e) => e.id === capabilities.tts.active);
+    if (!active?.supports_cloning) throw new ApiRejected(409, "Select a cloning-capable engine in VoiceStudio to use saved voices. Using the browser voice for now.");
+    if (capabilities.tts.active !== req.engine) throw new ApiRejected(409, "The VoiceStudio engine changed. Refresh Voices before playing this saved voice. Using the browser voice for now.");
+  }
   const model = req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
   const r = await doFetch(`${base}/v1/audio/speech`, {
     method: "POST",

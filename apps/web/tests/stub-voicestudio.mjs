@@ -34,6 +34,9 @@ createServer(async (req, res) => {
   if (url.pathname === "/health") return json(res, 200, { status: "ok", device: "cpu", version: "stub" });
   if (req.headers.authorization !== `Bearer ${KEY}`) return json(res, 401, { error: { message: "Missing or invalid API key", type: "authentication_error" } });
   if (req.headers.origin) return json(res, 403, { error: { message: "Cross-site browser request refused" } });
+  if (url.pathname === "/engines/select") return json(res, 200, { family: "tts", active: "kittentts" });
+  if (url.pathname === "/engines") return json(res, 200, { tts: { active: "omnivoice", backends: [{ id: "omnivoice", supports_cloning: true }] } });
+  if (url.pathname === "/profiles") return json(res, 200, PROFILES.map(p => ({ ...p, kind: "clone" })));
   if (url.pathname === "/v1/models") return json(res, 200, { object: "list", data: ENGINES.filter((e) => e.available).map((e) => ({ id: e.id, object: "model", owned_by: "voicestudio" })) });
   if (url.pathname === "/v1/audio/voices") return json(res, 200, { voices: PROFILES.map((p) => ({ ...p, voice_id: p.id })), engines: ENGINES });
   if (url.pathname === "/v1/audio/speech" && req.method === "POST") {

@@ -6,6 +6,9 @@ vi.mock("../engine/providers", async (original) => ({
   ...await original<typeof import("../engine/providers")>(),
   fetchFishVoices: vi.fn(), fetchServerVoices: vi.fn(),
 }));
+vi.mock("../lib/studio", () => ({
+  studioJson: async (path: string) => path === "/profiles" ? [] : { tts: { active: "omnivoice" } },
+}));
 const initial = useVoices.getState();
 beforeEach(() => { vi.resetAllMocks(); useVoices.setState(initial, true); });
 const fish = [{ _id: "narrator", title: "Narrator", languages: ["en"] }];

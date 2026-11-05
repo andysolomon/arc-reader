@@ -66,7 +66,7 @@ Measured on this laptop (Intel i7, 12 threads, CPU only, KittenTTS warm; the fir
 | "I went to the woods because I wished to live deliberately." | 11 | 1.2 s | 240 KB (WAV) |
 | "The quick brown fox … begin to call." | 22 | 2.3 s | 156 KB |
 
-Generation runs at roughly 3–4× real time, so the two-sentence prefetch keeps up once playback starts. MP3 is the cheapest format; WAV and PCM save nothing on latency. Cloned profiles play in the active engine's default voice unless a cloning engine (OmniVoice, VoxCPM2, CosyVoice, PocketTTS, MOSS) is selected; KittenTTS cannot clone. Re-measure with `apps/web/scripts/measure-tts.sh`:
+Generation runs at roughly 3–4× real time, so the two-sentence prefetch keeps up once playback starts. MP3 is the cheapest format; WAV and PCM save nothing on latency. Saved profiles require an active cloning engine; ReadAloud checks this before requesting speech and reports an explicit browser fallback if it is unavailable. KittenTTS cannot clone. Re-measure with `apps/web/scripts/measure-tts.sh`:
 
 ```sh
 apps/web/scripts/measure-tts.sh            # three runs, first-byte and total time
@@ -91,7 +91,11 @@ VOICESTUDIO_URL=http://127.0.0.1:3900
 VOICESTUDIO_API_KEY=<the key you printed above>
 ```
 
-Then `npm run dev` (or `pnpm build && pnpm --filter @readaloud/web preview` for the tailnet build). The Voices page lists KittenTTS's eight presets plus any profiles you clone in VoiceStudio; Settings → Engine lists what the server reports.
+Then `npm run dev` (or `pnpm build && pnpm --filter @readaloud/web preview` for the tailnet build). The Voices page lists KittenTTS's eight presets plus any cloned or designed profiles; Settings → Engine lists what the server reports.
+
+### Studio
+
+Open **Studio** to clone a voice, design one from a description, browse VoiceStudio’s designed-voice gallery, dictate, transcribe files, or dub a video. The required model terms can be reviewed and accepted in Studio. See [Studio setup and verification](docs/voicestudio-studio.md) for API details and the remaining live-render verification gate.
 
 ### OpenAI voices (the ChatGPT voices)
 
@@ -103,7 +107,7 @@ VITE_OPENAI_TTS_MODEL=gpt-4o-mini-tts   # or tts-1 / tts-1-hd
 OPENAI_API_KEY=sk-...                     # read by the proxy only
 ```
 
-The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; the Settings → Engine choice only affects cloned profiles and the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → Usage shows OpenAI characters for the month with a list-price estimate for text input. Every sentence sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
+The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; Settings → Engine selects VoiceStudio’s active engine for saved profiles or enables the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → Usage shows OpenAI characters for the month with a list-price estimate for text input. Every sentence sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
 
 ### Fish Audio voices
 

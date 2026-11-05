@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { VoiceCard } from "@readaloud/ui";
 import { useVoices, getVoice, voiceLang, isLocalVoice } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -42,6 +42,7 @@ export function VoicesPage() {
     if (timer.current) clearTimeout(timer.current);
     abort.current?.abort();
     audio.current?.pause();
+    if (audio.current?.src.startsWith("blob:")) URL.revokeObjectURL(audio.current.src);
     audio.current = null;
     window.speechSynthesis?.cancel();
     setPreviewing(null);
@@ -62,7 +63,7 @@ export function VoicesPage() {
     const chunk = await synthesize({
       text,
       voice: v.id,
-      engine: v.kind === "preset" ? v.engine : v.kind === "local" ? LOCAL_ENGINE : engineId,
+      engine: v.engine,
       profile: v.kind === "profile",
       signal: ac.signal,
       forceLocal: isLocalVoice(v.id) || (v.kind === "profile" && engineId === LOCAL_ENGINE),
@@ -122,6 +123,7 @@ export function VoicesPage() {
             <button type="button" onClick={() => void reload()} className="ml-2 border-0 bg-transparent text-accent underline">Retry</button>
           </div>
         )}
+        <div className="flex flex-wrap gap-4 text-sm underline"><Link to="/studio/clone">Clone a voice</Link><Link to="/studio/design">Design a voice</Link><Link to="/studio/gallery">Browse designed voices</Link></div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
           {VOICES.map((v) => (
             <VoiceCard key={v.id} voice={v} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />

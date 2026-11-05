@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, FISH_DEFAULT_VOICE, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
 import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, DEFAULT_ENGINE, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
+import { studioJson, type Profile } from "../lib/studio";
 import { LOCAL_ENGINE } from "../engine/types";
 
 export interface EngineOption {
@@ -80,11 +81,17 @@ export const useVoices = create<VoicesState>()((set, get) => ({
     }
     try {
       const { voices, engines } = await fetchServerVoices();
+      const [metadata, capabilities] = await Promise.allSettled([
+        studioJson<Profile[]>("/profiles"),
+        studioJson<{ tts: { active: string } }>("/engines"),
+      ]);
+      const profileMap = new Map(metadata.status === "fulfilled" ? metadata.value.map((p) => [p.id, p]) : []);
+      const profileEngine = capabilities.status === "fulfilled" ? capabilities.value.tts.active : "omnivoice";
       const available = new Set((engines as ServerEngine[]).filter((e) => e.available !== false).map((e) => e.id));
       const presets = available.size ? PRESET_VOICES.filter((v) => available.has(v.engine)) : PRESET_VOICES;
       const profiles: Voice[] = voices
         .filter((v) => v.type === "profile")
-        .map((v) => ({ id: v.id, name: v.name, lang: langLabel(v.language), tags: ["cloned"], hue: hueFor(v.id), engine: DEFAULT_ENGINE, kind: "profile" as const }));
+        .map((v) => ({ id: v.id, name: v.name, lang: langLabel(v.language), tags: [profileMap.get(v.id)?.kind === "design" ? "designed" : "cloned"], hue: hueFor(v.id), engine: profileEngine, kind: "profile" as const }));
       const engineOpts: EngineOption[] = (engines as ServerEngine[])
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false }))
         .concat([{ id: LOCAL_ENGINE, label: engineLabel(LOCAL_ENGINE), available: true }]);
