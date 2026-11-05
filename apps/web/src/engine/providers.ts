@@ -371,7 +371,7 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
       }
     }
     await locateSentences(chunk, opts.parts);
-    void toCache(opts, chunk);
+    await toCache(opts, chunk);
     return chunk;
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;

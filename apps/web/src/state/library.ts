@@ -1,7 +1,11 @@
 import { create } from "zustand";
-import { docs as docStore, positions, type DocRecord, type DocSource } from "../lib/db";
+import { audioCache, docs as docStore, positions, type DocRecord, type DocSource } from "../lib/db";
 import { estimateTotal, titleFrom } from "../lib/segment";
 import { uid } from "../lib/hash";
+import { preparedVoices, type PreparedVoice } from "../lib/prepared";
+import { useVoices } from "./voices";
+import { useSettings } from "./settings";
+import { usePreparation } from "./preparation";
 
 export interface LibraryItem {
   rec: DocRecord;
@@ -9,6 +13,7 @@ export interface LibraryItem {
   progress: number;
   /** total seconds at 1× */
   duration: number;
+  prepared: PreparedVoice[];
 }
 
 interface LibraryState {
@@ -20,17 +25,27 @@ interface LibraryState {
   touch: (id: string) => Promise<void>;
 }
 
+let refreshVersion = 0;
 export const useLibrary = create<LibraryState>()((set, get) => ({
   items: [],
   loaded: false,
   async refresh() {
+    const version = ++refreshVersion;
     try {
-      const [all, pos] = await Promise.all([docStore.all(), positions.all()]);
+      const [all, pos, keys] = await Promise.all([docStore.all(), positions.all(), audioCache.keys()]);
+      if (version !== refreshVersion) return;
       const byId = new Map(pos.map((p) => [p.docId, p]));
+      const cached = new Set(keys);
+      const voices = [...useVoices.getState().voices];
+      // Saved voices can outlive a catalogue page or an unavailable speech server.
+      for (const key of keys) {
+        const [engine, id] = key.split("|");
+        if (id && !voices.some((v) => v.id === id)) voices.push({ id, name: id, engine: engine.split(":")[0], kind: "preset", lang: "", hue: null, tags: [] });
+      }
       set({
         items: all.map((rec) => {
           const p = byId.get(rec.id);
-          return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text) };
+          return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
         }),
         loaded: true,
       });
@@ -56,7 +71,9 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     return rec;
   },
   async remove(id) {
+    usePreparation.getState().cancelDocument(id);
     await docStore.delete(id);
+    refreshVersion++;
     set({ items: get().items.filter((i) => i.rec.id !== id) });
   },
   async touch(id) {
