@@ -65,9 +65,19 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   expect(requests).toBe(8);
   await expect(page.getByRole("region", { name: "Player", exact: true })).toBeHidden();
 
+  await page.reload();
+  await page.getByRole("checkbox", { name: "Select First document", exact: true }).check();
+  await page.getByRole("button", { name: "Prepare selected" }).click();
+  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Alloy ChatGPT" })).not.toBeChecked();
+  await expect(dialog.getByRole("button", { name: "Prepare 2 readings" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
   await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
   await page.getByRole("button", { name: "Prepare selected" }).click();
-  await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
+  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" })).toBeChecked();
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
   await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished");
   expect(requests).toBe(8);

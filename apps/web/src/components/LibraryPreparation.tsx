@@ -46,7 +46,7 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
   const defaultVoice = useSettings((s) => s.voice);
   const available = useMemo(() => voices.filter((v) => v.engine !== LOCAL_ENGINE && !!baseFor(v.engine)), [voices]);
   const [selected, setSelected] = useState<string[]>(() => {
-    const used = new Set(documents.map((it) => it.rec.voice ?? defaultVoice));
+    const used = new Set(documents.flatMap((it) => [it.rec.voice ?? defaultVoice, ...it.prepared.map((v) => v.voiceId)]));
     return available.filter((v) => used.has(v.id)).map((v) => v.id);
   });
   const [query, setQuery] = useState("");
