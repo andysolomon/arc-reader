@@ -64,8 +64,8 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   expect(accessibility.violations).toEqual([]);
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
   try {
-    await expect.poll(() => submissions).toBe(3);
-    await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("3 active · 1 queued");
+    await expect.poll(() => submissions).toBe(4);
+    await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("0 active · 4 queued");
   } finally { release(); }
   // Internal navigation keeps the preparation queue alive.
   await page.getByRole("link", { name: "Compose", exact: true }).click();
@@ -100,6 +100,40 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   await expect(page.getByRole("img", { name: "0% listened", exact: true })).toHaveCount(2);
   const library = page.locator('[data-screen="library"]');
   expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+});
+
+test("shows one reading per machine, waiting readings, and restores their assignments after reload", async ({ page }) => {
+  await seedLibrary(page);
+  const jobs: { id: string; state: string; done: number; total: number; queued: boolean; worker?: string }[] = [];
+  await page.route("**/api/preparations", async (route) => {
+    const index = jobs.length;
+    const job = { id: `00000000-0000-0000-0000-${String(index).padStart(12, "0")}`, state: "running", done: 0, total: 2,
+      queued: index >= 2, ...(index < 2 ? { worker: ["Mac", "Omarchy"][index] } : {}) };
+    jobs.push(job);
+    await route.fulfill({ status: 202, json: job });
+  });
+  await page.route("**/api/preparations/*", async (route) => {
+    const job = jobs.find((job) => route.request().url().endsWith(job.id));
+    if (!job) return route.continue();
+    if (route.request().method() === "DELETE") job.state = "cancelled";
+    await route.fulfill({ json: job });
+  });
+  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await page.getByRole("button", { name: "Prepare selected" }).click();
+  const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
+  await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
+  await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
+  const queue = page.getByRole("region", { name: "Audio preparation queue" });
+  await expect(queue).toContainText("2 active · 2 queued");
+  await expect(queue).toContainText("Preparing on Mac");
+  await expect(queue).toContainText("Preparing on Omarchy");
+  await page.reload();
+  await expect(queue).toContainText("2 active · 2 queued");
+  await expect(queue).toContainText("Preparing on Mac");
+  await expect(queue).toContainText("Preparing on Omarchy");
+  expect(jobs).toHaveLength(4);
+  await queue.getByRole("button", { name: "Cancel all" }).click();
+  await expect(queue.getByText("Cancelled · saved audio kept", { exact: true })).toHaveCount(4);
 });
 
 test("selects filtered documents and offers explicit paid voice preparation", async ({ page }) => {

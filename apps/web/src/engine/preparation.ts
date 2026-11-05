@@ -16,6 +16,8 @@ export interface PreparationStatus {
   done: number;
   total: number;
   error?: string;
+  queued?: boolean;
+  worker?: string;
 }
 interface SavedPreparation {
   id: string;
@@ -102,7 +104,7 @@ async function submit(requests: PreparationRequest[], start: number, fingerprint
 
 /** Identical readings share a submission; polling only observes it. A reader
  * cancels server work only when no other reader still needs that job. */
-export async function prepareAudio(requests: PreparationRequest[], start: number, progress?: (done: number, total: number) => void, signal?: AbortSignal) {
+export async function prepareAudio(requests: PreparationRequest[], start: number, progress?: (done: number, total: number, status?: PreparationStatus) => void, signal?: AbortSignal) {
   signal?.throwIfAborted();
   const fingerprint = signature(requests);
   let session = sessions.get(fingerprint);
@@ -142,7 +144,7 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
         await delay(signal);
         continue;
       }
-      progress?.(status.done, status.total);
+      progress?.(status.done, status.total, status);
       if (status.state !== "running") {
         save(saved().map((job) => job.id === id ? { ...job, active: false } : job));
         if (status.state === "error") throw new Error(status.error || "Could not prepare audio. Please retry.");

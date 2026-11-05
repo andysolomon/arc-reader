@@ -54,6 +54,9 @@ export default defineConfig({
         VITE_DEFAULT_ENGINE: "kittentts",
         VOICESTUDIO_URL: LIVE ? process.env.VOICESTUDIO_URL || localEnv.VOICESTUDIO_URL || "http://127.0.0.1:3900" : "http://127.0.0.1:3999",
         VOICESTUDIO_API_KEY: LIVE ? process.env.VOICESTUDIO_API_KEY || localEnv.VOICESTUDIO_API_KEY || "" : "test-key",
+        VOICESTUDIO_NAME: "Mac",
+        // Stub workflows exercise one machine unless a test explicitly adds a second.
+        VOICESTUDIO_SECONDARY_URL: LIVE ? process.env.VOICESTUDIO_SECONDARY_URL || localEnv.VOICESTUDIO_SECONDARY_URL || "" : "",
         VITE_OPENAI_BASE: "/api/oa",
         VITE_OPENAI_TTS_MODEL: "gpt-4o-mini-tts",
         OPENAI_URL: LIVE ? process.env.OPENAI_URL || localEnv.OPENAI_URL || "https://api.openai.com" : "http://127.0.0.1:3998",

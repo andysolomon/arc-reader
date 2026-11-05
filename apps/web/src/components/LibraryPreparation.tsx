@@ -32,7 +32,7 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
         return (
           <button key={voice.voiceId} type="button" onClick={onPrepare} className="inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[12px] text-fg2 hover:text-fg" title={`${voice.name}: ${percent}% prepared${job ? ` · ${job.status}` : ""}`}>
             <ProgressRing value={voice.fraction} size={24} stroke={2} label={`${voice.name}: ${percent}% prepared`} />
-            <span>{voice.name} <span className="tabular-nums">· {percent}%</span>{job && <span className="text-accent"> · {job.status === "queued" ? "Queued" : "Preparing"}</span>}</span>
+            <span>{voice.name} <span className="tabular-nums">· {percent}%</span>{job && <span className="text-accent"> · {job.status === "queued" ? "Queued" : job.status === "saving" ? "Saving" : job.worker ? `Preparing on ${job.worker}` : "Preparing"}</span>}</span>
             <VoiceSourceBadge source={voiceSource(voice)} />
           </button>
         );
@@ -61,7 +61,7 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
   return (
     <Dialog open onClose={onClose} title="Prepare audio" initialFocus="dialog" className="max-h-[calc(100dvh-48px)]">
       <p className="m-0 text-sm text-fg2">Choose voices for {documents.length === 1 ? `“${documents[0].rec.title}”` : `${documents.length} documents`}. Saved audio is reused. Preparation continues as you browse; keep this tab open.</p>
-      <p className="m-0 text-[12px] text-fg2">Up to {PREPARATION_CONCURRENCY} readings per provider prepare together. VoiceStudio shares its worker between readings; cloud providers run independently.</p>
+      <p className="m-0 text-[12px] text-fg2">VoiceStudio prepares one reading at a time on each configured machine and queues the rest. Cloud providers run independently, with up to {PREPARATION_CONCURRENCY} readings each.</p>
       {available.length > 0 ? <>
         <Input leading={<Search size={16} aria-hidden />} aria-label="Search preparation voices" placeholder="Find a voice or provider" value={query} onChange={(e) => setQuery(e.target.value)} />
         <div role="group" aria-label="Preparation voices" className="flex min-h-0 max-h-[42dvh] flex-col gap-1 overflow-y-auto rounded-control border border-line p-2">
@@ -90,13 +90,14 @@ export function PreparationQueue() {
   if (!jobs.length) return null;
   const pending = jobs.filter(isPreparing);
   const preparing = pending.filter((job) => job.status === "preparing").length;
-  const queued = pending.length - preparing;
+  const saving = pending.filter((job) => job.status === "saving").length;
+  const queued = pending.filter((job) => job.status === "queued").length;
   const finished = jobs.length - pending.length;
   return (
     <div className="rounded-card border border-line bg-bg2 p-4" role="region" aria-label="Audio preparation queue">
       <div className="flex flex-wrap items-center gap-3">
         <Zap size={16} className="text-accent" aria-hidden />
-        <span className="flex-1 text-sm" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}` : "Audio preparation finished"}</span>
+        <span className="flex-1 text-sm" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}${saving ? ` · ${saving} saving` : ""}` : "Audio preparation finished"}</span>
         {pending.length > 0 && <Button size="sm" onClick={cancelAll}>Cancel all</Button>}
         {finished > 0 && <Button size="sm" variant="ghost" onClick={dismissFinished}>Clear finished</Button>}
       </div>
@@ -106,7 +107,7 @@ export function PreparationQueue() {
             <div className="min-w-0 flex-1">
               <div className="truncate text-fg">{job.title} · {job.voice.name}</div>
               <div className={job.status === "error" ? "text-danger" : "text-fg2"}>
-                {job.status === "preparing" ? job.message ?? `Preparing ${job.done}/${job.total} passages` : job.status === "ready" ? "Prepared" : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : "Queued"}
+                {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? "Prepared" : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? "Queued · waiting for a free machine"}
               </div>
             </div>
             <VoiceSourceBadge source={voiceSource(job.voice)} />

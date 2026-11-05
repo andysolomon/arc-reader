@@ -18,16 +18,18 @@ export interface PreparationJob {
   voice: Voice;
   openaiModel: string;
   wordTimings: boolean;
-  status: "queued" | "preparing" | "ready" | "error" | "cancelled";
+  status: "queued" | "preparing" | "saving" | "ready" | "error" | "cancelled";
   done: number;
   total: number;
   message?: string;
+  worker?: string;
 }
 
-export const isPreparing = (job: PreparationJob) => job.status === "queued" || job.status === "preparing";
-// Each provider gets its own bounded pool so a slow local reading cannot hold
-// up cloud voices. VoiceStudio still serializes inference on the server.
+export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "saving"].includes(job.status);
+// Cloud providers keep bounded parallelism. Local submissions join the durable
+// server queue, which reserves exactly one whole reading per machine.
 export const PREPARATION_CONCURRENCY = 3;
+export const PREPARATION_QUEUE_LIMIT = 20;
 const active = new Map<string, { controller: AbortController; provider: string }>();
 const providerFor = (job: PreparationJob) => isPaidEngine(job.voice.engine) ? job.voice.engine : "voicestudio";
 
@@ -70,7 +72,7 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   partialize: ({ jobs }) => ({ jobs }),
   merge: (persisted, current) => {
     const { jobs = [] } = (persisted ?? {}) as { jobs?: PreparationJob[] };
-    return { ...current, jobs: jobs.map((job) => job.status === "preparing" ? { ...job, status: "queued", message: undefined } : job) };
+    return { ...current, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined } : job) };
   },
   // Local storage hydrates synchronously, before usePreparation is initialized.
   // Re-enter the worker afterwards; server jobs reconnect and saved audio is reused.
@@ -79,18 +81,20 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
 
 const update = (id: string, patch: Partial<PreparationJob>) => usePreparation.setState((state) => ({ jobs: state.jobs.map((job) => job.id === id ? { ...job, ...patch } : job) }));
 
-/** Rotate whole-reading jobs through bounded provider pools. Each server job
- * yields between passages, sharing the single VoiceStudio worker fairly. */
+/** Submit local work to the server's machine scheduler. Cloud voices use their
+ * own pools and never occupy a Mac or Omarchy reservation. */
 function drain() {
   const counts = new Map<string, number>();
   for (const { provider } of active.values()) counts.set(provider, (counts.get(provider) || 0) + 1);
   for (const job of usePreparation.getState().jobs) {
     const provider = providerFor(job);
-    if (job.status !== "queued" || (counts.get(provider) || 0) >= PREPARATION_CONCURRENCY) continue;
+    const background = provider === "voicestudio" && API_BASE === "/api/vs";
+    const limit = background ? PREPARATION_QUEUE_LIMIT : provider === "voicestudio" ? 1 : PREPARATION_CONCURRENCY;
+    if (job.status !== "queued" || active.has(job.id) || (counts.get(provider) || 0) >= limit) continue;
     const controller = new AbortController();
     active.set(job.id, { controller, provider });
     counts.set(provider, (counts.get(provider) || 0) + 1);
-    update(job.id, { status: "preparing" });
+    update(job.id, { status: background ? "queued" : "preparing", worker: undefined });
     void run(job, controller.signal).finally(() => {
       active.delete(job.id);
       drain();
@@ -119,7 +123,11 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     if (API_BASE === "/api/vs" && !isPaidEngine(job.voice.engine)) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
-      })), 0, (done) => update(job.id, { done }), signal);
+      })), 0, (done, _total, status) => {
+        if (!signal.aborted) update(job.id, { done, status: status?.queued ? "queued" : "preparing", worker: status?.worker });
+      }, signal);
+      signal.throwIfAborted();
+      update(job.id, { status: "saving", worker: undefined });
     }
     for (const passage of passages) {
       signal.throwIfAborted();
@@ -141,7 +149,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     update(job.id, { status: "ready" });
   } catch (error) {
     if (!signal.aborted && (isTransientPreparationError(error) || error instanceof ApiUnreachable || error instanceof ApiBusy)) {
-      update(job.id, { message: "Waiting for the speech server to reconnect…" });
+      update(job.id, { status: "queued", worker: undefined, message: "Waiting for the speech server to reconnect…" });
       await new Promise<void>((resolve) => {
         const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
         const timer = setTimeout(finish, 1500);
