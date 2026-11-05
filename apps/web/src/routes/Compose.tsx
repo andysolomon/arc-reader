@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Clipboard, Link2, Upload } from "lucide-react";
-import { Button, Chip, TextArea, VoiceAvatar, formatSpeed, cn, Input } from "@readaloud/ui";
+import { Button, Chip, TextArea, VoiceAvatar, VoiceSourceBadge, formatSpeed, cn, Input } from "@readaloud/ui";
+import { voiceSource } from "../data/voices";
 import { PLACEHOLDERS, SAMPLE, SAMPLE_TITLE } from "../data/sample";
 import { getVoice } from "../state/voices";
 import { useSettings } from "../state/settings";
@@ -142,8 +143,9 @@ export function Compose() {
             <input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(e) => onFile(e.target.files?.[0])} className="sr-only" />
           </label>
           <span className="flex-1" />
-          <Chip leading={<VoiceAvatar voice={voice} size={24} />} onClick={() => navigate("/voices")} aria-label={`Voice: ${voice.name}. Change voice`}>
+          <Chip leading={<VoiceAvatar voice={voice} size={24} />} onClick={() => navigate("/voices")} aria-label={`Voice: ${voice.name} · ${voiceSource(voice)}. Change voice`}>
             {voice.name}
+            <VoiceSourceBadge source={voiceSource(voice)} />
           </Chip>
           <Chip
             onClick={() => {

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Square, Zap } from "lucide-react";
 import { PlayerPill, PlayerBar, type PlayerProps } from "@readaloud/ui";
 import { getVoice } from "../state/voices";
+import { LOCAL_VOICE } from "../data/voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
 import { usePlayer, engine } from "../state/player";
@@ -19,6 +20,7 @@ function safeName(s: string) {
 export function PlayerHost() {
   const bp = useBreakpoint();
   const style = useSettings((s) => s.playerStyle);
+  const browserOnly = useSettings((s) => s.engine === LOCAL_ENGINE);
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const p = usePlayer();
@@ -86,7 +88,7 @@ export function PlayerHost() {
   ];
 
   const props: PlayerProps = {
-    voice,
+    voice: p.offline || browserOnly ? LOCAL_VOICE : voice,
     playing: p.playing,
     loading: p.loading,
     speed: p.speed,

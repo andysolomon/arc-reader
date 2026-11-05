@@ -1,6 +1,7 @@
 import type { Voice as UiVoice } from "@readaloud/ui";
 import { hash } from "../lib/hash";
 import { LOCAL_ENGINE } from "../engine/types";
+import { VOICE_SERVICES, voiceSourceForEngine, type VoiceSource } from "@readaloud/tokens";
 
 export interface Voice extends UiVoice {
   /** Engine that renders this voice; "local" for the browser voice */
@@ -9,20 +10,12 @@ export interface Voice extends UiVoice {
   kind: "preset" | "profile" | "local";
 }
 
-export function voiceSource(voice: Pick<Voice, "engine">): string {
-  if (voice.engine === "openai") return "ChatGPT";
-  if (voice.engine === "fish") return "Fish";
-  if (voice.engine === LOCAL_ENGINE) return "Browser";
-  return "VoiceStudio";
+export function voiceSource(voice: Pick<Voice, "engine">): VoiceSource {
+  return voiceSourceForEngine(voice.engine);
 }
 
 /** What each `voiceSource` label means: which service renders the voice. */
-export const SOURCE_INFO: Record<string, { title: string; description: string }> = {
-  ChatGPT: { title: "ChatGPT", description: "OpenAI’s speech voices, rendered by the OpenAI API. Needs a connection; billed per use." },
-  Fish: { title: "Fish Audio", description: "Community voices from Fish Audio’s catalog, rendered by the Fish Audio API. Needs a connection; billed per use." },
-  VoiceStudio: { title: "VoiceStudio", description: "Rendered on this machine: engine presets plus the voices you clone, design, or add from the Studio gallery." },
-  Browser: { title: "Browser", description: "Your device’s built-in speech. Works offline." },
-};
+export const SOURCE_INFO: Record<string, { title: string; description: string }> = VOICE_SERVICES;
 
 export const LOCAL_VOICE_ID = "local";
 export const JAMAICAN_PATOIS_VOICE_ID = "fish:0724e14ccf884007a641908722575fdf";

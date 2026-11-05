@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap } from "lucide-react";
-import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, fmtTime, cn } from "@readaloud/ui";
+import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceSourceBadge, fmtTime, cn } from "@readaloud/ui";
+import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
 import { useLibrary, type LibraryItem } from "../state/library";
 import { useSettings } from "../state/settings";
@@ -106,6 +107,7 @@ export function LibraryPage() {
             {usedVoices.map((id) => (
               <Chip key={id} size="sm" selected={vf === id} onClick={() => setVf(id)}>
                 {voiceName(id)}
+                <VoiceSourceBadge source={voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id))} />
               </Chip>
             ))}
           </div>
@@ -191,6 +193,9 @@ function Actions({ it, resume, revoice, prepare, del, size = 36, className }: It
 }
 
 function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: string; withDate?: boolean }) {
+  const voiceId = it.rec.voice ?? defaultVoice;
+  const voice = getVoice(voiceId);
+  const prepared = it.prepared.find((v) => v.voiceId === voiceId);
   return (
     <div className="flex flex-wrap gap-2.5 text-[12px] text-fg2">
       <span className="inline-flex items-center gap-1.5">
@@ -198,7 +203,10 @@ function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: s
         {it.rec.domain}
       </span>
       <span className="tabular-nums">{fmtTime(it.duration)}</span>
-      <span>{getVoice(it.rec.voice ?? defaultVoice).name}</span>
+      <span className="inline-flex items-center gap-1.5">
+        {prepared?.name ?? voice.name}
+        <VoiceSourceBadge source={voiceSource(prepared ?? voice)} />
+      </span>
       {withDate && <span>{dateLabel(it.rec.updatedAt)}</span>}
     </div>
   );

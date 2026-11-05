@@ -5,6 +5,8 @@ export interface Voice {
   tags: string[];
   /** oklch hue; null means local/Piper (uses --bg3) */
   hue: number | null;
+  /** Rendering service; used for a consistent service color throughout the UI. */
+  engine?: string;
 }
 
 export type HighlightMode = "block" | "dim" | "underline";

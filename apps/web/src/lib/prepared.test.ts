@@ -12,8 +12,8 @@ describe("prepared audio coverage", () => {
   it("counts actual cached text per voice, including older sentence clips, without double counting", () => {
     const keys = new Set([key("One two. Three four."), key("One two."), key("Five six.", jasper)]);
     expect(preparedVoices(rec, [bella, jasper, LOCAL_VOICE], keys, "gpt-4o-mini-tts")).toEqual([
-      { voiceId: bella.id, name: bella.name, fraction: 2 / 3 },
-      { voiceId: jasper.id, name: jasper.name, fraction: 1 / 3 },
+      { voiceId: bella.id, name: bella.name, engine: bella.engine, fraction: 2 / 3 },
+      { voiceId: jasper.id, name: jasper.name, engine: jasper.engine, fraction: 1 / 3 },
     ]);
     expect(preparedVoices(rec, [bella], new Set([key("One two.")]), "gpt-4o-mini-tts")[0].fraction).toBe(1 / 3);
     expect(preparedVoices(rec, [bella], new Set(), "gpt-4o-mini-tts")).toEqual([]);

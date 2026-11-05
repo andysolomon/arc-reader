@@ -8,12 +8,14 @@ import { Chip } from "./Chip";
 import { VoiceAvatar } from "./VoiceAvatar";
 import { Waveform } from "./Waveform";
 import { Button } from "./Button";
+import { VoiceSourceBadge } from "./VoiceSourceBadge";
+import type { VoiceSource } from "@readaloud/tokens";
 
 export interface VoiceCardProps {
   voice: Voice;
   selected?: boolean;
   previewing?: boolean;
-  source?: string;
+  source?: VoiceSource;
   onPreview: () => void;
   onSelect: () => void;
   className?: string;
@@ -36,7 +38,7 @@ export function VoiceCard({ voice, selected, previewing, source, onPreview, onSe
         <div className="font-mono text-[12px] text-fg2">{voice.lang}</div>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {source && <span className="rounded-pill border border-line px-2 py-0.5 text-xs font-medium text-fg2" aria-label={`Voice source: ${source}`}>{source}</span>}
+        {source && <span aria-label={`Voice source: ${source}`}><VoiceSourceBadge source={source} /></span>}
         {voice.tags.map((t) => (
           <Chip key={t} tag>
             {t}

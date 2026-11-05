@@ -12,6 +12,7 @@ export * from "./components/Kbd";
 export * from "./components/Skeleton";
 export * from "./components/ProgressRing";
 export * from "./components/VoiceAvatar";
+export * from "./components/VoiceSourceBadge";
 export * from "./components/PlayPauseIcon";
 export * from "./components/ThemeIcon";
 export * from "./components/Waveform";

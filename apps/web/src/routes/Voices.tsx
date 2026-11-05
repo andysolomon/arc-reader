@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Chip, Input, VoiceCard } from "@readaloud/ui";
+import { Chip, Input, VoiceCard, VoiceSourceBadge } from "@readaloud/ui";
+import type { VoiceSource } from "@readaloud/tokens";
 import { Search } from "lucide-react";
 import { useVoices, getVoice, voiceLang, isLocalVoice } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -141,7 +142,7 @@ export function VoicesPage() {
   const current = forDoc ? (loadedDoc?.id === forDoc ? docVoice : selected) : selected;
   // Group by the service that renders each voice. Sections keep a fixed order:
   // the store's order depends on which provider answered first.
-  const bySource = new Map<string, typeof VOICES>(Object.keys(SOURCE_INFO).map((s) => [s, []]));
+  const bySource = new Map<VoiceSource, typeof VOICES>((Object.keys(SOURCE_INFO) as VoiceSource[]).map((s) => [s, []]));
   for (const v of shown) bySource.set(voiceSource(v), [...(bySource.get(voiceSource(v)) ?? []), v]);
   const groups = [...bySource].filter(([, voices]) => voices.length);
 
@@ -165,7 +166,7 @@ export function VoicesPage() {
           <Input type="search" aria-label="Search voices" placeholder="Search by name, tag or language…" leading={<Search size={16} aria-hidden />} wrapperClassName="h-10" value={filters.query} onChange={(e) => setFilter("query", e.target.value)} />
           <div className="flex flex-wrap gap-2" role="group" aria-label="Voice source">
             <Chip size="sm" selected={!filters.source} onClick={() => setFilter("source", "")}>All sources</Chip>
-            {sources.map(([source, n]) => <Chip key={source} size="sm" selected={filters.source === source} onClick={() => setFilter("source", filters.source === source ? "" : source)}>{SOURCE_INFO[source]?.title ?? source} · {n}</Chip>)}
+            {sources.map(([source, n]) => <Chip key={source} size="sm" selected={filters.source === source} onClick={() => setFilter("source", filters.source === source ? "" : source)}><VoiceSourceBadge source={source as VoiceSource} />{n}</Chip>)}
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,220px)_auto]">
             <FilterSelect label="Language" any="All languages" value={filters.language} options={languages.map(([code, n]) => [code, `${languageLabel(code)} (${n})`])} onChange={(value) => setFilter("language", value)} />
@@ -178,7 +179,10 @@ export function VoicesPage() {
         {groups.map(([source, voices]) => (
           <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3">
             <div>
-              <h2 id={`voices-${source}`} className="m-0 font-serif text-xl">{SOURCE_INFO[source]?.title ?? source}</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 id={`voices-${source}`} className="m-0 font-serif text-xl"><VoiceSourceBadge source={source} className="px-3 py-1 text-sm" /></h2>
+                {source === "VoiceStudio" && <span className="text-xs text-fg2">Free · on device · default service</span>}
+              </div>
               {SOURCE_INFO[source] && <p className="mt-1 text-sm text-fg2">{SOURCE_INFO[source].description}</p>}
               {voices.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="mt-1 text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
             </div>

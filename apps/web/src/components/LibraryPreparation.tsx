@@ -1,24 +1,27 @@
 import { useMemo, useState } from "react";
-import { Button, Dialog, Input, ProgressRing } from "@readaloud/ui";
+import { Button, Dialog, Input, ProgressRing, VoiceSourceBadge } from "@readaloud/ui";
 import { Search, Zap } from "lucide-react";
 import { voiceSource } from "../data/voices";
 import { baseFor, isPaidEngine } from "../engine/providers";
 import { LOCAL_ENGINE } from "../engine/types";
 import { isPreparing, usePreparation } from "../state/preparation";
-import { useVoices } from "../state/voices";
+import { getVoice, useVoices } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 import type { LibraryItem } from "../state/library";
 
 export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryItem; defaultVoice: string; onPrepare: () => void }) {
   const jobs = usePreparation((s) => s.jobs);
-  const catalog = useVoices((s) => s.voices);
+  useVoices((s) => s.voices);
   const voiceId = it.rec.voice ?? defaultVoice;
   const prepared = [...it.prepared];
   for (const job of jobs) {
-    if (job.docId === it.rec.id && isPreparing(job) && !prepared.some((v) => v.voiceId === job.voice.id)) prepared.push({ voiceId: job.voice.id, name: job.voice.name, fraction: 0 });
+    if (job.docId === it.rec.id && isPreparing(job) && !prepared.some((v) => v.voiceId === job.voice.id)) prepared.push({ voiceId: job.voice.id, name: job.voice.name, engine: job.voice.engine, fraction: 0 });
   }
-  if (!prepared.some((v) => v.voiceId === voiceId) && voiceId !== "local") prepared.unshift({ voiceId, name: catalog.find((v) => v.id === voiceId)?.name ?? voiceId, fraction: 0 });
+  if (!prepared.some((v) => v.voiceId === voiceId) && voiceId !== "local") {
+    const voice = getVoice(voiceId);
+    prepared.unshift({ voiceId, name: voice.name, engine: voice.engine, fraction: 0 });
+  }
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1.5" role="group" aria-label="Prepared audio">
       {prepared.length > 0 && <span className="text-[11px] text-fg2">Prepared</span>}
@@ -30,6 +33,7 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
           <button key={voice.voiceId} type="button" onClick={onPrepare} className="inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[12px] text-fg2 hover:text-fg" title={`${voice.name}: ${percent}% prepared${job ? ` · ${job.status}` : ""}`}>
             <ProgressRing value={voice.fraction} size={24} stroke={2} label={`${voice.name}: ${percent}% prepared`} />
             <span>{voice.name} <span className="tabular-nums">· {percent}%</span>{job && <span className="text-accent"> · {job.status === "queued" ? "Queued" : "Preparing"}</span>}</span>
+            <VoiceSourceBadge source={voiceSource(voice)} />
           </button>
         );
       })}
@@ -65,7 +69,7 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
             <label key={voice.id} className="flex shrink-0 cursor-pointer items-center gap-3 rounded-control p-2 hover:bg-bg3">
               <input type="checkbox" className="size-4 shrink-0 accent-[var(--accent)]" checked={selected.includes(voice.id)} onChange={(e) => setSelected((prev) => e.target.checked ? [...prev, voice.id] : prev.filter((id) => id !== voice.id))} />
               <span className="flex-1 text-sm">{voice.name}</span>
-              <span className="text-[12px] text-fg2">{voiceSource(voice)}</span>
+              <VoiceSourceBadge source={voiceSource(voice)} />
             </label>
           ))}
           {shown.length === 0 && <p className="p-2 text-sm text-fg2">No voices match.</p>}
@@ -102,6 +106,7 @@ export function PreparationQueue() {
                 {job.status === "preparing" ? job.message ?? `Preparing ${job.done}/${job.total} passages` : job.status === "ready" ? "Prepared" : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : "Queued"}
               </div>
             </div>
+            <VoiceSourceBadge source={voiceSource(job.voice)} />
             {isPreparing(job) && <Button variant="ghost" size="sm" aria-label={`Cancel ${job.title} in ${job.voice.name}`} onClick={() => cancel(job.id)}>Cancel</Button>}
           </li>
         ))}

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchFishVoices, fetchServerVoices } from "../engine/providers";
 import { getVoice, useVoices } from "./voices";
+import { DEFAULT_VOICE_ID, LOCAL_VOICE, voiceSource } from "../data/voices";
 
 vi.mock("../engine/providers", async (original) => ({
   ...await original<typeof import("../engine/providers")>(),
@@ -81,5 +82,18 @@ describe("voice providers", () => {
   });
   it("keeps a saved Fish voice's identity outside the current catalogue", () => {
     expect(getVoice("fish:saved-voice")).toMatchObject({ id: "fish:saved-voice", engine: "fish", kind: "preset" });
+  });
+  it("identifies saved services when their catalogues are unavailable", () => {
+    useVoices.setState({ voices: [LOCAL_VOICE] });
+    expect(getVoice("nova")).toMatchObject({ id: "nova", name: "Nova", engine: "openai" });
+    expect(getVoice("coral~georgia")).toMatchObject({ name: "Savannah", engine: "openai" });
+    expect(getVoice("fish:saved-voice").engine).toBe("fish");
+    expect(getVoice(DEFAULT_VOICE_ID)).toMatchObject({ name: "Bella", engine: "kittentts" });
+    expect(getVoice("saved-profile")).toMatchObject({ id: "saved-profile", kind: "profile", engine: "omnivoice" });
+    expect(voiceSource(getVoice("saved-profile"))).toBe("VoiceStudio");
+  });
+  it("keeps VoiceStudio as the default even when cloud voices arrive first", () => {
+    useVoices.setState({ voices: [getVoice("nova"), LOCAL_VOICE] });
+    expect(getVoice(null)).toMatchObject({ id: DEFAULT_VOICE_ID, engine: "kittentts" });
   });
 });

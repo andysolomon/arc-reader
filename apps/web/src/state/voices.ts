@@ -52,7 +52,7 @@ function langLabel(l: string | null | undefined): string {
 }
 
 export const useVoices = create<VoicesState>()((set, get) => ({
-  voices: [...cloud(), ...(hasApi() ? PRESET_VOICES : []), LOCAL_VOICE],
+  voices: [...(hasApi() ? PRESET_VOICES : []), ...cloud(), LOCAL_VOICE],
   engines: [],
   activeEngine: null,
   loaded: false,
@@ -97,7 +97,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
       const engineOpts: EngineOption[] = (engines as ServerEngine[])
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false, cloning: e.supports_cloning === true }));
       const clouds = get().voices.filter((v) => v.engine === OPENAI_ENGINE || v.engine === FISH_ENGINE);
-      set({ voices: [...clouds, ...profiles, ...presets, LOCAL_VOICE], engines: engineOpts.length ? engineOpts : get().engines, activeEngine: activeEngine ?? get().activeEngine });
+      set({ voices: [...profiles, ...presets, ...clouds, LOCAL_VOICE], engines: engineOpts.length ? engineOpts : get().engines, activeEngine: activeEngine ?? get().activeEngine });
     } catch {
       // Keep available voices if the local speech server is offline.
     }
@@ -108,11 +108,14 @@ export function getVoice(id: string | null | undefined): Voice {
   const list = useVoices.getState().voices;
   const found = list.find((v) => v.id === id);
   if (found) return found;
+  const preset = [...PRESET_VOICES, ...OPENAI_VOICES, ...OPENAI_ACCENT_VOICES, ...FISH_PRESET_VOICES, LOCAL_VOICE].find((v) => v.id === id);
+  if (preset) return preset;
   // A saved document can reference a voice outside the current catalogue page.
-  if (hasFish() && id?.startsWith("fish:") && id.length > 5) {
+  if (id?.startsWith("fish:") && id.length > 5) {
     return { ...FISH_DEFAULT_VOICE, id, name: "Fish Audio voice", hue: hueFor(id) };
   }
-  return list.find((v) => v.id === DEFAULT_VOICE_ID) ?? list[0];
+  if (id) return { id, name: "Saved VoiceStudio voice", engine: useVoices.getState().activeEngine ?? "omnivoice", kind: "profile", lang: "", tags: [], hue: hueFor(id) };
+  return list.find((v) => v.id === DEFAULT_VOICE_ID) ?? PRESET_VOICES[0];
 }
 
 export const isLocalVoice = (id: string | null | undefined) => id === LOCAL_VOICE_ID;

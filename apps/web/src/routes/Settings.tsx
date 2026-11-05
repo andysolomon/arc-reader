@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Copy, Check } from "lucide-react";
 import { THEMES } from "@readaloud/tokens";
-import { Chip, SectionLabel, Segmented, Switch, ThemeSwatch, VoiceAvatar, Button } from "@readaloud/ui";
+import { Chip, SectionLabel, Segmented, Switch, ThemeSwatch, VoiceAvatar, VoiceSourceBadge, Button } from "@readaloud/ui";
+import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
 import { useSettings, useThemeId } from "../state/settings";
 import { usePlayer } from "../state/player";
@@ -93,6 +94,7 @@ export function SettingsPage() {
             <RowItem label="Default voice">
               <Chip size="sm" leading={<VoiceAvatar voice={voice} size={22} />} trailing={<ChevronRight size={16} strokeWidth={1.5} aria-hidden />} onClick={() => navigate("/voices")} className="bg-bg">
                 {voice.name}
+                <VoiceSourceBadge source={voiceSource(voice)} />
               </Chip>
             </RowItem>
             <RowItem label="Default speed">

@@ -8,6 +8,7 @@ import { planPassages, segment } from "./segment";
 export interface PreparedVoice {
   voiceId: string;
   name: string;
+  engine: string;
   fraction: number;
 }
 
@@ -33,6 +34,6 @@ export function preparedVoices(rec: DocRecord, voices: Voice[], keys: Set<string
         if (cached || keys.has(key(sentence.text))) ready += weight;
       }
     }
-    return ready && total ? [{ voiceId: voice.id, name: voice.name, fraction: ready / total }] : [];
+    return ready && total ? [{ voiceId: voice.id, name: voice.name, engine: voice.engine, fraction: ready / total }] : [];
   });
 }

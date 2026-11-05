@@ -1,10 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-async function seedLibrary(page: Page) {
+async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null]) {
   await page.goto("/library");
   await page.getByRole("heading", { name: "Library", exact: true }).waitFor();
-  await page.evaluate(async () => {
+  await page.evaluate(async (voices) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open("readaloud", 1);
       request.onsuccess = () => resolve(request.result);
@@ -12,18 +12,37 @@ async function seedLibrary(page: Page) {
     });
     await new Promise<void>((resolve, reject) => {
       const tx = database.transaction("docs", "readwrite");
-      for (const id of ["First", "Second"]) tx.objectStore("docs").put({
-        id, title: `${id} document`, text: `${id} paragraph.\n\nMore ${id.toLowerCase()} text.`, voice: null,
-        source: "paste", domain: "Pasted text", chars: 40, createdAt: 1, updatedAt: 1,
-      });
+      for (const [index, voice] of voices.entries()) {
+        const id = ["First", "Second", "Third", "Fourth"][index];
+        tx.objectStore("docs").put({
+          id, title: `${id} document`, text: `${id} paragraph.\n\nMore ${id.toLowerCase()} text.`, voice,
+          source: "paste", domain: "Pasted text", chars: 40, createdAt: 1, updatedAt: 1,
+        });
+      }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
     database.close();
-  });
+  }, voiceIds);
   await page.reload();
-  await expect(page.getByRole("checkbox", { name: /Select .* document/ })).toHaveCount(2);
+  await expect(page.getByRole("checkbox", { name: /Select .* document/ })).toHaveCount(voiceIds.length);
 }
+
+test("Library identifies voice services in both views even outside the available catalogue", async ({ page }) => {
+  await seedLibrary(page, [null, "alloy", "fish:saved-narrator", "local"]);
+  const library = page.locator('[data-screen="library"]');
+  const identities = [["First", "VoiceStudio", "Bella"], ["Second", "ChatGPT", "Alloy"], ["Third", "Fish", "Fish Audio voice"], ["Fourth", "Browser", "Browser voice"]];
+  for (const view of ["List", "Cards"]) {
+    await page.getByRole("button", { name: view, exact: true }).click();
+    for (const [document, source, voice] of identities) {
+      const item = library.getByRole("listitem").filter({ has: page.getByRole("button", { name: `${document} document`, exact: true }) });
+      await expect(item.locator(`[data-voice-source="${source}"]`).first()).toBeVisible();
+      await expect(item).toContainText(voice);
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+});
 
 test("prepares multiple documents in multiple voices, reuses saved audio, and shows persisted coverage in both views", async ({ page }) => {
   await seedLibrary(page);
