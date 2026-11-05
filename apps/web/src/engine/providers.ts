@@ -7,7 +7,7 @@ import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
 import { OPENAI_ACCENTS, STEADY_NARRATION } from "../data/voices";
-import { preparedAudio } from "./preparation";
+import { hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest } from "./preparation";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
@@ -95,12 +95,15 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
   const model = req.engine === OPENAI_ENGINE ? openaiModelFor(req) : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
   const steerable = req.engine === OPENAI_ENGINE && isTokenSpeechModel(model);
   const streamUsage = steerable;
+  // Match VoiceStudio's normal 16-step setting. Its isolated Mac worker otherwise
+  // falls through to the model's slower 32-step default.
+  const omniVoice = req.engine === "omnivoice" || req.engine === "omnivoice-subprocess";
   // Only gpt-4o-mini-tts follows `instructions`; an accent voice adds its own on top of the steady delivery.
   const instructions = steerable ? (accent ? `${accent.instructions} ${STEADY_NARRATION}` : STEADY_NARRATION) : accent?.instructions;
   const r = await doFetch(`${base}/v1/audio/speech`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: streamUsage ? "text/event-stream, audio/mpeg" : "audio/mpeg, audio/*" },
-    body: JSON.stringify({ model, input: req.text, voice: accent?.voice ?? req.voice, instructions, response_format: "mp3", speed: 1, ...(streamUsage ? { stream_format: "sse" } : {}) }),
+    body: JSON.stringify({ model, input: req.text, voice: accent?.voice ?? req.voice, instructions, response_format: "mp3", speed: 1, ...(omniVoice ? { num_step: 16 } : {}), ...(streamUsage ? { stream_format: "sse" } : {}) }),
     signal: req.signal,
   });
   const streamed = r.headers.get("content-type")?.includes("text/event-stream") ? await readSpeechStream(r) : null;
@@ -329,6 +332,20 @@ export interface SynthOptions extends TtsRequest {
   onOffline?: () => void;
   onOnline?: () => void;
   onRejected?: (message: string) => void;
+}
+
+export const preparationRequests = (requests: SynthOptions[]): PreparationRequest[] => requests.map((r) => ({ key: cacheKey(r), text: r.text, voice: r.voice, engine: r.engine, profile: r.profile, protocol: API_KIND }));
+
+export async function prepareInBackground(requests: SynthOptions[], start: number, progress?: (done: number, total: number) => void, signal?: AbortSignal) {
+  if (API_BASE !== "/api/vs") throw new Error("Background preparation needs the built-in /api/vs connection.");
+  const items = preparationRequests(requests);
+  await Promise.all(items.map(async (item, index) => { item.cached = !!await fromCache(requests[index]); }));
+  signal?.throwIfAborted();
+  if (items.every((item) => item.cached) && !hasActivePreparation(items)) {
+    progress?.(items.length, items.length);
+    return;
+  }
+  return prepareAudio(items, start, progress, signal);
 }
 
 /**

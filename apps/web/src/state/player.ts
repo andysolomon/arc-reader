@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
-import { API_BASE, API_KIND, cacheKey, fromCache, hasSpeechApi, isPaidEngine, type SynthOptions } from "../engine/providers";
-import { hasActivePreparation, prepareAudio, type PreparationRequest } from "../engine/preparation";
+import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground } from "../engine/providers";
+import { hasActivePreparation } from "../engine/preparation";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { segment } from "../lib/segment";
 import { getVoice, voiceLang, isLocalVoice } from "./voices";
@@ -14,7 +14,6 @@ import { hasPatois, preparePatois } from "../lib/patois";
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
 let retryPreparation: (() => Promise<boolean>) | null = null;
-const preparationRequests = (requests: SynthOptions[]): PreparationRequest[] => requests.map((r) => ({ key: cacheKey(r), text: r.text, voice: r.voice, engine: r.engine, profile: r.profile, protocol: API_KIND }));
 const variant = (id: string) => id === JAMAICAN_PATOIS_VOICE_ID ? "patois" : "original";
 
 export interface PlayerState extends EngineSnapshot {
@@ -75,12 +74,7 @@ export const engine = new PlaybackEngine({
   openaiModel: () => useSettings.getState().openaiModel,
   isProfileVoice: (id) => getVoice(id).kind === "profile",
   offline: () => usePlayer.getState().offline || useSettings.getState().engine === LOCAL_ENGINE,
-  prepareAudio: async (requests, start, progress, signal) => {
-    if (API_BASE !== "/api/vs") throw new Error("Background preparation needs the built-in /api/vs connection.");
-    const items = preparationRequests(requests);
-    await Promise.all(items.map(async (item, index) => { item.cached = !!await fromCache(requests[index]); }));
-    return prepareAudio(items, start, progress, signal);
-  },
+  prepareAudio: prepareInBackground,
   onRejected: (m) => toast(m),
   onOffline: () => {
     if (!usePlayer.getState().offline) {

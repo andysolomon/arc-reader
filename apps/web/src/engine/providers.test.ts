@@ -38,7 +38,14 @@ describe("openaiSpeechSynthesize", () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ tts: { active: "omnivoice", backends: [{ id: "omnivoice", supports_cloning: true }] } })))
       .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" })));
     await openaiSpeechSynthesize({ text: "x", voice: "prof-1", engine: "omnivoice", profile: true });
-    expect(JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body)).model).toBe("tts-1");
+    expect(JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body))).toMatchObject({ model: "tts-1", num_step: 16 });
+  });
+
+  it.each(["omnivoice", "omnivoice-subprocess"])("uses the normal 16-step preset for %s", async (engine) => {
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" })));
+    await openaiSpeechSynthesize({ text: "Hello there.", voice: "default", engine });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body).toMatchObject({ model: engine, num_step: 16 });
   });
 
   it("refuses to silently substitute a preset for a cloned profile", async () => {
@@ -151,6 +158,7 @@ describe("OpenAI engine routing", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/oa/v1/audio/speech");
     expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-4o-mini-tts", voice: "nova" });
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("num_step");
   });
 
   it("asks gpt-4o-mini-tts for one steady delivery on every request", async () => {

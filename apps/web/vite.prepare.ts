@@ -198,6 +198,7 @@ export class PreparationService {
     return this.upstream("/v1/audio/speech", {
       model: item.profile || ALIAS.test(item.voice) ? "tts-1" : item.engine,
       input: item.text, voice: item.voice, response_format: "mp3", speed: 1,
+      ...(["omnivoice", "omnivoice-subprocess"].includes(item.engine) ? { num_step: 16 } : {}),
     });
   }
 }

@@ -657,6 +657,12 @@ export class PlaybackEngine {
 
   private persistSoon(delay = 800) {
     if (this.persistTimer) clearTimeout(this.persistTimer);
+    if (delay === 0) {
+      this.persistTimer = null;
+      // Pausing can be followed immediately by navigation; start saving before the page unloads.
+      if (this.doc) this.opts.onPersist(this.snap);
+      return;
+    }
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
       if (this.doc) this.opts.onPersist(this.snap);

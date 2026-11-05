@@ -94,9 +94,17 @@ export const positions = {
 };
 
 const AUDIO_CACHE_MAX = 2000;
+const audioListeners = new Set<() => void>();
+const notifyAudio = () => audioListeners.forEach((listener) => listener());
 
 export const audioCache = {
   get: async (key: string) => (await db()).get("audio", key),
+  /** Read coverage without loading audio blobs into memory. */
+  keys: async () => (await db()).getAllKeys("audio"),
+  subscribe(listener: () => void) {
+    audioListeners.add(listener);
+    return () => { audioListeners.delete(listener); };
+  },
   async put(rec: AudioRecord) {
     const d = await db();
     await d.put("audio", rec);
@@ -112,6 +120,10 @@ export const audioCache = {
         }
       }
     }
+    notifyAudio();
   },
-  clear: async () => (await db()).clear("audio"),
+  async clear() {
+    await (await db()).clear("audio");
+    notifyAudio();
+  },
 };
