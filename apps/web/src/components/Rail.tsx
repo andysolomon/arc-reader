@@ -1,8 +1,9 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { PenLine, Library, Mic, SlidersHorizontal, Terminal, PanelLeft, AudioLines } from "lucide-react";
+import { Clipboard, PenLine, Library, Mic, SlidersHorizontal, Terminal, PanelLeft, AudioLines } from "lucide-react";
 import { THEMES, getTheme } from "@readaloud/tokens";
 import { ThemeIcon, cn } from "@readaloud/ui";
 import { useSettings, useThemeId } from "../state/settings";
+import { useClipboardImport } from "../hooks/useClipboardImport";
 
 export const NAV = [
   { to: "/", label: "Compose", Icon: PenLine, end: true },
@@ -23,6 +24,7 @@ export function useCycleTheme() {
 }
 
 export function Rail() {
+  const clipboard = useClipboardImport();
   const open = useSettings((s) => s.railOpen);
   const set = useSettings((s) => s.set);
   const theme = getTheme(useThemeId());
@@ -43,6 +45,18 @@ export function Rail() {
         </span>
         {open && <span className="whitespace-nowrap font-serif text-[17px] font-medium">ReadAloud</span>}
       </div>
+      <button
+        type="button"
+        onClick={() => void clipboard.readClipboard()}
+        disabled={clipboard.busy}
+        aria-busy={clipboard.busy || undefined}
+        aria-label="Read clipboard"
+        title="Read clipboard (or paste outside a text field)"
+        className={cn(item, "mb-2 bg-bg2 text-fg hover:bg-bg3 disabled:opacity-50")}
+      >
+        <span className="grid size-5 shrink-0 place-items-center"><Clipboard size={20} strokeWidth={1.5} aria-hidden /></span>
+        {open && <span className="whitespace-nowrap">Read clipboard</span>}
+      </button>
       {NAV.map(({ to, label, Icon, end }) => (
         <NavLink
           key={to}

@@ -12,10 +12,12 @@ import { toast } from "../state/toast";
 import { fetchReadable, hostOf } from "../lib/fetchUrl";
 import { openDocument } from "../lib/openDoc";
 import { SPEED_STEPS } from "@readaloud/ui";
+import { useClipboardImport } from "../hooks/useClipboardImport";
 
 const DRAFT_KEY = "readaloud:draft";
 
 export function Compose() {
+  const clipboard = useClipboardImport();
   const navigate = useNavigate();
   const layout = useSettings((s) => s.composeLayout);
   const voice = getVoice(useSettings((s) => s.voice));
@@ -65,27 +67,6 @@ export function Compose() {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void listen();
-    }
-  };
-
-  const paste = async () => {
-    if (!navigator.clipboard?.readText) {
-      toast("Clipboard unavailable here — press Ctrl+V in the text box");
-      ta.current?.focus();
-      return;
-    }
-    try {
-      const t = await navigator.clipboard.readText();
-      if (!t.trim()) {
-        toast("Clipboard is empty");
-        return;
-      }
-      setText(t);
-      setTitle(undefined);
-      ta.current?.focus();
-    } catch {
-      toast("Clipboard access was denied — press Ctrl+V in the text box");
-      ta.current?.focus();
     }
   };
 
@@ -147,8 +128,8 @@ export function Compose() {
           />
         </motion.div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button leading={<Clipboard size={16} strokeWidth={1.5} />} onClick={paste}>
-            Paste from clipboard
+          <Button leading={<Clipboard size={16} strokeWidth={1.5} />} onClick={() => void clipboard.readClipboard()} loading={clipboard.busy} disabled={busy !== null}>
+            Read clipboard
           </Button>
           <Button leading={<Link2 size={16} strokeWidth={1.5} />} onClick={() => setShowUrl((v) => !v)} aria-expanded={showUrl}>
             From URL
@@ -178,13 +159,13 @@ export function Compose() {
         {showUrl && (
           <form onSubmit={fetchUrl} className="flex gap-2 animate-rise">
             <Input ref={urlRef} type="url" required placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Article URL" className="flex-1" />
-            <Button type="submit" size="md" loading={busy === "fetch"} className="bg-bg3">
+            <Button type="submit" size="md" loading={busy === "fetch"} disabled={clipboard.busy} className="bg-bg3">
               Fetch
             </Button>
           </form>
         )}
         <div className="mt-1 flex items-center gap-4">
-          <Button variant="primary" size="xl" onClick={listen} loading={busy === "listen"} data-testid="listen">
+          <Button variant="primary" size="xl" onClick={listen} loading={busy === "listen"} disabled={clipboard.busy} data-testid="listen">
             Listen
             <span className="rounded-[6px] bg-black/15 px-2 py-1 font-mono text-[12px] font-medium" aria-hidden>
               ⌘↵
