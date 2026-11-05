@@ -4,7 +4,7 @@ import { ApiBusy, ApiRejected } from "./types";
 import { audioCache } from "../lib/db";
 
 vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
-vi.mock("../lib/usage", () => ({ addUsage: vi.fn() }));
+vi.mock("../lib/usage", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/usage")>(), addUsage: vi.fn() }));
 const req = { text: "Hello from Fish Audio.", voice: "fish:voice-123", engine: "fish" };
 const audio = () => new Response(new Uint8Array(64), { headers: { "Content-Type": "audio/mpeg" } });
 const fetchMock = vi.fn();
