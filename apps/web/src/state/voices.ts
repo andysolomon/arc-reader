@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
 import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
-import { studioJson, type Profile } from "../lib/studio";
+import { archetypeOf, idPath, studioFetch, studioJson, type Profile } from "../lib/studio";
 import { LOCAL_ENGINE } from "../engine/types";
 
 export interface EngineOption {
@@ -24,6 +24,8 @@ interface VoicesState {
   load: () => Promise<void>;
   loadFish: () => Promise<void>;
   loadServer: () => Promise<void>;
+  /** Delete a saved VoiceStudio profile. A gallery voice reappears in Studio; a clone's reference is gone for good. */
+  remove: (id: string) => Promise<void>;
 }
 
 const ENGINE_LABELS: Record<string, string> = {
@@ -93,7 +95,11 @@ export const useVoices = create<VoicesState>()((set, get) => ({
       const presets = available.size ? PRESET_VOICES.filter((v) => available.has(v.engine)) : PRESET_VOICES;
       const profiles: Voice[] = voices
         .filter((v) => v.type === "profile")
-        .map((v) => ({ id: v.id, name: v.name, lang: langLabel(v.language), tags: [profileMap.get(v.id)?.kind === "design" ? "designed" : "cloned"], hue: hueFor(v.id), engine: profileEngine, kind: "profile" as const }));
+        .map((v): Voice => {
+          const profile = profileMap.get(v.id);
+          const archetype = archetypeOf(profile);
+          return { id: v.id, name: v.name, lang: langLabel(v.language), tags: [profile?.kind === "design" ? "designed" : "cloned"], hue: hueFor(v.id), engine: profileEngine, kind: "profile", ...(archetype ? { archetype } : {}) };
+        });
       const engineOpts: EngineOption[] = (engines as ServerEngine[])
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false, cloning: e.supports_cloning === true }));
       const clouds = get().voices.filter((v) => v.engine === OPENAI_ENGINE || v.engine === FISH_ENGINE);
@@ -101,6 +107,11 @@ export const useVoices = create<VoicesState>()((set, get) => ({
     } catch {
       // Keep available voices if the local speech server is offline.
     }
+  },
+  async remove(id) {
+    await studioFetch(`/profiles/${idPath(id)}`, { method: "DELETE" });
+    set({ voices: get().voices.filter((v) => v.id !== id) });
+    await get().loadServer();
   },
 }));
 

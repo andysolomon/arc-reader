@@ -11,7 +11,7 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
-import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource } from "../data/voices";
+import { DEFAULT_VOICE_ID, JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
 import { ClearFilters, FilterSelect } from "../components/Filters";
@@ -139,6 +139,21 @@ export function VoicesPage() {
     toast(`${v.name} selected`);
   };
 
+  // Only voices added from the Studio gallery can go back: the recipe lives on in the gallery,
+  // whereas deleting a clone would discard its reference recording.
+  const demote = async (id: string) => {
+    const v = getVoice(id);
+    if (previewing === id) stopPreview();
+    try {
+      await useVoices.getState().remove(id);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : `Could not send ${v.name} back to Studio`);
+      return;
+    }
+    if (useSettings.getState().voice === id) set("voice", DEFAULT_VOICE_ID);
+    toast(`${v.name} sent back to the Studio gallery`);
+  };
+
   const current = forDoc ? (loadedDoc?.id === forDoc ? docVoice : selected) : selected;
   // Group by the service that renders each voice. Sections keep a fixed order:
   // the store's order depends on which provider answered first.
@@ -188,7 +203,8 @@ export function VoicesPage() {
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
               {voices.map((v) => (
-                <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
+                <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)}
+                  onRemove={v.archetype ? () => void demote(v.id) : undefined} removeLabel={`Send ${v.name} back to Studio`} />
               ))}
             </div>
           </section>

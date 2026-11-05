@@ -3,8 +3,11 @@ import AxeBuilder from "@axe-core/playwright";
 
 test.use({ launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } });
 
-async function mockStudio(page: Page) {
-  const profiles = [{ id: "voice-1", name: "My narrator", kind: "clone", language: "English" }];
+type MockProfile = { id: string; name: string; kind: string; language: string; personality?: string };
+const LIBRARIAN_PROFILE: MockProfile = { id: "voice-3", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" };
+
+async function mockStudio(page: Page, extraProfiles: MockProfile[] = []) {
+  const profiles: MockProfile[] = [{ id: "voice-1", name: "My narrator", kind: "clone", language: "English" }, ...extraProfiles];
   const calls: { path: string; body: string }[] = [];
   await page.route("**/api/vs/**", async (route) => {
     const req = route.request();
@@ -18,11 +21,12 @@ async function mockStudio(page: Page) {
     else if (path === "/engines") body = { tts: { active: "omnivoice", backends: [{ id: "omnivoice", supports_cloning: true }] } };
     else if (path === "/v1/audio/voices") body = { voices: profiles.map((p) => ({ ...p, type: "profile" })), engines: [{ id: "kittentts", available: true }] };
     else if (path === "/profiles" && req.method() === "GET") body = profiles;
-    else if (path === "/profiles") { body = { id: "voice-2", name: "New voice", kind: req.postData()?.includes('name="vd_states"') ? "design" : "clone", language: "English" }; profiles.push(body as typeof profiles[0]); }
+    else if (path === "/profiles") { body = { id: "voice-2", name: "New voice", kind: req.postData()?.includes('name="vd_states"') ? "design" : "clone", language: "English" }; profiles.push(body as MockProfile); }
+    else if (path.startsWith("/profiles/") && req.method() === "DELETE") { const id = path.slice("/profiles/".length); const at = profiles.findIndex((p) => p.id === id); if (at < 0) return route.fulfill({ status: 404, json: { detail: "Profile not found" } }); profiles.splice(at, 1); body = { deleted: id }; }
     else if (path === "/design/describe") body = { attrs: { Gender: "female", Pitch: "low pitch" }, instruct: "female, low pitch", unmatched: ["raspy"] };
     else if (path === "/archetypes") body = { total: 1, items: [{ id: "librarian", name: "The Librarian", language: "English", use_case: "narration", instruct: "female, low pitch, british accent" }] };
     else if (path.endsWith("/preview/state")) body = { source: "rendering", message: "Rendering" };
-    else if (path === "/archetypes/librarian/use") body = { profile_id: "voice-1", name: "The Librarian" };
+    else if (path === "/archetypes/librarian/use") { if (!profiles.some((p) => p.id === LIBRARIAN_PROFILE.id)) profiles.push({ ...LIBRARIAN_PROFILE }); body = { profile_id: LIBRARIAN_PROFILE.id, name: LIBRARIAN_PROFILE.name }; }
     else if (path === "/transcribe") body = { text: "Hello from the recording.", segments: [{ start: 0, end: 2.5, text: "Hello from the recording." }] };
     else if (path === "/dub/upload") body = { job_id: "dub-1", task_id: "prep-1" };
     else if (path.startsWith("/tasks/stream/")) return route.fulfill({ contentType: "text/event-stream", body: `data: {"type":"${path.endsWith("prep-1") ? "ready" : "done"}"}\n\n` });
@@ -62,14 +66,50 @@ test("designs only recognized traits and shows unsupported words", async ({ page
   expect(calls.find((c) => c.path === "/profiles" && c.body)?.body).toContain('name="vd_states"');
 });
 
-test("imports actual gallery recipes and searches the catalog", async ({ page }) => {
+test("imports actual gallery recipes, moves them out of Studio, and searches the catalog", async ({ page }) => {
   const calls = await mockStudio(page);
   await page.goto("/studio/gallery");
   await page.getByRole("button", { name: "Add to Voices" }).click();
-  await expect(page.getByRole("button", { name: "Added", exact: true })).toBeDisabled();
+  await expect(page.getByRole("status").filter({ hasText: "The Librarian added to Voices." })).toBeVisible();
+  await expect(page.getByRole("article", { name: "The Librarian" })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "1 on this page already in Voices" })).toBeVisible();
+  await expect(page.getByText("Every voice on this page is already in Voices.")).toBeVisible();
   expect(calls.some((c) => c.path === "/archetypes/librarian/use")).toBe(true);
   await page.getByLabel("Search designed voices").fill("British");
   await expect.poll(() => calls.filter((c) => c.path === "/archetypes").length).toBeGreaterThan(1);
+  await page.getByRole("link", { name: "Voices", exact: true }).first().click();
+  await expect(page.locator('[data-voice="voice-3"]').getByRole("button", { name: "Send The Librarian back to Studio" })).toBeVisible();
+});
+
+test("Voices sends a gallery voice back to Studio but never offers that for clones", async ({ page }) => {
+  const calls = await mockStudio(page, [LIBRARIAN_PROFILE]);
+  await page.goto("/studio/gallery");
+  await expect(page.getByRole("status").filter({ hasText: "1 on this page already in Voices" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "The Librarian" })).toHaveCount(0);
+  await page.goto("/voices");
+  const librarian = page.locator('[data-voice="voice-3"]');
+  await expect(librarian.getByText("designed", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-voice="voice-1"]').getByRole("button", { name: /back to Studio/ })).toHaveCount(0);
+  await librarian.getByRole("button", { name: "Use", exact: true }).click();
+  await expect(librarian.getByRole("button", { name: "Selected" })).toBeVisible();
+  await librarian.getByRole("button", { name: "Send The Librarian back to Studio" }).click();
+  await expect(page.getByText("The Librarian sent back to the Studio gallery")).toBeVisible();
+  await expect(librarian).toHaveCount(0);
+  await expect(page.locator('[data-voice="expr-voice-2-f"]').getByRole("button", { name: "Selected" })).toBeVisible();
+  expect(calls.some((c) => c.path === "/profiles/voice-3")).toBe(true);
+  await page.getByRole("link", { name: "Studio", exact: true }).first().click();
+  await page.getByRole("link", { name: "Voice gallery" }).click();
+  await expect(page.getByRole("article", { name: "The Librarian" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "The Librarian" }).getByRole("button", { name: "Add to Voices" })).toBeEnabled();
+});
+
+test("a refused removal keeps the voice and explains why", async ({ page }) => {
+  await mockStudio(page, [LIBRARIAN_PROFILE]);
+  await page.route("**/api/vs/profiles/voice-3", (route) => route.request().method() === "DELETE" ? route.fulfill({ status: 409, json: { detail: "Profile is locked" } }) : route.fallback());
+  await page.goto("/voices");
+  await page.locator('[data-voice="voice-3"]').getByRole("button", { name: "Send The Librarian back to Studio" }).click();
+  await expect(page.getByText("Profile is locked")).toBeVisible();
+  await expect(page.locator('[data-voice="voice-3"]')).toBeVisible();
 });
 
 test("transcribes a file and saves edited text to Library", async ({ page }) => {

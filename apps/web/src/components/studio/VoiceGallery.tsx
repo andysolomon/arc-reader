@@ -29,7 +29,11 @@ export function VoiceGallery() {
   const generated = usePreviews((s) => s.ready);
   const jobs = usePreviews((s) => s.jobs);
   const openPreview = usePreviews((s) => s.open);
-  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const voices = useVoices((s) => s.voices);
+  const voicesLoaded = useVoices((s) => s.loaded);
+  const loadVoices = useVoices((s) => s.load);
+  // Recipes already saved as voices belong to Voices now; send one back from there to see it here again.
+  const inVoices = useMemo(() => new Set(voices.flatMap((v) => (v.archetype ? [v.archetype] : []))), [voices]);
   const favorites = useGallery((s) => s.favorites);
   const toggleFavorite = useGallery((s) => s.toggleFavorite);
   const op = useOperation();
@@ -38,15 +42,18 @@ export function VoiceGallery() {
     .map(([, voice]) => voice), [favorites]);
   const matchingFavorites = useMemo(() => {
     const search = query.trim().toLowerCase();
-    return favoriteVoices.filter((voice) => matchesGallery(voice, filters) && [voice.name, voice.instruct, voice.language, voice.use_case].join(" ").toLowerCase().includes(search));
-  }, [favoriteVoices, query, filters]);
+    return favoriteVoices.filter((voice) => !inVoices.has(voice.id) && matchesGallery(voice, filters) && [voice.name, voice.instruct, voice.language, voice.use_case].join(" ").toLowerCase().includes(search));
+  }, [favoriteVoices, query, filters, inVoices]);
   const filterCount = activeFilterCount(filters);
   const setFilter = (key: keyof GalleryFilters, value: string) => { setFilters((f) => ({ ...f, [key]: value })); setPage(0); };
   const count = favoritesOnly ? matchingFavorites.length : total;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(count / PAGE_SIZE) - 1));
   const visibleItems = useMemo(() => favoritesOnly
     ? matchingFavorites.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
-    : items, [favoritesOnly, matchingFavorites, currentPage, items]);
+    : items.filter((voice) => !inVoices.has(voice.id)), [favoritesOnly, matchingFavorites, currentPage, items, inVoices]);
+  const hidden = favoritesOnly ? 0 : items.length - visibleItems.length;
+
+  useEffect(() => { if (!voicesLoaded) void loadVoices(); }, [voicesLoaded, loadVoices]);
 
   useEffect(() => {
     if (favoritesOnly) { setLoading(false); setLoadError(""); return; }
@@ -83,7 +90,7 @@ export function VoiceGallery() {
   }, [visibleItems]);
 
   return <div className="flex flex-col gap-5">
-    <div><h2 className="font-serif text-xl">Designed voice gallery</h2><p className="mt-2 text-sm text-fg2">VoiceStudio’s original catalog. Preview a character, favorite it, or add its recipe to your saved voices. <Link to="/voices" className="underline">Find Fish and ChatGPT voices in Voices.</Link></p></div>
+    <div><h2 className="font-serif text-xl">Designed voice gallery</h2><p className="mt-2 text-sm text-fg2">VoiceStudio’s original catalog. Preview a character, favorite it, or add its recipe to your saved voices. Added voices move to <Link to="/voices" className="underline">Voices</Link>, where you can send one back here.</p></div>
     <div className="flex flex-wrap gap-2" role="group" aria-label="Gallery view">
       <Button variant={favoritesOnly ? "secondary" : "primary"} aria-pressed={!favoritesOnly} onClick={() => { setFavoritesOnly(false); setPage(0); }}>All voices</Button>
       <Button variant={favoritesOnly ? "primary" : "secondary"} aria-pressed={favoritesOnly} onClick={() => { setFavoritesOnly(true); setPage(0); }}><Star size={14} aria-hidden />Favorites ({favoriteVoices.length})</Button>
@@ -95,7 +102,7 @@ export function VoiceGallery() {
       <div className="flex items-end"><ClearFilters count={filterCount} onClear={() => { setFilters(NO_GALLERY_FILTERS); setPage(0); }} /></div>
     </fieldset>
     {preview && <GalleryPreview id={preview.id} name={preview.name} />}
-    <p role="status" className="text-sm text-fg2">{loading ? "Loading gallery…" : `${count} ${favoritesOnly ? "favorite voices" : "voices"}`}{op.status && ` · ${op.status}`}</p>
+    <p role="status" className="text-sm text-fg2">{loading ? "Loading gallery…" : `${count} ${favoritesOnly ? "favorite voices" : "voices"}`}{hidden > 0 && ` · ${hidden} on this page already in Voices`}{op.status && ` · ${op.status}`}</p>
     <ErrorNotice error={loadError || op.error} />
     <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
       {visibleItems.map((voice) => {
@@ -118,13 +125,14 @@ export function VoiceGallery() {
             </span>
           </div>
           <p className="text-xs uppercase tracking-wide text-fg2">{voice.use_case} · {voice.language}</p><p className="flex-1 text-sm text-fg2">{voice.instruct}</p>
-          <div className="flex flex-wrap gap-2"><Button onClick={() => { op.setError(""); openPreview(voice.id, voice.name); }}>{ready && <Play size={14} aria-hidden />}{ready ? "Play preview" : "Preview"}</Button><Button disabled={op.busy || saved.has(voice.id)} onClick={() => void op.run(async (signal) => {
+          <div className="flex flex-wrap gap-2"><Button onClick={() => { op.setError(""); openPreview(voice.id, voice.name); }}>{ready && <Play size={14} aria-hidden />}{ready ? "Play preview" : "Preview"}</Button><Button disabled={op.busy} onClick={() => void op.run(async (signal) => {
             const result = await studioJson<{ profile_id: string; name: string }>(`/archetypes/${idPath(voice.id)}/use`, { method: "POST", signal });
-            setSaved((before) => new Set([...before, voice.id])); await useVoices.getState().load(); op.setStatus(`${result.name} added to Voices.`);
-          })}>{saved.has(voice.id) ? "Added" : "Add to Voices"}</Button></div>
+            await useVoices.getState().load(); op.setStatus(`${result.name} added to Voices.`);
+          })}>Add to Voices</Button></div>
         </article>;
       })}
     </div>
+    {!loading && !loadError && count > 0 && visibleItems.length === 0 && <p className="text-fg2">Every voice on this page is already in Voices.</p>}
     {!loading && count === 0 && !loadError && <p className="text-fg2">{favoritesOnly && !favoriteVoices.length ? "No favorites yet. Star a voice in All voices to keep it here." : filterCount ? "No voices match these filters." : "No voices match that search."}</p>}
     <div className="flex items-center gap-3"><Button disabled={currentPage === 0 || loading} onClick={() => setPage(currentPage - 1)}>Previous</Button><span className="text-sm text-fg2">Page {currentPage + 1}</span><Button disabled={(currentPage + 1) * PAGE_SIZE >= count || loading} onClick={() => setPage(currentPage + 1)}>Next</Button></div>
   </div>;

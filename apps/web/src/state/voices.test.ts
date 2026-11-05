@@ -7,11 +7,15 @@ vi.mock("../engine/providers", async (original) => ({
   ...await original<typeof import("../engine/providers")>(),
   fetchFishVoices: vi.fn(), fetchServerVoices: vi.fn(),
 }));
-vi.mock("../lib/studio", () => ({
-  studioJson: async (path: string) => path === "/profiles" ? [] : { tts: { active: "omnivoice" } },
+const profiles: { id: string; name: string; kind: string; language: string; personality?: string | null }[] = [];
+const studioFetch = vi.fn(async () => new Response("{}"));
+vi.mock("../lib/studio", async (original) => ({
+  ...await original<typeof import("../lib/studio")>(),
+  studioJson: async (path: string) => path === "/profiles" ? profiles : { tts: { active: "omnivoice" } },
+  studioFetch: (...args: unknown[]) => studioFetch(...(args as [])),
 }));
 const initial = useVoices.getState();
-beforeEach(() => { vi.resetAllMocks(); useVoices.setState(initial, true); });
+beforeEach(() => { vi.resetAllMocks(); profiles.length = 0; studioFetch.mockResolvedValue(new Response("{}")); useVoices.setState(initial, true); });
 const fish = [{ _id: "narrator", title: "Narrator", languages: ["en"] }];
 const local = { voices: [{ id: "profile", name: "My voice", type: "profile" }], engines: [{ id: "kittentts", available: true }] };
 
@@ -79,6 +83,30 @@ describe("voice providers", () => {
     vi.mocked(fetchFishVoices).mockResolvedValue(fish);
     await useVoices.getState().loadFish();
     expect(useVoices.getState().fishError).toBeNull();
+  });
+  it("links voices added from the Studio gallery to their recipe and sends them back on removal", async () => {
+    profiles.push(
+      { id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" },
+      { id: "mine", name: "My voice", kind: "clone", language: "English", personality: null },
+    );
+    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "lib", name: "The Librarian", type: "profile" }, { id: "mine", name: "My voice", type: "profile" }], engines: [] });
+    await useVoices.getState().loadServer();
+    expect(getVoice("lib")).toMatchObject({ kind: "profile", archetype: "librarian", tags: ["designed"] });
+    expect(getVoice("mine").archetype).toBeUndefined();
+    profiles.splice(0, 1);
+    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "mine", name: "My voice", type: "profile" }], engines: [] });
+    await useVoices.getState().remove("lib");
+    expect(studioFetch).toHaveBeenCalledWith("/profiles/lib", { method: "DELETE" });
+    expect(useVoices.getState().voices.some((v) => v.id === "lib")).toBe(false);
+    expect(getVoice("mine").id).toBe("mine");
+  });
+  it("keeps a voice when VoiceStudio refuses to delete it", async () => {
+    profiles.push({ id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" });
+    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "lib", name: "The Librarian", type: "profile" }], engines: [] });
+    await useVoices.getState().loadServer();
+    studioFetch.mockRejectedValueOnce(new Error("Profile is locked"));
+    await expect(useVoices.getState().remove("lib")).rejects.toThrow("Profile is locked");
+    expect(getVoice("lib").archetype).toBe("librarian");
   });
   it("keeps a saved Fish voice's identity outside the current catalogue", () => {
     expect(getVoice("fish:saved-voice")).toMatchObject({ id: "fish:saved-voice", engine: "fish", kind: "preset" });
