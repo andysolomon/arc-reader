@@ -6,6 +6,8 @@ export interface DocRecord {
   id: string;
   title: string;
   text: string;
+  /** Cached adaptation; the original text remains intact. */
+  patois?: { sourceText: string; text: string; version: number };
   source: DocSource;
   /** Hostname for URLs, file name for uploads, "Pasted text" otherwise */
   domain: string;
@@ -18,6 +20,7 @@ export interface DocRecord {
 
 export interface PositionRecord {
   docId: string;
+  variant?: "original" | "patois";
   index: number;
   /** seconds into the sentence at 1× */
   offset: number;
