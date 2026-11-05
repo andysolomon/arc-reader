@@ -103,3 +103,31 @@ describe("apiSynthesize queue", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("OpenAI engine routing", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends OpenAI voices to the OpenAI base with the OpenAI model", async () => {
+    const { openaiSpeechSynthesize } = await import("./providers");
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    await openaiSpeechSynthesize({ text: "x", voice: "nova", engine: "openai" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/oa/v1/audio/speech");
+    expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-4o-mini-tts", voice: "nova" });
+  });
+
+  it("does not queue OpenAI requests behind VoiceStudio ones", async () => {
+    const { apiSynthesize } = await import("./providers");
+    let inFlight = 0, maxInFlight = 0;
+    fetchMock.mockImplementation(async () => {
+      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 });
+    });
+    await Promise.all([1, 2, 3].map((i) => apiSynthesize({ text: `s${i}`, voice: "nova", engine: "openai" })));
+    expect(maxInFlight).toBe(3);
+  });
+});

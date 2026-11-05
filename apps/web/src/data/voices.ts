@@ -42,6 +42,23 @@ export const PRESET_VOICES: Voice[] = [
   supertonic("M5", "Kai", ["multilingual", "energetic"]),
 ];
 
+const openai = (id: string, name: string, tags: string[]): Voice => ({ id, name, lang: "MULTI · cloud", tags, hue: hueFor("openai:" + id), engine: "openai", kind: "preset" });
+
+/** The ChatGPT voices, served by OpenAI's speech endpoint. Ids are OpenAI's voice names. */
+export const OPENAI_VOICES: Voice[] = [
+  openai("alloy", "Alloy", ["neutral", "clear"]),
+  openai("ash", "Ash", ["warm", "steady"]),
+  openai("ballad", "Ballad", ["soft", "expressive"]),
+  openai("coral", "Coral", ["bright", "friendly"]),
+  openai("echo", "Echo", ["deep", "measured"]),
+  openai("fable", "Fable", ["storyteller", "narrator"]),
+  openai("nova", "Nova", ["energetic", "clear"]),
+  openai("onyx", "Onyx", ["deep", "narrator"]),
+  openai("sage", "Sage", ["calm", "documentary"]),
+  openai("shimmer", "Shimmer", ["light", "podcast"]),
+  openai("verse", "Verse", ["expressive", "podcast"]),
+];
+
 export const LOCAL_VOICE: Voice = { id: LOCAL_VOICE_ID, name: "Browser voice", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null, engine: LOCAL_ENGINE, kind: "local" };
 
 /** The list shown before (or without) a speech server. */

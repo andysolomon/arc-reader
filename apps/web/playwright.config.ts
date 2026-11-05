@@ -35,6 +35,12 @@ export default defineConfig({
             reuseExistingServer: !process.env.CI,
             timeout: 20_000,
           },
+          {
+            command: "node tests/stub-voicestudio.mjs 3998 oa-test-key",
+            url: "http://127.0.0.1:3998/health",
+            reuseExistingServer: !process.env.CI,
+            timeout: 20_000,
+          },
         ]),
     {
       // Built against the proxy; the preview server forwards /api/vs to the stub above.
@@ -48,6 +54,10 @@ export default defineConfig({
         VITE_DEFAULT_ENGINE: "kittentts",
         VOICESTUDIO_URL: LIVE ? process.env.VOICESTUDIO_URL || localEnv.VOICESTUDIO_URL || "http://127.0.0.1:3900" : "http://127.0.0.1:3999",
         VOICESTUDIO_API_KEY: LIVE ? process.env.VOICESTUDIO_API_KEY || localEnv.VOICESTUDIO_API_KEY || "" : "test-key",
+        VITE_OPENAI_BASE: "/api/oa",
+        VITE_OPENAI_TTS_MODEL: "gpt-4o-mini-tts",
+        OPENAI_URL: LIVE ? process.env.OPENAI_URL || localEnv.OPENAI_URL || "https://api.openai.com" : "http://127.0.0.1:3998",
+        OPENAI_API_KEY: LIVE ? process.env.OPENAI_API_KEY || localEnv.OPENAI_API_KEY || "" : "oa-test-key",
       },
     },
   ],

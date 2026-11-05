@@ -32,7 +32,8 @@ export interface EngineSnapshot {
 }
 
 export interface EngineOptions {
-  engine: () => EngineId;
+  /** Engine for a voice: presets name their own, cloned profiles use the chosen one, local is local */
+  engine: (voiceId: string) => EngineId;
   wordTimings: () => boolean;
   isProfileVoice: (voiceId: string) => boolean;
   offline: () => boolean;
@@ -285,11 +286,11 @@ export class PlaybackEngine {
       p = synthesize({
         text: s.text,
         voice: doc.voice,
-        engine: this.opts.engine(),
+        engine: this.opts.engine(doc.voice),
         profile: this.opts.isProfileVoice(doc.voice),
         wordTimings: this.opts.wordTimings(),
         words: s.words,
-        forceLocal: this.opts.offline() || doc.voice === "local" || this.opts.engine() === LOCAL_ENGINE,
+        forceLocal: this.opts.offline() || doc.voice === "local" || this.opts.engine(doc.voice) === LOCAL_ENGINE,
         onOffline: this.opts.onOffline,
         onOnline: this.opts.onOnline,
         onRejected: this.opts.onRejected,

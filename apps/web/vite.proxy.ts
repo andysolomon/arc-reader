@@ -7,14 +7,11 @@ import type { ProxyOptions } from "vite";
  * dropped: VoiceStudio's CSRF guard would reject an unknown origin, and a request
  * without one is treated as a non-browser client, which is what the proxy is.
  */
-export function voiceStudioProxy(env: Record<string, string>): Record<string, ProxyOptions> {
-  const target = (env.VOICESTUDIO_URL || "http://127.0.0.1:3900").replace(/\/$/, "");
-  const key = env.VOICESTUDIO_API_KEY || "";
+function route(prefix: string, target: string, key: string, extra: Partial<ProxyOptions> = {}): ProxyOptions {
   return {
-    "/api/vs": {
       target,
       changeOrigin: true,
-      rewrite: (p) => p.replace(/^\/api\/vs/, ""),
+      rewrite: (p) => p.slice(prefix.length),
       timeout: 120_000,
       proxyTimeout: 120_000,
       configure(proxy) {
@@ -27,10 +24,21 @@ export function voiceStudioProxy(env: Record<string, string>): Record<string, Pr
         proxy.on("error", (err, _req, res) => {
           if ("writeHead" in res && !res.headersSent) {
             res.writeHead(502, { "content-type": "application/json" });
-            res.end(JSON.stringify({ error: "voicestudio_unreachable", message: err.message }));
+            res.end(JSON.stringify({ error: "upstream_unreachable", message: err.message }));
           }
         });
       },
-    },
+      ...extra,
   };
+}
+
+/** /api/vs → VoiceStudio (loopback), /api/oa → OpenAI. Keys come from server-side env only. */
+export function voiceStudioProxy(env: Record<string, string>): Record<string, ProxyOptions> {
+  const routes: Record<string, ProxyOptions> = {
+    "/api/vs": route("/api/vs", (env.VOICESTUDIO_URL || "http://127.0.0.1:3900").replace(/\/$/, ""), env.VOICESTUDIO_API_KEY || ""),
+  };
+  if (env.OPENAI_API_KEY) {
+    routes["/api/oa"] = route("/api/oa", (env.OPENAI_URL || "https://api.openai.com").replace(/\/$/, ""), env.OPENAI_API_KEY, { secure: true });
+  }
+  return routes;
 }

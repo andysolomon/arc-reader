@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { TEXT } from "./helpers";
 
 /**
@@ -25,6 +26,24 @@ test.describe("@live VoiceStudio", () => {
     await expect(page.locator('article [data-i="0"] span.decoration-accent, article [data-i="1"]').first()).toBeVisible();
     console.log("first sentence audio after", responses[0].ms, "ms; next chunks at", responses.slice(1).map((r) => `${r.ms}ms`).join(", "));
     test.info().annotations.push({ type: "first-audio-ms", description: String(responses[0].ms) });
+  });
+
+  test("an OpenAI voice reads a sentence through the real API", async ({ page }) => {
+    const hasKey = !!process.env.OPENAI_API_KEY || /^OPENAI_API_KEY=.+/m.test((() => { try { return readFileSync(".env.local", "utf8"); } catch { return ""; } })());
+    test.skip(!hasKey, "no OpenAI key in .env.local");
+    test.setTimeout(60_000);
+    await page.goto("/voices");
+    await page.locator('[data-voice="nova"]').getByRole("button", { name: "Use" }).click();
+    await page.goto("/");
+    await page.getByLabel("Text to read").fill("Short test. One more sentence.");
+    const t0 = Date.now();
+    const first = page.waitForResponse((r) => r.url().includes("/api/oa/v1/audio/speech"));
+    await page.getByTestId("listen").click();
+    const r = await first;
+    expect(r.status()).toBe(200);
+    expect(r.headers()["content-type"]).toContain("audio/");
+    console.log("OpenAI first sentence audio after", Date.now() - t0, "ms");
+    await expect(page.getByRole("button", { name: /^(Play|Pause)/ })).toHaveAttribute("data-playing", "true");
   });
 
   test("voices and engines come from the real server", async ({ page }) => {

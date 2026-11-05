@@ -42,7 +42,7 @@ createServer(async (req, res) => {
     let j;
     try { j = JSON.parse(body); } catch { return json(res, 400, { error: { message: "Bad JSON" } }); }
     if (!j.input) return json(res, 422, { error: { message: "input is required", param: "input" } });
-    if (j.model && j.model !== "tts-1" && !ENGINES.some((e) => e.id === j.model && e.available)) return json(res, 400, { error: { message: `Engine '${j.model}' is not available`, param: "model", code: "model_not_available" } });
+    if (j.model && !/^(tts-1|tts-1-hd|gpt-.*-tts)$/.test(j.model) && !ENGINES.some((e) => e.id === j.model && e.available)) return json(res, 400, { error: { message: `Engine '${j.model}' is not available`, param: "model", code: "model_not_available" } });
     requests++;
     const words = String(j.input).trim().split(/\s+/).length;
     const seconds = Math.max(0.3, words / 2.83 / (j.speed || 1));

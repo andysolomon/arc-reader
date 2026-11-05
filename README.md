@@ -93,6 +93,18 @@ VOICESTUDIO_API_KEY=<the key you printed above>
 
 Then `npm run dev` (or `pnpm build && pnpm --filter @readaloud/web preview` for the tailnet build). The Voices page lists KittenTTS's eight presets plus any profiles you clone in VoiceStudio; Settings → Engine lists what the server reports.
 
+### OpenAI voices (the ChatGPT voices)
+
+The same adapter talks to OpenAI's speech endpoint. Add to `apps/web/.env.local`:
+
+```sh
+VITE_OPENAI_BASE=/api/oa
+VITE_OPENAI_TTS_MODEL=gpt-4o-mini-tts   # or tts-1 / tts-1-hd
+OPENAI_API_KEY=sk-...                     # read by the proxy only
+```
+
+The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; the Settings → Engine choice only affects cloned profiles and the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → Usage shows OpenAI characters for the month with a list-price estimate for text input. Every sentence sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
+
 ### Without VoiceStudio
 
 `LIVE=1 pnpm test:e2e` runs the `@live` specs against a real server (URL and key from `.env.local`) and prints the measured first-sentence latency. Without the flag, `tests/stub-voicestudio.mjs` imitates the API (bearer check, two cloned profiles, sine-tone audio, word timings). Playwright starts it automatically. To develop against it:

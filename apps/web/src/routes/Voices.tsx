@@ -60,7 +60,7 @@ export function VoicesPage() {
     const chunk = await synthesize({
       text,
       voice: v.id,
-      engine: v.kind === "preset" ? v.engine : engineId,
+      engine: v.kind === "preset" ? v.engine : v.kind === "local" ? LOCAL_ENGINE : engineId,
       profile: v.kind === "profile",
       signal: ac.signal,
       forceLocal: isLocalVoice(v.id) || engineId === LOCAL_ENGINE || usePlayer.getState().offline,

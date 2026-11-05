@@ -9,7 +9,13 @@ import type { WordTiming } from "../lib/db";
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
 export const DEFAULT_ENGINE: string = (import.meta.env.VITE_DEFAULT_ENGINE as string | undefined) || "kittentts";
+export const OPENAI_BASE = ((import.meta.env.VITE_OPENAI_BASE as string | undefined) ?? "").replace(/\/$/, "");
+export const OPENAI_MODEL: string = (import.meta.env.VITE_OPENAI_TTS_MODEL as string | undefined) || "gpt-4o-mini-tts";
+export const OPENAI_ENGINE = "openai";
 export const hasApi = () => API_BASE.length > 0;
+export const hasOpenAI = () => OPENAI_BASE.length > 0;
+/** Which server an engine lives on. */
+export const baseFor = (engine: string) => (engine === OPENAI_ENGINE ? OPENAI_BASE : API_BASE);
 
 /** OpenAI-style voice ids that VoiceStudio maps to the active engine's default voice. */
 const OPENAI_ALIAS = /^(alloy|ash|ballad|cedar|coral|echo|fable|marin|nova|onyx|sage|shimmer|verse)$/;
@@ -60,9 +66,10 @@ async function doFetch(url: string, init: RequestInit): Promise<Response> {
  * Presets name their engine via `model`; cloned profiles use the active engine alias.
  */
 export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boolean }): Promise<Chunk> {
-  if (!hasApi()) throw new ApiUnreachable("No API configured");
-  const model = req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
-  const r = await doFetch(`${API_BASE}/v1/audio/speech`, {
+  const base = baseFor(req.engine);
+  if (!base) throw new ApiUnreachable("No API configured");
+  const model = req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
+  const r = await doFetch(`${base}/v1/audio/speech`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "audio/mpeg, audio/*" },
     body: JSON.stringify({ model, input: req.text, voice: req.voice, response_format: "mp3", speed: 1 }),
@@ -135,6 +142,8 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
       }
     }
   };
+  // OpenAI handles concurrency; only the single-worker local server is serialized.
+  if (req.engine === OPENAI_ENGINE) return run();
   const p = chain.then(run, run);
   chain = p.catch(() => undefined);
   return p;
@@ -192,7 +201,7 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
   try {
     const chunk = await apiSynthesize(opts);
     opts.onOnline?.();
-    addUsage(opts.text.length);
+    addUsage(opts.text.length, opts.engine);
     if (opts.wordTimings && chunk.audio && opts.words?.length) {
       try {
         chunk.words = (await fetchWordTimings(chunk.audio, opts.words, opts.signal)) ?? undefined;

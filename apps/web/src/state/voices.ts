@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { DEFAULT_VOICES, DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
-import { fetchServerVoices, hasApi, API_KIND, DEFAULT_ENGINE, type ServerEngine } from "../engine/providers";
+import { DEFAULT_VOICES, DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
+import { fetchServerVoices, hasApi, hasOpenAI, API_KIND, DEFAULT_ENGINE, OPENAI_ENGINE, type ServerEngine } from "../engine/providers";
 import { LOCAL_ENGINE } from "../engine/types";
 
 export interface EngineOption {
@@ -26,7 +26,10 @@ const ENGINE_LABELS: Record<string, string> = {
   voxcpm2: "VoxCPM2",
   cosyvoice: "CosyVoice 3",
   [LOCAL_ENGINE]: "Browser voice",
+  [OPENAI_ENGINE]: "OpenAI",
 };
+
+const cloud = () => (hasOpenAI() ? OPENAI_VOICES : []);
 
 export const engineLabel = (id: string) => ENGINE_LABELS[id] ?? id;
 
@@ -44,12 +47,13 @@ function langLabel(l: string | null | undefined): string {
 }
 
 export const useVoices = create<VoicesState>()((set, get) => ({
-  voices: DEFAULT_VOICES,
+  voices: [...cloud(), ...DEFAULT_VOICES],
   engines: defaultEngines(),
   loaded: false,
   async load() {
     if (!hasApi() || API_KIND !== "openai") {
-      set({ loaded: true });
+      set({ voices: [...cloud(), ...(hasApi() ? PRESET_VOICES : [])], loaded: true });
+      if (!hasApi()) set({ voices: [...cloud(), LOCAL_VOICE] });
       return;
     }
     try {
@@ -62,7 +66,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
       const engineOpts: EngineOption[] = (engines as ServerEngine[])
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false }))
         .concat([{ id: LOCAL_ENGINE, label: engineLabel(LOCAL_ENGINE), available: true }]);
-      set({ voices: [...profiles, ...presets, LOCAL_VOICE], engines: engineOpts.length > 1 ? engineOpts : get().engines, loaded: true });
+      set({ voices: [...cloud(), ...profiles, ...presets, LOCAL_VOICE], engines: engineOpts.length > 1 ? engineOpts : get().engines, loaded: true });
     } catch {
       set({ loaded: true });
     }

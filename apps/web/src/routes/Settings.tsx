@@ -7,9 +7,9 @@ import { getVoice, useVoices } from "../state/voices";
 import { useSettings, useThemeId } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
-import { getUsage, PLAN_LIMIT } from "../lib/usage";
+import { getUsage, getUsageByEngine, PLAN_LIMIT, OPENAI_PRICE_PER_M } from "../lib/usage";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
-import { hasApi } from "../engine/providers";
+import { hasApi, hasOpenAI, OPENAI_MODEL } from "../engine/providers";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -43,8 +43,12 @@ export function SettingsPage() {
   const notInstalled = allEngines.length - engines.length;
   const [copied, setCopied] = useState(false);
   const [usage, setUsage] = useState(getUsage());
+  const [byEngine, setByEngine] = useState(getUsageByEngine());
   useEffect(() => {
-    const on = () => setUsage(getUsage());
+    const on = () => {
+      setUsage(getUsage());
+      setByEngine(getUsageByEngine());
+    };
     window.addEventListener("readaloud:usage", on);
     return () => window.removeEventListener("readaloud:usage", on);
   }, []);
@@ -136,7 +140,15 @@ export function SettingsPage() {
             limit={PLAN_LIMIT}
             footer={
               <>
-                <span>{usage === 0 ? "No cloud characters used yet this month" : "Counted when a cloud voice synthesizes text"}</span>
+                <span>
+                  {usage === 0 ? "No cloud characters used yet this month" : "Counted when a cloud voice synthesizes text"}
+                  {hasOpenAI() && (byEngine.openai ?? 0) > 0 && (
+                    <>
+                      {" · OpenAI "}
+                      {(byEngine.openai ?? 0).toLocaleString()} chars ≈ ${(((byEngine.openai ?? 0) / 1_000_000) * (OPENAI_PRICE_PER_M[OPENAI_MODEL] ?? 15)).toFixed(2)} ({OPENAI_MODEL}, text only)
+                    </>
+                  )}
+                </span>
                 <button type="button" onClick={() => toast("Billing opens on the web account page")} className="border-0 bg-transparent p-0 text-accent hover:text-fg">
                   Manage billing
                 </button>
