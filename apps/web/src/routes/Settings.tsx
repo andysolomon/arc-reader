@@ -10,7 +10,7 @@ import { toast } from "../state/toast";
 import { ApiUsage } from "../components/ApiUsage";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
 import { studioJson, jsonBody } from "../lib/studio";
-import { hasApi } from "../engine/providers";
+import { OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL, hasApi, hasOpenAI } from "../engine/providers";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -105,6 +105,16 @@ export function SettingsPage() {
             <RowItem label="Auto-play on share" hint="When text arrives from the share sheet, open the Reader already playing.">
               <Switch checked={s.autoplayShare} onChange={(v) => s.set("autoplayShare", v)} label="Auto-play on share" />
             </RowItem>
+            {hasOpenAI() && (
+              <RowItem label="OpenAI model" hint="Steady follows a narration prompt for an even delivery and powers accent voices. Standard costs about a third less per passage but ignores the prompt; accent voices stay on Steady.">
+                <Segmented
+                  value={s.openaiModel === OPENAI_STANDARD_MODEL ? OPENAI_STANDARD_MODEL : OPENAI_STEADY_MODEL}
+                  onChange={(v) => s.set("openaiModel", v)}
+                  label="OpenAI model"
+                  options={[{ value: OPENAI_STEADY_MODEL, label: "Steady" }, { value: OPENAI_STANDARD_MODEL, label: "Standard" }]}
+                />
+              </RowItem>
+            )}
             <RowItem label="Word timings from the server" hint="Asks the speech server to time each word after a passage is synthesized. One extra request per passage; off keeps the estimate." last>
               <Switch checked={s.wordTimings} onChange={(v) => s.set("wordTimings", v)} label="Word timings from the server" disabled={!hasApi()} />
             </RowItem>

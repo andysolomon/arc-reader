@@ -35,6 +35,8 @@ export interface TtsRequest {
   text: string;
   voice: string;
   engine: EngineId;
+  /** OpenAI model for the reading voice (see openaiModelFor); other engines ignore it. */
+  openaiModel?: string;
   signal?: AbortSignal;
 }
 

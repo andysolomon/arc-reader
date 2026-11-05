@@ -3,7 +3,7 @@ import { PlaybackEngine, SLOW_FACTOR, type EngineDoc } from "./engine";
 import { synthesize } from "./providers";
 import { ApiUnreachable, type Chunk } from "./types";
 
-vi.mock("./providers", () => ({ synthesize: vi.fn() }));
+vi.mock("./providers", () => ({ synthesize: vi.fn(), isPaidEngine: (e: string) => e === "openai" || e === "fish" }));
 vi.stubGlobal("requestAnimationFrame", () => 0);
 vi.stubGlobal("cancelAnimationFrame", () => {});
 
@@ -21,9 +21,9 @@ const paraDoc = (sizes: number[]): EngineDoc => {
 };
 const chunk = (extra: Partial<Chunk> = {}): Chunk => ({ source: "api", audio: new Blob([new Uint8Array(4)]), duration: 2, ...extra });
 
-function make(onSlow = vi.fn(), onUnavailable = vi.fn()) {
+function make(onSlow = vi.fn(), onUnavailable = vi.fn(), engineId = "omnivoice") {
   const e = new PlaybackEngine({
-    engine: () => "omnivoice", wordTimings: () => false, isProfileVoice: () => true, offline: () => false,
+    engine: () => engineId, wordTimings: () => false, isProfileVoice: () => true, offline: () => false,
     onRejected: () => {}, onOffline: () => {}, onOnline: () => {}, onPersist: () => {}, onError: () => {}, onSlow, onUnavailable,
   });
   return { e, onSlow, onUnavailable };
@@ -180,5 +180,33 @@ describe("start-up", () => {
     synth.mockResolvedValue(chunk({ source: "estimate", audio: undefined, duration: 1 }));
     await e.play();
     expect(e.getSnapshot().playing).toBe(true);
+  });
+});
+
+describe("prefetch", () => {
+  const ahead = async (engineId: string) => {
+    synth.mockResolvedValue(chunk({ source: "estimate", audio: undefined, duration: 1 }));
+    const { e } = make(vi.fn(), vi.fn(), engineId);
+    e.load(doc(5));
+    await e.play();
+    return synth.mock.calls.map((c) => c[0].text);
+  };
+
+  it("keeps two passages ahead on a local server", async () => {
+    expect(await ahead("omnivoice")).toEqual(["s0", "s1", "s2"]);
+  });
+
+  it("keeps one passage ahead on a paid engine, so a pause or skip bills less unheard audio", async () => {
+    expect(await ahead("openai")).toEqual(["s0", "s1"]);
+    synth.mockReset();
+    expect(await ahead("fish")).toEqual(["s0", "s1"]);
+  });
+
+  it("passes each sentence's text so a passage can reuse clips cached sentence by sentence", async () => {
+    synth.mockResolvedValue(chunk({ source: "estimate", audio: undefined, duration: 1 }));
+    const { e } = make();
+    e.load(paraDoc([2]));
+    await e.play();
+    expect(synth.mock.calls[0][0]).toMatchObject({ text: "p0s0. p0s1.", sentences: ["p0s0.", "p0s1."] });
   });
 });

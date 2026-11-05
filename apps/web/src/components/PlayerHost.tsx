@@ -7,6 +7,7 @@ import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
 import { usePlayer, engine } from "../state/player";
 import { unavailableMessage } from "../engine/engine";
+import { isPaidEngine } from "../engine/providers";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { useBreakpoint } from "../hooks/useMedia";
@@ -76,8 +77,9 @@ export function PlayerHost() {
   if (!p.doc || pathname === "/auth") return null;
 
   // Slow engines (cloning on CPU) can't keep up with playback: render the whole document ahead.
+  // Paid engines keep up and would bill the whole document up front, so they don't offer it.
   const prerender = p.prerendering;
-  const extraMenu: PlayerProps["extraMenu"] = voice.engine === LOCAL_ENGINE || p.offline ? [] : [
+  const extraMenu: PlayerProps["extraMenu"] = !prerender && (voice.engine === LOCAL_ENGINE || isPaidEngine(voice.engine) || p.offline) ? [] : [
     prerender
       ? { id: "prerender", label: `Stop preparing (${prerender.done}/${prerender.total})`, icon: <Square size={16} strokeWidth={1.5} />, onSelect: p.cancelPrerender }
       : { id: "prerender", label: "Prepare audio", icon: <Zap size={16} strokeWidth={1.5} />, onSelect: () => void p.prerender() },

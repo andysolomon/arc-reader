@@ -1,6 +1,6 @@
 import type { WordTiming } from "../lib/db";
 import { estimateDuration, planPassages, type Passage, type Segmented, type Sentence } from "../lib/segment";
-import { synthesize } from "./providers";
+import { isPaidEngine, synthesize } from "./providers";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type EngineId } from "./types";
 
 export interface EngineDoc extends Segmented {
@@ -36,6 +36,8 @@ export interface EngineOptions {
   /** Engine for a voice: presets name their own, cloned profiles use the chosen one, local is local */
   engine: (voiceId: string) => EngineId;
   wordTimings: () => boolean;
+  /** OpenAI model for OpenAI voices (see openaiModelFor) */
+  openaiModel?: () => string;
   isProfileVoice: (voiceId: string) => boolean;
   offline: () => boolean;
   onRejected: (message: string) => void;
@@ -62,7 +64,9 @@ export function unavailableMessage(e: unknown): string {
   return (e as Error)?.message || "Could not prepare audio.";
 }
 
+/** Passages generated ahead of the one playing: two for slow servers, one for paid engines, which are quick and bill audio that a pause or skip never plays. */
 const PREFETCH = 2;
+const PAID_PREFETCH = 1;
 /** Render time ÷ audio time above which a voice cannot keep up with playback. */
 export const SLOW_FACTOR = 1.5;
 /** Seconds of a clip's trailing silence that are still played before the next passage starts. */
@@ -74,7 +78,7 @@ const now = () => (typeof performance !== "undefined" ? performance.now() : Date
 /**
  * Passage-level playback engine with sentence-level position.
  * - One request and one audio element per passage (a run of sentences, see planPassages);
- *   the next two passages are prefetched. The reader still moves sentence by sentence:
+ *   the next passages are prefetched (see PREFETCH). The reader still moves sentence by sentence:
  *   each clip carries its sentence starts, and crossing one advances the index without
  *   touching the audio.
  * - Advances with requestAnimationFrame using real elapsed time (never a fixed step).
@@ -385,10 +389,12 @@ export class PlaybackEngine {
         text: g.text,
         voice: doc.voice,
         engine: this.opts.engine(doc.voice),
+        openaiModel: this.opts.openaiModel?.(),
         profile: this.opts.isProfileVoice(doc.voice),
         wordTimings: this.opts.wordTimings(),
         words: g.parts.flat(),
         parts: g.parts,
+        sentences: doc.sentences.slice(g.start, g.end).map((s) => s.text),
         forceLocal: this.opts.offline() || doc.voice === "local" || this.opts.engine(doc.voice) === LOCAL_ENGINE,
         fallbackLocal: false,
         onOffline: this.opts.onOffline,
@@ -449,7 +455,8 @@ export class PlaybackEngine {
   private prefetch() {
     if (!this.doc) return;
     const from = this.passageOf[this.index];
-    for (let k = 1; k <= PREFETCH; k++) {
+    const ahead = isPaidEngine(this.opts.engine(this.doc.voice)) ? PAID_PREFETCH : PREFETCH;
+    for (let k = 1; k <= ahead; k++) {
       const i = from + k;
       if (i < this.passageList.length) void this.ensureChunk(i).catch(() => {});
     }

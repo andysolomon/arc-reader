@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { analyzePcm, proportionalStarts } from "./audio";
+import { analyzePcm, encodeWav, joinPcm, proportionalStarts } from "./audio";
 
 const RATE = 16_000;
 /** Tone and silence segments in seconds → mono PCM. */
@@ -53,5 +53,30 @@ describe("analyzePcm", () => {
   it("shares a clip by word count", () => {
     expect(proportionalStarts(10, [1, 1, 2])).toEqual([0, 2.5, 5]);
     expect(proportionalStarts(10, [1, 1], 1, 1)).toEqual([0, 5]);
+  });
+});
+
+describe("joinPcm", () => {
+  it("cuts each join back to a natural pause and starts every later sentence a hair before its first word", () => {
+    const clip = () => pcm([{ on: false, s: 0.3 }, { on: true, s: 1.0 }, { on: false, s: 0.6 }]);
+    const j = joinPcm([clip(), clip()], RATE);
+    // First: whole lead, voice, 0.25 s of tail. Second: 0.05 s of lead, voice, whole tail.
+    expect(j.starts[0]).toBe(0);
+    expect(j.starts[1]).toBeCloseTo(1.55, 1);
+    expect(j.trims[0]).toBe(0);
+    expect(j.trims[1]).toBeCloseTo(0.25, 1);
+    expect(j.samples.length / RATE).toBeCloseTo(3.2, 1);
+  });
+});
+
+describe("encodeWav", () => {
+  it("writes a mono 16-bit PCM WAV", async () => {
+    const blob = encodeWav(new Float32Array([0, 1, -1, 0.5]), RATE);
+    expect(blob.type).toBe("audio/wav");
+    const view = new DataView(await blob.arrayBuffer());
+    expect(view.byteLength).toBe(44 + 8);
+    expect(String.fromCharCode(...new Uint8Array(view.buffer, 0, 4))).toBe("RIFF");
+    expect(view.getUint32(24, true)).toBe(RATE);
+    expect([1, 2, 3].map((i) => view.getInt16(44 + i * 2, true))).toEqual([32767, -32768, 16383]);
   });
 });

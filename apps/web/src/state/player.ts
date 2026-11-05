@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
-import { hasSpeechApi } from "../engine/providers";
+import { hasSpeechApi, isPaidEngine } from "../engine/providers";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { segment } from "../lib/segment";
 import { getVoice, voiceLang, isLocalVoice } from "./voices";
@@ -70,6 +70,7 @@ export const engine = new PlaybackEngine({
     return v.engine;
   },
   wordTimings: () => useSettings.getState().wordTimings,
+  openaiModel: () => useSettings.getState().openaiModel,
   isProfileVoice: (id) => getVoice(id).kind === "profile",
   offline: () => usePlayer.getState().offline || useSettings.getState().engine === LOCAL_ENGINE,
   onRejected: (m) => toast(m),
@@ -90,8 +91,10 @@ export const engine = new PlaybackEngine({
   onError: (m) => toast(m),
   onUnavailable: (m) => usePlayer.setState({ speechError: m }),
   onSlow: (factor) => {
-    const name = getVoice(usePlayer.getState().voiceId).name;
-    toast(`${name} takes ~${factor}× longer to generate than to play on this server, so reading pauses between passages. Choose “Prepare audio” in the player menu, or a faster voice.`, 8000);
+    const voice = getVoice(usePlayer.getState().voiceId);
+    // Prepare audio is not offered for paid engines (it would bill the whole document up front).
+    const fix = isPaidEngine(voice.engine) ? "Choose a faster voice." : "Choose “Prepare audio” in the player menu, or a faster voice.";
+    toast(`${voice.name} takes ~${factor}× longer to generate than to play on this server, so reading pauses between passages. ${fix}`, 8000);
   },
 });
 

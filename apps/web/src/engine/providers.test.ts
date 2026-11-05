@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiRejected, ApiUnreachable } from "./types";
 import { apiSynthesize, openaiSpeechSynthesize, synthesize, cacheKey, localChunk, startsFromWords } from "./providers";
+import { joinClips } from "./audio";
 import { addUsage } from "../lib/usage";
 import { audioCache } from "../lib/db";
 
 vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
+vi.mock("./audio", async (importOriginal) => ({ ...await importOriginal<typeof import("./audio")>(), joinClips: vi.fn(async () => null) }));
 vi.mock("../lib/usage", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/usage")>(), addUsage: vi.fn() }));
 
 // VITE_API_BASE=/api/vs comes from vitest.config.ts
@@ -83,6 +85,14 @@ describe("openaiSpeechSynthesize", () => {
   it("cache keys include the engine", async () => {
     expect(cacheKey({ text: "t", voice: "v", engine: "kittentts" })).not.toBe(cacheKey({ text: "t", voice: "v", engine: "supertonic3" }));
   });
+
+  it("cache keys separate OpenAI models, keeping the steady model on the key its clips already use", () => {
+    const legacy = cacheKey({ text: "t", voice: "nova", engine: "openai" });
+    expect(cacheKey({ text: "t", voice: "nova", engine: "openai", openaiModel: "gpt-4o-mini-tts" })).toBe(legacy);
+    expect(cacheKey({ text: "t", voice: "nova", engine: "openai", openaiModel: "tts-1" })).not.toBe(legacy);
+    // Accent voices always use the steady model, whatever is chosen.
+    expect(cacheKey({ text: "t", voice: "coral~georgia", engine: "openai", openaiModel: "tts-1" })).toBe(cacheKey({ text: "t", voice: "coral~georgia", engine: "openai" }));
+  });
 });
 
 describe("alignWords", () => {
@@ -159,6 +169,23 @@ describe("OpenAI engine routing", () => {
     expect(body.instructions).toMatch(/Georgia Southern accent.*same calm tone/);
   });
 
+  it("uses tts-1 when it is chosen, without instructions or token streaming", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    await openaiSpeechSynthesize({ text: "x", voice: "nova", engine: "openai", openaiModel: "tts-1" });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body).toMatchObject({ model: "tts-1", voice: "nova" });
+    expect(body).not.toHaveProperty("instructions");
+    expect(body).not.toHaveProperty("stream_format");
+  });
+
+  it("keeps accent voices on the steady model when tts-1 is chosen", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    await openaiSpeechSynthesize({ text: "x", voice: "coral~georgia", engine: "openai", openaiModel: "tts-1" });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body.model).toBe("gpt-4o-mini-tts");
+    expect(body.instructions).toMatch(/Georgia Southern accent/);
+  });
+
   it("leaves VoiceStudio and tts-1 requests without instructions", async () => {
     const { openaiSpeechSynthesize } = await import("./providers");
     fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
@@ -196,6 +223,12 @@ describe("generation accounting", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: "gpt-4o-mini-tts", stream_format: "sse" });
     expect(addUsage).toHaveBeenCalledTimes(1);
     expect(addUsage).toHaveBeenCalledWith(expect.objectContaining({ engine: "openai", model: "gpt-4o-mini-tts", text: req.text, tokens: { inputTokens: 4, outputTokens: 50 } }));
+  });
+
+  it("records tts-1 generations under tts-1", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    await synthesize({ ...req, openaiModel: "tts-1" });
+    expect(addUsage).toHaveBeenCalledWith(expect.objectContaining({ engine: "openai", model: "tts-1", text: req.text }));
   });
 
   it("records only a successful retry", async () => {
@@ -262,5 +295,45 @@ describe("passage clips", () => {
     const single = await synthesize({ text: "Only one.", voice: "v", engine: "kittentts", parts: [["Only", "one."]] });
     expect(single.starts).toBeUndefined();
     vi.unstubAllGlobals();
+  });
+});
+
+describe("sentence clips cached before passages", () => {
+  const parts = [["One", "two."], ["Three", "four."]];
+  const opts = { text: "One two. Three four.", voice: "nova", engine: "openai", parts, sentences: ["One two.", "Three four."] };
+  const sentenceKeys = new Set(opts.sentences.map((text) => cacheKey({ ...opts, text })));
+  const fetchMock = vi.fn(async () => new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(audioCache.get).mockImplementation(async (key: string) => sentenceKeys.has(key)
+      ? { key, blob: new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), mime: "audio/mpeg", duration: 1.5, words: [{ start: 0.3, end: 0.6 }, { start: 0.7, end: 1.1 }], createdAt: 0 }
+      : undefined);
+  });
+  afterEach(() => {
+    vi.mocked(audioCache.get).mockReset().mockResolvedValue(undefined);
+    vi.unstubAllGlobals();
+  });
+
+  it("joins them instead of paying for the passage again", async () => {
+    const audio = new Blob([new Uint8Array(44)], { type: "audio/wav" });
+    vi.mocked(joinClips).mockResolvedValueOnce({ audio, duration: 2.6, starts: [0, 1.4], trims: [0, 0.25], lead: 0.3, tail: 0.4, loudness: -18 });
+    const c = await synthesize(opts);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(addUsage).not.toHaveBeenCalled();
+    expect(audioCache.put).not.toHaveBeenCalled();
+    expect(c).toMatchObject({ source: "cache", audio, mime: "audio/wav", duration: 2.6, starts: [0, 1.4], loudness: -18 });
+    // The second clip's words move by its place in the passage, less what was cut from its front.
+    expect(c.words![2].start).toBeCloseTo(0.3 - 0.25 + 1.4);
+  });
+
+  it("generates the passage when a sentence is missing or the clips cannot be decoded", async () => {
+    await synthesize(opts);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.mocked(audioCache.get).mockImplementation(async (key: string) => key === [...sentenceKeys][0]
+      ? { key, blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 1, createdAt: 0 } : undefined);
+    await synthesize(opts);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(joinClips).toHaveBeenCalledTimes(1);
   });
 });
