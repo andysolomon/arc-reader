@@ -1,7 +1,9 @@
 import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { Square, Zap } from "lucide-react";
 import { PlayerPill, PlayerBar, type PlayerProps } from "@readaloud/ui";
 import { getVoice } from "../state/voices";
+import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
 import { usePlayer, engine } from "../state/player";
 import { useLibrary } from "../state/library";
@@ -66,6 +68,14 @@ export function PlayerHost() {
 
   if (!p.doc || pathname === "/auth") return null;
 
+  // Slow engines (cloning on CPU) can't keep up with playback: render the whole document ahead.
+  const prerender = p.prerendering;
+  const extraMenu: PlayerProps["extraMenu"] = voice.engine === LOCAL_ENGINE || p.offline ? [] : [
+    prerender
+      ? { id: "prerender", label: `Stop preparing (${prerender.done}/${prerender.total})`, icon: <Square size={16} strokeWidth={1.5} />, onSelect: p.cancelPrerender }
+      : { id: "prerender", label: "Prepare audio", icon: <Zap size={16} strokeWidth={1.5} />, onSelect: () => void p.prerender() },
+  ];
+
   const props: PlayerProps = {
     voice,
     playing: p.playing,
@@ -87,6 +97,8 @@ export function PlayerHost() {
     onChangeVoice: () => navigate(`/voices?for=${p.doc!.id}`),
     menuOpen: p.menuOpen,
     onMenuOpenChange: p.setMenuOpen,
+    status: prerender ? `Preparing ${prerender.done}/${prerender.total}` : undefined,
+    extraMenu,
   };
 
   if (bp === "sm") return <PlayerBar {...props} compact />;

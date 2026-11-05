@@ -20,7 +20,7 @@ export function PlayerBar(p: PlayerProps) {
       >
         <div className="flex items-center gap-2">
           <Scrubber value={p.progress} ticks={p.ticks} onSeek={p.onSeek} valueText={`${fmtTime(p.elapsed)} elapsed, ${fmtTime(p.remaining)} remaining`} className="h-8" />
-          <TimeReadout elapsed={p.elapsed} remaining={p.remaining} />
+          <TimeReadout elapsed={p.elapsed} remaining={p.remaining} status={p.status} />
         </div>
         <div className="flex items-center justify-between gap-1">
           <VoiceAvatar voice={p.voice} size={36} interactive onClick={p.onVoice} />

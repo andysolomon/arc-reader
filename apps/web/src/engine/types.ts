@@ -20,6 +20,8 @@ export interface Chunk {
   words?: WordTiming[];
   /** Reported by the provider for a new generation; never reused from cache. */
   tokens?: TokenUsage;
+  /** Wall-clock seconds the server took to generate this chunk (new generations only, queue wait excluded). */
+  renderSeconds?: number;
 }
 
 export interface TtsRequest {
