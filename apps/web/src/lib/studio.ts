@@ -27,7 +27,9 @@ export async function studioJson<T>(path: string, init?: RequestInit): Promise<T
   return (await studioFetch(path, init)).json() as Promise<T>;
 }
 export const jsonBody = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-export interface Profile { id: string; name: string; kind: "clone" | "design"; language: string; instruct?: string }
+export interface Profile { id: string; name: string; kind: "clone" | "design"; language: string; instruct?: string; personality?: string | null }
+/** Gallery recipe a saved profile was added from (VoiceStudio tags it `archetype:<id>`); undefined for clones and designs made in Studio. */
+export const archetypeOf = (profile: Pick<Profile, "personality"> | undefined) => profile?.personality?.startsWith("archetype:") ? profile.personality.slice("archetype:".length) : undefined;
 export interface ArchetypeFacets { gender?: string | null; age?: string | null; pitch?: string | null; accent?: string | null; whisper?: boolean; lang?: string }
 export interface Archetype { id: string; name: string; instruct: string; language: string; use_case: string; attrs: Record<string, string>; facets?: ArchetypeFacets }
 export interface PreviewSource { source: "gallery" | "cached" | "rendering" | "no_model"; message: string }

@@ -8,6 +8,8 @@ export interface Voice extends UiVoice {
   engine: string;
   /** preset: engine built-in · profile: cloned/designed on the server · local: browser speech */
   kind: "preset" | "profile" | "local";
+  /** Studio gallery recipe this saved voice was added from; such voices can be sent back to the gallery. */
+  archetype?: string;
 }
 
 export function voiceSource(voice: Pick<Voice, "engine">): VoiceSource {

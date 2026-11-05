@@ -1,6 +1,6 @@
 import { MorphIcon } from "morphicons/react";
 import { Play, AudioLines } from "lucide";
-import { Check } from "lucide-react";
+import { Check, Undo2 } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { Voice } from "../lib/types";
 import { Card } from "./Card";
@@ -18,20 +18,37 @@ export interface VoiceCardProps {
   source?: VoiceSource;
   onPreview: () => void;
   onSelect: () => void;
+  /** Offers to take the voice out of this list (e.g. send a gallery voice back to Studio). */
+  onRemove?: () => void;
+  /** Accessible name for the remove control; defaults to "Remove <name>". */
+  removeLabel?: string;
   className?: string;
 }
 
-export function VoiceCard({ voice, selected, previewing, source, onPreview, onSelect, className }: VoiceCardProps) {
+export function VoiceCard({ voice, selected, previewing, source, onPreview, onSelect, onRemove, removeLabel, className }: VoiceCardProps) {
   return (
     <Card interactive selected={selected} className={cn("flex min-h-[200px] flex-col gap-3.5", className)} data-voice={voice.id}>
       <div className="flex items-center justify-between">
         <VoiceAvatar voice={voice} size={40} />
-        {selected ? (
-          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent">
-            <Check size={16} strokeWidth={1.5} aria-hidden />
-            Selected
-          </span>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {selected ? (
+            <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent">
+              <Check size={16} strokeWidth={1.5} aria-hidden />
+              Selected
+            </span>
+          ) : null}
+          {onRemove ? (
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label={removeLabel ?? `Remove ${voice.name}`}
+              title={removeLabel ?? `Remove ${voice.name}`}
+              className="grid size-8 place-items-center rounded-control border-0 bg-transparent text-fg2 hover:bg-bg3 hover:text-fg"
+            >
+              <Undo2 size={16} strokeWidth={1.5} aria-hidden />
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="flex flex-col gap-0.5">
         <div className="text-[16px] font-semibold">{voice.name}</div>
