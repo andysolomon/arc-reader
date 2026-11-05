@@ -4,6 +4,7 @@ export const SHORTCUTS: [string, string][] = [
   ["Next sentence", "→"],
   ["Slower / faster", "[  ]"],
   ["Listen (compose)", "⌘ ↵"],
+  ["Read clipboard (outside text fields)", "Ctrl / ⌘ V"],
   ["Focus mode", "F"],
   ["Search library", "/"],
   ["This sheet", "?"],

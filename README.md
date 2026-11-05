@@ -186,7 +186,9 @@ With `VITE_TTS_PROVIDER=readaloud` the app instead calls `POST {VITE_API_BASE}/t
 
 ## Keyboard
 
-Space play/pause · ← → sentences · [ ] speed ±0.25 · ⌘↵ Listen · F focus · / search library · ? shortcuts · Esc exit/close. Ignored while typing, except Esc and ⌘↵.
+Space play/pause · ← → sentences · [ ] speed ±0.25 · ⌘↵ Listen · Ctrl/⌘V read clipboard · F focus · / search library · ? shortcuts · Esc exit/close. Ignored while typing, except Esc and ⌘↵. Pasting in text fields keeps its normal editing behavior.
+
+Use **Read clipboard** from the sidebar, composer, or mobile toolbar to open copied text directly in the reader and start listening. A copied HTTP(S) article link fetches the article first. You can also paste anywhere outside a text field without opening Compose; this works even when the browser blocks clipboard reading. Clipboard contents are read only after clicking the button or pasting, and existing composer drafts are preserved.
 
 ## PWA
 
