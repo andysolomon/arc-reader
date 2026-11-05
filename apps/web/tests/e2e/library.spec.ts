@@ -46,6 +46,13 @@ test("Library identifies voice services in both views even outside the available
 
 test("prepares multiple documents in multiple voices, reuses saved audio, and shows persisted coverage in both views", async ({ page }) => {
   await seedLibrary(page);
+  let submissions = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/preparations", async (route) => {
+    if (route.request().method() === "POST") { submissions++; await gate; }
+    await route.continue();
+  });
   let requests = 0;
   page.on("request", (request) => { if (/\/api\/preparations\/[^/]+\/audio\//.test(request.url())) requests++; });
   await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
@@ -56,6 +63,10 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   expect(accessibility.violations).toEqual([]);
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
+  try {
+    await expect.poll(() => submissions).toBe(3);
+    await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("3 active · 1 queued");
+  } finally { release(); }
   // Internal navigation keeps the preparation queue alive.
   await page.getByRole("link", { name: "Compose", exact: true }).click();
   await page.getByRole("link", { name: "Library", exact: true }).click();

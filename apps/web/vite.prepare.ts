@@ -21,7 +21,7 @@ const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(va
 /** Disk-backed jobs belong to the web server, never to an HTTP connection. */
 export class PreparationService {
   private jobs = new Map<string, Job>();
-  private inflight = new Map<string, Promise<Audio>>();
+  private inflight = new Map<string, { promise: Promise<Audio>; consumers: Set<() => boolean> }>();
   private writes = new Map<string, Promise<void>>();
   private queue: Promise<unknown> = Promise.resolve();
   private ready: Promise<void>;
@@ -140,27 +140,37 @@ export class PreparationService {
   private audioFor(item: PreparationRequest, allowed: () => boolean): Promise<Audio> {
     const key = digest([this.target, item.protocol, item.engine, item.voice, !!item.profile, item.text]);
     const existing = this.inflight.get(key);
-    if (existing) return existing;
+    if (existing) {
+      existing.consumers.add(allowed);
+      return existing.promise;
+    }
+    const consumers = new Set([allowed]);
     const run = async () => {
       try {
         const metadata = JSON.parse(await readFile(resolve(this.directory, `${key}.json`), "utf8")) as Omit<Audio, "body">;
         return { ...metadata, body: await readFile(resolve(this.directory, `${key}.bin`)) };
       } catch { /* not cached */ }
-      if (!allowed()) throw new HttpError(410, "Audio preparation was cancelled or expired.");
-      const response = await this.synthesize(item);
-      const body = Buffer.from(await response.arrayBuffer());
-      const type = response.headers.get("content-type") || "audio/mpeg";
-      if (!body.length || (!type.startsWith("audio/") && type !== "application/octet-stream" && !(item.protocol === "readaloud" && type.includes("json")))) {
-        throw new HttpError(502, "The speech server returned no playable audio.");
-      }
-      const metadata = { type, duration: response.headers.get("x-duration") || undefined, words: response.headers.get("x-word-timings") || undefined };
-      await this.atomic(`${key}.bin`, body);
-      await this.atomic(`${key}.json`, JSON.stringify(metadata));
-      return { body, ...metadata };
+      // Cache hits must never wait behind slow inference for another voice.
+      // Only misses enter the single-worker queue, one passage per job at a time.
+      const generate = async () => {
+        if (![...consumers].some((isAllowed) => isAllowed())) throw new HttpError(410, "Audio preparation was cancelled or expired.");
+        const response = await this.synthesize(item);
+        const body = Buffer.from(await response.arrayBuffer());
+        const type = response.headers.get("content-type") || "audio/mpeg";
+        if (!body.length || (!type.startsWith("audio/") && type !== "application/octet-stream" && !(item.protocol === "readaloud" && type.includes("json")))) {
+          throw new HttpError(502, "The speech server returned no playable audio.");
+        }
+        const metadata = { type, duration: response.headers.get("x-duration") || undefined, words: response.headers.get("x-word-timings") || undefined };
+        await this.atomic(`${key}.bin`, body);
+        await this.atomic(`${key}.json`, JSON.stringify(metadata));
+        return { body, ...metadata };
+      };
+      const pending = this.queue.then(generate, generate);
+      this.queue = pending.catch(() => {});
+      return pending;
     };
-    const pending = this.queue.then(run, run);
-    this.queue = pending.catch(() => {});
-    this.inflight.set(key, pending);
+    const pending = run();
+    this.inflight.set(key, { promise: pending, consumers });
     void pending.finally(() => this.inflight.delete(key)).catch(() => {});
     return pending;
   }

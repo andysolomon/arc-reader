@@ -23,8 +23,11 @@ export interface PreparationJob {
 }
 
 export const isPreparing = (job: PreparationJob) => job.status === "queued" || job.status === "preparing";
-let running = false;
-let active: { id: string; controller: AbortController } | null = null;
+// Each provider gets its own bounded pool so a slow local reading cannot hold
+// up cloud voices. VoiceStudio still serializes inference on the server.
+export const PREPARATION_CONCURRENCY = 3;
+const active = new Map<string, { controller: AbortController; provider: string }>();
+const providerFor = (job: PreparationJob) => isPaidEngine(job.voice.engine) ? job.voice.engine : "voicestudio";
 
 interface PreparationState {
   jobs: PreparationJob[];
@@ -46,11 +49,11 @@ export const usePreparation = create<PreparationState>()((set, get) => ({
       jobs.push({ id: crypto.randomUUID(), docId: doc.id, title: doc.title, voice: { ...voice }, openaiModel: settings.openaiModel, wordTimings: settings.wordTimings, status: "queued", done: 0, total: 0 });
     }
     set({ jobs: [...get().jobs.filter((job) => isPreparing(job) || !jobs.some((next) => next.docId === job.docId && next.voice.id === job.voice.id)), ...jobs] });
-    void drain();
+    drain();
     return jobs.length;
   },
   cancel(id) {
-    if (active?.id === id) active.controller.abort();
+    active.get(id)?.controller.abort();
     set({ jobs: get().jobs.map((job) => job.id === id && isPreparing(job) ? { ...job, status: "cancelled", message: undefined } : job) });
   },
   cancelDocument(docId) {
@@ -64,65 +67,67 @@ export const usePreparation = create<PreparationState>()((set, get) => ({
 
 const update = (id: string, patch: Partial<PreparationJob>) => usePreparation.setState((state) => ({ jobs: state.jobs.map((job) => job.id === id ? { ...job, ...patch } : job) }));
 
-/** One batch can contain many documents and voices. Keep the single-worker server's queue bounded. */
-async function drain() {
-  if (running) return;
-  running = true;
+/** Rotate whole-reading jobs through bounded provider pools. Each server job
+ * yields between passages, sharing the single VoiceStudio worker fairly. */
+function drain() {
+  const counts = new Map<string, number>();
+  for (const { provider } of active.values()) counts.set(provider, (counts.get(provider) || 0) + 1);
+  for (const job of usePreparation.getState().jobs) {
+    const provider = providerFor(job);
+    if (job.status !== "queued" || (counts.get(provider) || 0) >= PREPARATION_CONCURRENCY) continue;
+    const controller = new AbortController();
+    active.set(job.id, { controller, provider });
+    counts.set(provider, (counts.get(provider) || 0) + 1);
+    update(job.id, { status: "preparing" });
+    void run(job, controller.signal).finally(() => {
+      active.delete(job.id);
+      drain();
+    });
+  }
+}
+
+async function run(job: PreparationJob, signal: AbortSignal) {
   try {
-    for (;;) {
-      const job = usePreparation.getState().jobs.find((job) => job.status === "queued");
-      if (!job) break;
-      const controller = new AbortController();
-      const { signal } = controller;
-      active = { id: job.id, controller };
-      update(job.id, { status: "preparing" });
-      try {
-        let rec = await docs.get(job.docId);
-        if (!rec) throw new Error("This document is no longer in the Library.");
-        signal.throwIfAborted();
-        if (job.voice.id === JAMAICAN_PATOIS_VOICE_ID) {
-          const prepared = await preparePatois(rec, signal, (message) => update(job.id, { message }));
-          signal.throwIfAborted();
-          const latest = await docs.get(job.docId);
-          if (!latest || latest.text !== rec.text) throw new Error("The document changed. Prepare it again.");
-          signal.throwIfAborted();
-          rec = { ...latest, patois: prepared.patois };
-          await docs.put(rec);
-        }
-        const { sentences } = segment(job.voice.id === JAMAICAN_PATOIS_VOICE_ID ? rec.patois!.text : rec.text);
-        const passages = planPassages(sentences);
-        if (!passages.length) throw new Error("There is no text to prepare.");
-        update(job.id, { total: passages.length, message: undefined });
-        if (API_BASE === "/api/vs" && !isPaidEngine(job.voice.engine)) {
-          await prepareInBackground(passages.map((passage) => ({
-            text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
-          })), 0, (done) => update(job.id, { done }), signal);
-        }
-        for (const passage of passages) {
-          signal.throwIfAborted();
-          const req = {
-            text: passage.text, voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel,
-            profile: job.voice.kind === "profile", wordTimings: job.wordTimings,
-            words: passage.parts.flat(), parts: passage.parts,
-            sentences: sentences.slice(passage.start, passage.end).map((s) => s.text),
-            fallbackLocal: false, signal,
-          };
-          const chunk = await synthesize(req);
-          signal.throwIfAborted();
-          if (!chunk.audio) throw new Error("This voice did not return audio to prepare.");
-          // Older sentence clips can be joined in memory; those are already safely cached.
-          if (chunk.source !== "cache" && !(await audioCache.get(cacheKey(req)))) throw new Error("Could not save prepared audio. Free some storage and retry.");
-          update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, passage.index + 1) });
-        }
-        signal.throwIfAborted();
-        update(job.id, { status: "ready" });
-      } catch (error) {
-        update(job.id, signal.aborted ? { status: "cancelled", message: undefined } : { status: "error", message: unavailableMessage(error) });
-      } finally {
-        active = null;
-      }
+    let rec = await docs.get(job.docId);
+    if (!rec) throw new Error("This document is no longer in the Library.");
+    signal.throwIfAborted();
+    if (job.voice.id === JAMAICAN_PATOIS_VOICE_ID) {
+      const prepared = await preparePatois(rec, signal, (message) => update(job.id, { message }));
+      signal.throwIfAborted();
+      const latest = await docs.get(job.docId);
+      if (!latest || latest.text !== rec.text) throw new Error("The document changed. Prepare it again.");
+      signal.throwIfAborted();
+      rec = { ...latest, patois: prepared.patois };
+      await docs.put(rec);
     }
-  } finally {
-    running = false;
+    const { sentences } = segment(job.voice.id === JAMAICAN_PATOIS_VOICE_ID ? rec.patois!.text : rec.text);
+    const passages = planPassages(sentences);
+    if (!passages.length) throw new Error("There is no text to prepare.");
+    update(job.id, { total: passages.length, message: undefined });
+    if (API_BASE === "/api/vs" && !isPaidEngine(job.voice.engine)) {
+      await prepareInBackground(passages.map((passage) => ({
+        text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
+      })), 0, (done) => update(job.id, { done }), signal);
+    }
+    for (const passage of passages) {
+      signal.throwIfAborted();
+      const req = {
+        text: passage.text, voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel,
+        profile: job.voice.kind === "profile", wordTimings: job.wordTimings,
+        words: passage.parts.flat(), parts: passage.parts,
+        sentences: sentences.slice(passage.start, passage.end).map((s) => s.text),
+        fallbackLocal: false, signal,
+      };
+      const chunk = await synthesize(req);
+      signal.throwIfAborted();
+      if (!chunk.audio) throw new Error("This voice did not return audio to prepare.");
+      // Older sentence clips can be joined in memory; those are already safely cached.
+      if (chunk.source !== "cache" && !(await audioCache.get(cacheKey(req)))) throw new Error("Could not save prepared audio. Free some storage and retry.");
+      update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, passage.index + 1) });
+    }
+    signal.throwIfAborted();
+    update(job.id, { status: "ready" });
+  } catch (error) {
+    update(job.id, signal.aborted ? { status: "cancelled", message: undefined } : { status: "error", message: unavailableMessage(error) });
   }
 }
