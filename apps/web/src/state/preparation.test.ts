@@ -5,7 +5,7 @@ import { JAMAICAN_PATOIS_VOICE_ID, FISH_PRESET_VOICES, OPENAI_VOICES, PRESET_VOI
 import { cacheKey, prepareInBackground, synthesize } from "../engine/providers";
 import { audioCache, db, docs, type DocRecord } from "../lib/db";
 import { preparePatois } from "../lib/patois";
-import { isPreparing, PREPARATION_CONCURRENCY, usePreparation, type PreparationJob } from "./preparation";
+import { isPreparing, usePreparation, type PreparationJob } from "./preparation";
 
 vi.hoisted(() => {
   const storage = new Map<string, string>();
@@ -25,10 +25,12 @@ const [bella, jasper] = PRESET_VOICES;
 const record = (id: string): DocRecord => ({ id, title: id, text: `First ${id}.\n\nSecond ${id}.`, voice: null, chars: 20, source: "paste", domain: "Text", createdAt: 0, updatedAt: 0 });
 const settled = async () => vi.waitFor(() => expect(usePreparation.getState().jobs.some(isPreparing)).toBe(false), { timeout: 5000 });
 function holdBackgroundJobs() {
-  const pending: { signal: AbortSignal; release: () => void }[] = [];
-  vi.mocked(prepareInBackground).mockImplementation((_requests, _start, _progress, signal) => new Promise<void>((resolve) => {
+  const pending: { signal: AbortSignal; release: () => void; activate: (worker: string) => void }[] = [];
+  vi.mocked(prepareInBackground).mockImplementation((requests, _start, progress, signal) => new Promise<void>((resolve) => {
     const release = () => { signal!.removeEventListener("abort", release); resolve(); };
-    pending.push({ signal: signal!, release });
+    const status = { id: String(pending.length), state: "running" as const, done: 0, total: requests.length };
+    progress?.(0, requests.length, { ...status, queued: true });
+    pending.push({ signal: signal!, release, activate: (worker) => progress?.(0, requests.length, { ...status, queued: false, worker }) });
     if (signal!.aborted) release();
     else signal!.addEventListener("abort", release, { once: true });
   }));
@@ -87,7 +89,7 @@ describe("Library preparation queue", () => {
       return generate(req);
     });
     usePreparation.getState().enqueue([record("a")], [bella]);
-    await vi.waitFor(() => expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "preparing", done: 1, message: expect.stringContaining("reconnect") }));
+    await vi.waitFor(() => expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", done: 1, message: expect.stringContaining("reconnect") }));
     await settled();
     expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "ready", done: 2 });
     expect(generated).toEqual(["First a.", "Second a."]);
@@ -103,15 +105,21 @@ describe("Library preparation queue", () => {
     expect(synthesize).toHaveBeenCalledTimes(3);
   });
 
-  it("starts bounded concurrent readings and fills a slot as soon as one finishes", async () => {
+  it("submits local readings to the machine queue and reports the actual assignment", async () => {
     const pending = holdBackgroundJobs();
     usePreparation.getState().enqueue([record("a"), record("b")], [bella, jasper]);
-    await vi.waitFor(() => expect(pending).toHaveLength(PREPARATION_CONCURRENCY));
-    expect(usePreparation.getState().jobs.map((job) => job.status)).toEqual(["preparing", "preparing", "preparing", "queued"]);
-    expect(usePreparation.getState().enqueue([record("a")], [bella])).toBe(0);
-    pending[0].release();
     await vi.waitFor(() => expect(pending).toHaveLength(4));
-    expect(usePreparation.getState().jobs[0].status).toBe("ready");
+    expect(usePreparation.getState().jobs.every((job) => job.status === "queued")).toBe(true);
+    expect(usePreparation.getState().enqueue([record("a")], [bella])).toBe(0);
+    pending[0].activate("Mac");
+    pending[1].activate("Omarchy");
+    expect(usePreparation.getState().jobs.map((job) => [job.status, job.worker])).toEqual([
+      ["preparing", "Mac"], ["preparing", "Omarchy"], ["queued", undefined], ["queued", undefined],
+    ]);
+    pending[0].release();
+    await vi.waitFor(() => expect(usePreparation.getState().jobs[0].status).toBe("ready"));
+    // A drain triggered by completed work must not submit queued server jobs again.
+    expect(pending).toHaveLength(4);
     pending.forEach((job) => job.release());
     await settled();
     expect(usePreparation.getState().jobs.every((job) => job.status === "ready")).toBe(true);
@@ -120,10 +128,10 @@ describe("Library preparation queue", () => {
   it("prepares cloud voices even when all VoiceStudio slots are occupied", async () => {
     const pending = holdBackgroundJobs();
     usePreparation.getState().enqueue([record("a"), record("b")], [bella, jasper]);
-    await vi.waitFor(() => expect(pending).toHaveLength(PREPARATION_CONCURRENCY));
+    await vi.waitFor(() => expect(pending).toHaveLength(4));
     usePreparation.getState().enqueue([record("a")], [OPENAI_VOICES[0], FISH_PRESET_VOICES[0]]);
     await vi.waitFor(() => expect(usePreparation.getState().jobs.slice(4).map((job) => job.status)).toEqual(["ready", "ready"]));
-    expect(pending).toHaveLength(PREPARATION_CONCURRENCY);
+    expect(pending).toHaveLength(4);
     usePreparation.getState().cancelAll();
     await settled();
   });
@@ -157,28 +165,29 @@ describe("Library preparation queue", () => {
   it("cancels active and queued jobs for a removed document without stopping other documents", async () => {
     const pending = holdBackgroundJobs();
     usePreparation.getState().enqueue([record("a"), record("b")], [bella, jasper]);
-    await vi.waitFor(() => expect(pending).toHaveLength(PREPARATION_CONCURRENCY));
-    // b has one active and one queued voice; a has two active voices.
+    await vi.waitFor(() => expect(pending).toHaveLength(4));
+    // b has one reading on a machine and one waiting for a machine.
+    pending[2].activate("Mac");
     usePreparation.getState().cancelDocument("b");
     await docs.delete("b");
-    expect(pending.map((job) => job.signal.aborted)).toEqual([false, false, true]);
+    expect(pending.map((job) => job.signal.aborted)).toEqual([false, false, true, true]);
     pending.forEach((job) => job.release());
     await settled();
     expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["ready", "ready", "cancelled", "cancelled"]);
     expect(await docs.get("b")).toBeUndefined();
-    expect(prepareInBackground).toHaveBeenCalledTimes(PREPARATION_CONCURRENCY);
+    expect(prepareInBackground).toHaveBeenCalledTimes(4);
   });
 
   it("aborts every active reading on cancel all and allows new work afterwards", async () => {
     const pending = holdBackgroundJobs();
     usePreparation.getState().enqueue([record("a"), record("b")], [bella, jasper]);
-    await vi.waitFor(() => expect(pending).toHaveLength(PREPARATION_CONCURRENCY));
+    await vi.waitFor(() => expect(pending).toHaveLength(4));
     usePreparation.getState().cancelAll();
     expect(pending.every((job) => job.signal.aborted)).toBe(true);
     expect(usePreparation.getState().jobs.every((job) => job.status === "cancelled")).toBe(true);
     usePreparation.getState().enqueue([record("b")], [jasper]);
-    await vi.waitFor(() => expect(pending).toHaveLength(4));
-    pending[3].release();
+    await vi.waitFor(() => expect(pending).toHaveLength(5));
+    pending[4].release();
     await settled();
     expect(usePreparation.getState().jobs.at(-1)?.status).toBe("ready");
   });

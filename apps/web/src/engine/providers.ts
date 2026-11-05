@@ -7,7 +7,7 @@ import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
 import { OPENAI_ACCENTS, STEADY_NARRATION } from "../data/voices";
-import { hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest } from "./preparation";
+import { hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest, type PreparationStatus } from "./preparation";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
@@ -336,7 +336,7 @@ export interface SynthOptions extends TtsRequest {
 
 export const preparationRequests = (requests: SynthOptions[]): PreparationRequest[] => requests.map((r) => ({ key: cacheKey(r), text: r.text, voice: r.voice, engine: r.engine, profile: r.profile, protocol: API_KIND }));
 
-export async function prepareInBackground(requests: SynthOptions[], start: number, progress?: (done: number, total: number) => void, signal?: AbortSignal) {
+export async function prepareInBackground(requests: SynthOptions[], start: number, progress?: (done: number, total: number, status?: PreparationStatus) => void, signal?: AbortSignal) {
   if (API_BASE !== "/api/vs") throw new Error("Background preparation needs the built-in /api/vs connection.");
   const items = preparationRequests(requests);
   await Promise.all(items.map(async (item, index) => { item.cached = !!await fromCache(requests[index]); }));

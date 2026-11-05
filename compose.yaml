@@ -39,6 +39,12 @@ services:
       # same .env and which is usually a loopback address that means nothing inside this container.
       VOICESTUDIO_URL: ${VOICESTUDIO_REMOTE_URL:-http://voicestudio:3900}
       VOICESTUDIO_API_KEY: ${VOICESTUDIO_API_KEY}
+      VOICESTUDIO_NAME: ${VOICESTUDIO_NAME:-VoiceStudio}
+      # When the primary is remote, the local container can prepare a second
+      # compatible reading. Each machine gets one whole reading at a time.
+      VOICESTUDIO_SECONDARY_URL: ${VOICESTUDIO_SECONDARY_REMOTE_URL:-${VOICESTUDIO_REMOTE_URL:+http://voicestudio:3900}}
+      VOICESTUDIO_SECONDARY_NAME: ${VOICESTUDIO_SECONDARY_NAME:-Omarchy}
+      VOICESTUDIO_SECONDARY_API_KEY: ${VOICESTUDIO_SECONDARY_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       FISH_API_KEY: ${FISH_API_KEY:-}
       PREPARATION_DATA_DIR: /app/preparations

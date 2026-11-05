@@ -69,7 +69,7 @@ describe("background preparation client", () => {
     await vi.advanceTimersByTimeAsync(1500);
     await run;
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ requests, start: 1 });
-    expect(progress.mock.calls).toEqual([[1, 2], [2, 2]]);
+    expect(progress.mock.calls).toEqual([[1, 2, status("running", 1)], [2, 2, status("done", 2)]]);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     vi.resetModules();
     const reloaded = await import("./preparation");
@@ -154,7 +154,7 @@ describe("background preparation client", () => {
     done = true;
     await vi.advanceTimersByTimeAsync(1500);
     await secondRun;
-    expect(progress).toHaveBeenLastCalledWith(2, 2);
+    expect(progress).toHaveBeenLastCalledWith(2, 2, status("done", 2));
     expect(hasActivePreparation(requests)).toBe(false);
   });
 

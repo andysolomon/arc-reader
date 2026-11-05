@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PreparationService } from "./vite.prepare";
+import { PreparationWorkers } from "./vite.preparation-workers";
 import type { PreparationRequest } from "./src/engine/preparation";
 
 const item = (text: string): PreparationRequest => ({ key: text, text, voice: "v", engine: "kittentts", protocol: "openai" });
@@ -21,9 +22,42 @@ describe("server-owned audio preparation", () => {
   let rejectSpeech: boolean;
   let unavailable: boolean;
   let activeSpeech: number, peakSpeech: number;
+  let secondary: Server | undefined;
+  let secondaryGate: ReturnType<typeof deferred> | undefined;
+  let discoveryGate: ReturnType<typeof deferred> | undefined;
+  let primaryAssignmentGate: ReturnType<typeof deferred> | undefined;
+  let secondaryCalls: string[];
+  let secondaryUnavailable: boolean, secondaryDiscoveries: number;
+  async function addSecondary() {
+    secondary = createServer(async (req, res) => {
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/engines") {
+        secondaryDiscoveries++;
+        await discoveryGate?.promise;
+        if (secondaryUnavailable) { res.writeHead(503); return res.end("{}"); }
+        return res.end(JSON.stringify({ tts: { active: "kittentts", backends: [{ id: "kittentts", available: true }] } }));
+      }
+      if (req.url === "/profiles") return res.end("[]");
+      const buffers: Buffer[] = [];
+      for await (const chunk of req) buffers.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(buffers).toString()) as { input: string };
+      secondaryCalls.push(body.input);
+      expect(req.headers.authorization).toBe("Bearer secondary-secret");
+      await secondaryGate?.promise;
+      res.setHeader("content-type", "audio/mpeg");
+      res.end(`secondary:${body.input}`);
+    });
+    await new Promise<void>((resolve) => secondary!.listen(0, "127.0.0.1", resolve));
+    env.VOICESTUDIO_NAME = "Mac";
+    env.VOICESTUDIO_SECONDARY_URL = `http://127.0.0.1:${(secondary.address() as AddressInfo).port}`;
+    env.VOICESTUDIO_SECONDARY_API_KEY = "secondary-secret";
+  }
   beforeEach(async () => {
     calls = []; gate = undefined; rejectSpeech = false; unavailable = false;
     activeSpeech = 0; peakSpeech = 0;
+    secondary = undefined; secondaryGate = undefined; discoveryGate = undefined; secondaryCalls = [];
+    primaryAssignmentGate = undefined;
+    secondaryUnavailable = false; secondaryDiscoveries = 0;
     directory = await mkdtemp(join(tmpdir(), "readaloud-preparation-"));
     upstream = createServer(async (req, res) => {
       const buffers: Buffer[] = [];
@@ -55,6 +89,10 @@ describe("server-owned audio preparation", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     gate?.resolve();
+    secondaryGate?.resolve();
+    discoveryGate?.resolve();
+    primaryAssignmentGate?.resolve();
+    if (secondary) await new Promise<void>((resolve) => secondary!.close(() => resolve()));
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
   });
@@ -96,17 +134,18 @@ describe("server-owned audio preparation", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("shares the worker between concurrent voices without overlapping synthesis", async () => {
+  it("finishes one whole reading before starting another voice on the same machine", async () => {
     const service = new PreparationService(env, directory);
     gate = deferred();
     const first = await service.submit({ requests: [item("a1"), item("a2"), item("a3")], start: 0 });
     await expect.poll(() => calls.length).toBe(1);
     const second = await service.submit({ requests: [item("b1"), item("b2")].map((r) => ({ ...r, voice: "other" })), start: 0 });
+    expect(await service.get(second.id)).toMatchObject({ state: "running", queued: true });
     gate.resolve();
     await expect.poll(async () => (await service.get(first.id)).state).toBe("done");
     await expect.poll(async () => (await service.get(second.id)).state).toBe("done");
     const order = calls.map((call) => call.body.input);
-    expect(order.indexOf("b1")).toBeLessThan(order.indexOf("a3"));
+    expect(order).toEqual(["a1", "a2", "a3", "b1", "b2"]);
     expect(order.filter((text) => String(text).startsWith("a"))).toEqual(["a1", "a2", "a3"]);
     expect(order.filter((text) => String(text).startsWith("b"))).toEqual(["b1", "b2"]);
     expect(peakSpeech).toBe(1);
@@ -126,6 +165,120 @@ describe("server-owned audio preparation", () => {
     expect((await service.get(rendering.id)).done).toBe(0);
     gate.resolve();
     await expect.poll(async () => (await service.get(rendering.id)).state).toBe("done");
+  });
+
+  it("uses one reading on each machine and queues the rest until a whole reading finishes", async () => {
+    await addSecondary();
+    gate = deferred(); secondaryGate = deferred();
+    const service = new PreparationService(env, directory);
+    const first = await service.submit({ requests: [item("mac1"), item("mac2")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const second = await service.submit({ requests: [item("cpu1"), item("cpu2")], start: 0 });
+    await expect.poll(() => secondaryCalls.length).toBe(1);
+    const third = await service.submit({ requests: [item("next")], start: 0 });
+    expect(await service.get(first.id)).toMatchObject({ worker: "Mac", queued: false });
+    expect(await service.get(second.id)).toMatchObject({ worker: "Omarchy", queued: false });
+    expect(await service.get(third.id)).toMatchObject({ queued: true });
+    expect(secondaryCalls).toEqual(["cpu1"]);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(third.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["mac1", "mac2", "next"]);
+    expect(await service.get(second.id)).toMatchObject({ worker: "Omarchy", done: 0 });
+    secondaryGate.resolve();
+    await expect.poll(async () => (await service.get(second.id)).state).toBe("done");
+    expect(secondaryCalls).toEqual(["cpu1", "cpu2"]);
+    expect(peakSpeech).toBe(1);
+    // Cache retrieval must follow the machine that actually rendered the voice,
+    // including after a web-server restart.
+    const restarted = new PreparationService(env, directory);
+    expect((await restarted.audio(second.id, 0)).body.toString()).toBe("secondary:cpu1");
+    expect(secondaryCalls).toHaveLength(2);
+  });
+
+  it("gives an idle Mac priority even if secondary assignment could finish first", async () => {
+    await addSecondary();
+    gate = deferred(); secondaryGate = deferred(); primaryAssignmentGate = deferred();
+    // Delay the primary's reservation to prove priority does not depend on the
+    // relative timing of the two asynchronous worker schedulers.
+    vi.spyOn(PreparationWorkers.prototype, "supports").mockImplementation(async (worker) => {
+      if (worker.id === "primary") await primaryAssignmentGate!.promise;
+      return true;
+    });
+    const service = new PreparationService(env, directory);
+    const first = await service.submit({ requests: [item("preferred")], start: 0 });
+    expect(await service.get(first.id)).toMatchObject({ queued: true });
+    expect(secondaryCalls).toEqual([]);
+    primaryAssignmentGate.resolve();
+    await expect.poll(() => calls.length).toBe(1);
+    expect(await service.get(first.id)).toMatchObject({ worker: "Mac", queued: false });
+    const overflow = await service.submit({ requests: [item("overflow")], start: 0 });
+    await expect.poll(() => secondaryCalls.length).toBe(1);
+    expect(await service.get(overflow.id)).toMatchObject({ worker: "Omarchy", queued: false });
+    gate.resolve(); secondaryGate.resolve();
+    await expect.poll(async () => (await service.get(first.id)).state).toBe("done");
+    await expect.poll(async () => (await service.get(overflow.id)).state).toBe("done");
+    expect(peakSpeech).toBe(1);
+  });
+
+  it("keeps an incompatible saved voice queued for the primary machine", async () => {
+    await addSecondary();
+    gate = deferred();
+    const service = new PreparationService(env, directory);
+    const first = await service.submit({ requests: [item("first")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const incompatible = await service.submit({ requests: [{ ...item("saved"), profile: true, engine: "omnivoice" }], start: 0 });
+    const compatible = await service.submit({ requests: [item("preset")], start: 0 });
+    await expect.poll(async () => (await service.get(compatible.id)).state).toBe("done");
+    expect(await service.get(incompatible.id)).toMatchObject({ queued: true, done: 0 });
+    expect(secondaryCalls).toEqual(["preset"]);
+    await service.cancel(incompatible.id);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(first.id)).state).toBe("done");
+  });
+
+  it("does not delay the Mac's next reading while secondary discovery is stalled", async () => {
+    await addSecondary();
+    gate = deferred(); discoveryGate = deferred();
+    const service = new PreparationService(env, directory);
+    const first = await service.submit({ requests: [item("first")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const next = await service.submit({ requests: [item("next")], start: 0 });
+    await expect.poll(() => secondaryDiscoveries).toBe(1);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(next.id)).state).toBe("done");
+    expect((await service.get(first.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["first", "next"]);
+    expect(secondaryCalls).toEqual([]);
+    discoveryGate.resolve();
+  });
+
+  it("keeps a cancelled machine reserved until its in-flight passage finishes", async () => {
+    gate = deferred();
+    const service = new PreparationService(env, directory);
+    const first = await service.submit({ requests: [item("first"), item("unused")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const second = await service.submit({ requests: [item("next")], start: 0 });
+    await service.cancel(first.id);
+    expect(await service.get(second.id)).toMatchObject({ queued: true });
+    gate.resolve();
+    await expect.poll(async () => (await service.get(second.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["first", "next"]);
+    expect(peakSpeech).toBe(1);
+  });
+
+  it("does not let playback start a queued voice on an occupied machine", async () => {
+    gate = deferred();
+    const service = new PreparationService(env, directory);
+    const first = await service.submit({ requests: [item("first"), item("second")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const queued = await service.submit({ requests: [item("queued")], start: 0 });
+    const playback = service.audio(queued.id, 0);
+    expect(await service.get(queued.id)).toMatchObject({ queued: true });
+    gate.resolve();
+    expect((await playback).body.toString()).toBe("audio:queued");
+    await expect.poll(async () => (await service.get(queued.id)).state).toBe("done");
+    expect((await service.get(first.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["first", "second", "queued"]);
   });
 
   it("keeps shared queued work when one of its documents is cancelled", async () => {
@@ -162,6 +315,22 @@ describe("server-owned audio preparation", () => {
     await expect.poll(async () => (await service.get(id)).state, { timeout: 5000 }).toBe("done");
     expect(calls.map((call) => call.body.input)).toEqual(["second", "second"]);
   });
+
+  it("restores an assigned secondary job and reconnects without moving its partial audio to the Mac", async () => {
+    await addSecondary();
+    const id = "12345678-1234-1234-1234-123456789abc";
+    await writeFile(join(directory, `job-${id}.json`), JSON.stringify({ id, requests: [item("saved"), item("remaining")],
+      completed: [0], start: 0, done: 1, total: 2, state: "running", workerId: "secondary" }));
+    secondaryUnavailable = true;
+    const service = new PreparationService(env, directory);
+    await expect.poll(() => secondaryDiscoveries).toBe(1);
+    expect(await service.get(id)).toMatchObject({ state: "running", queued: true, done: 1 });
+    secondaryUnavailable = false;
+    await expect.poll(async () => (await service.get(id)).state, { timeout: 7000 }).toBe("done");
+    expect(await service.get(id)).toMatchObject({ worker: "Omarchy", done: 2 });
+    expect(secondaryCalls).toEqual(["remaining"]);
+    expect(calls).toEqual([]);
+  }, 10_000);
 
   it("retries a dropped upstream connection without losing the job", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("fetch failed"));

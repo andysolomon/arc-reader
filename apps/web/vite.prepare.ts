@@ -4,11 +4,14 @@ import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
 import type { PreparationRequest, PreparationStatus } from "./src/engine/preparation";
+import { PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
 
 interface Job extends PreparationStatus {
   requests: PreparationRequest[];
   completed: number[];
   start: number;
+  workerId?: string;
+  createdAt?: number;
 }
 interface Audio { body: Buffer; type: string; duration?: string; words?: string }
 class HttpError extends Error {
@@ -25,11 +28,15 @@ export class PreparationService {
   private jobs = new Map<string, Job>();
   private inflight = new Map<string, { promise: Promise<Audio>; consumers: Set<() => boolean> }>();
   private writes = new Map<string, Promise<void>>();
-  private queue: Promise<unknown> = Promise.resolve();
+  private queues = new Map<string, Promise<unknown>>();
+  private active = new Map<string, PreparationWorker>();
+  private changes = new Map<string, Set<() => void>>();
+  private scheduling = new Map<string, Promise<void>>();
+  private retryTimer?: ReturnType<typeof setTimeout>;
+  private discovery: PreparationWorkers;
   private ready: Promise<void>;
-  private target: string;
-  constructor(private env: Record<string, string>, private directory = resolve(env.PREPARATION_DATA_DIR || ".readaloud-preparations")) {
-    this.target = (env.VOICESTUDIO_URL || "http://127.0.0.1:3900").replace(/\/$/, "");
+  constructor(env: Record<string, string>, private directory = resolve(env.PREPARATION_DATA_DIR || ".readaloud-preparations")) {
+    this.discovery = new PreparationWorkers(env);
     this.ready = this.restore();
   }
 
@@ -43,9 +50,14 @@ export class PreparationService {
       try {
         const job = JSON.parse(await readFile(path, "utf8")) as Job;
         this.jobs.set(job.id, job);
-        if (job.state === "running") void this.run(job);
+        if (job.state === "running" && job.workerId && !this.discovery.workers.some((worker) => worker.id === job.workerId)) {
+          job.state = "error";
+          job.error = "The preparation machine is no longer configured. Prepare this reading again.";
+          await this.persist(job);
+        }
       } catch { /* ignore an incomplete file */ }
     }
+    this.schedule();
   }
 
   private async atomic(file: string, data: string | Buffer) {
@@ -62,7 +74,85 @@ export class PreparationService {
     return write;
   }
   private status(job: Job): PreparationStatus {
-    return { id: job.id, state: job.state, done: job.done, total: job.total, ...(job.error ? { error: job.error } : {}) };
+    const worker = this.discovery.workers.find((worker) => worker.id === job.workerId);
+    return { id: job.id, state: job.state, done: job.done, total: job.total,
+      queued: job.state === "running" && !this.active.has(job.id),
+      ...(worker && (job.state !== "running" || this.active.has(job.id)) ? { worker: worker.name } : {}),
+      ...(job.error ? { error: job.error } : {}) };
+  }
+
+  private notify(job: Job) {
+    for (const resolve of this.changes.get(job.id) || []) resolve();
+    this.changes.delete(job.id);
+  }
+
+  private wait(job: Job, milliseconds?: number) {
+    return new Promise<void>((resolve) => {
+      const waiters = this.changes.get(job.id) || new Set();
+      const finish = () => {
+        clearTimeout(timer);
+        waiters.delete(finish);
+        if (!waiters.size) this.changes.delete(job.id);
+        resolve();
+      };
+      const timer = milliseconds === undefined ? undefined : setTimeout(finish, milliseconds);
+      waiters.add(finish);
+      this.changes.set(job.id, waiters);
+    });
+  }
+
+  private schedule() {
+    // Discovery on a disconnected secondary must never stall the primary.
+    for (const worker of this.discovery.workers) {
+      const pending = (this.scheduling.get(worker.id) || Promise.resolve())
+        .then(() => this.assign(worker)).finally(() => this.retryDiscovery());
+      this.scheduling.set(worker.id, pending);
+    }
+  }
+
+  private async assign(worker: PreparationWorker) {
+    if ([...this.active.values()].some((active) => active.id === worker.id)) return;
+    const pending = [...this.jobs.values()].filter((job) => job.state === "running" && !this.active.has(job.id))
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    for (const job of pending) {
+      // Keep partial audio on its original machine after a web restart.
+      if (job.workerId && job.workerId !== worker.id) continue;
+      // New readings belong to the primary whenever it is free. The secondary
+      // is overflow capacity; discovery completion order must not decide priority.
+      if (worker.id !== "primary" && !job.workerId && !this.primaryBusy()) return;
+      if (!await this.discovery.supports(worker, job.requests)) continue;
+      if (job.state !== "running" || this.active.has(job.id)) continue;
+      // The primary may have finished while secondary discovery was in flight.
+      if (worker.id !== "primary" && !job.workerId && !this.primaryBusy()) return;
+      job.workerId = worker.id;
+      this.active.set(job.id, worker);
+      this.notify(job);
+      void this.persist(job).then(() => this.run(job, worker)).catch(async (error) => {
+        if (job.state !== "cancelled") { job.state = "error"; job.error = (error as Error).message; }
+        await this.persist(job).catch(() => {});
+      }).finally(() => {
+        this.active.delete(job.id);
+        this.notify(job);
+        this.schedule();
+      });
+      break;
+    }
+  }
+
+  private primaryBusy() {
+    return [...this.active.values()].some((worker) => worker.id === "primary");
+  }
+
+  private retryDiscovery() {
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    // A restored secondary job can outlive a temporary outage, even when the
+    // primary has no work whose completion could wake the scheduler.
+    if ([...this.jobs.values()].some((job) => job.state === "running" && !this.active.has(job.id))
+      && this.discovery.workers.some((worker) => ![...this.active.values()].some((active) => active.id === worker.id))) {
+      this.retryTimer = setTimeout(() => this.schedule(), 5000);
+      this.retryTimer.unref();
+    }
   }
 
   async submit(raw: unknown): Promise<PreparationStatus> {
@@ -87,10 +177,11 @@ export class PreparationService {
     const existing = [...this.jobs.values()].find((job) => job.state === "running" && signature(job.requests) === fingerprint);
     if (existing) return this.status(existing);
     if ([...this.jobs.values()].filter((job) => job.state === "running").length >= 20) throw new HttpError(429, "Too many audio preparations. Try again later.");
-    const job: Job = { id: randomUUID(), requests, start: start!, completed: [], done: 0, total: requests.length, state: "running" };
-    await this.persist(job);
+    const job: Job = { id: randomUUID(), requests, start: start!, completed: [], done: 0, total: requests.length, state: "running", createdAt: Date.now() };
     this.jobs.set(job.id, job);
-    void this.run(job);
+    try { await this.persist(job); }
+    catch (error) { this.jobs.delete(job.id); throw error; }
+    this.schedule();
     return this.status(job);
   }
 
@@ -105,12 +196,14 @@ export class PreparationService {
     const job = await this.job(id);
     if (job.state === "running") {
       job.state = "cancelled";
+      this.notify(job);
       await this.persist(job);
+      this.schedule();
     }
     return this.status(job);
   }
 
-  private async run(job: Job) {
+  private async run(job: Job, worker: PreparationWorker) {
     try {
       for (let k = 0; k < job.total; k++) {
         if (job.state !== "running") return;
@@ -118,14 +211,14 @@ export class PreparationService {
         if (job.completed.includes(index)) continue;
         for (let attempt = 0; ; attempt++) {
           try {
-            if (!job.requests[index].cached) await this.audioFor(job.requests[index], () => job.state === "running");
+            if (!job.requests[index].cached) await this.audioFor(job.requests[index], () => job.state === "running", worker);
             break;
           } catch (error) {
             if (job.state !== "running") return;
             // A restarting speech server must not turn durable work into a
             // terminal error. Keep this passage pending until it comes back.
             if (!(error instanceof TypeError) && !(error instanceof RetryableError) && (error as Error)?.name !== "TimeoutError") throw error;
-            await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5))));
+            await this.wait(job, Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5)));
             if (job.state !== "running") return;
           }
         }
@@ -147,13 +240,17 @@ export class PreparationService {
     const job = await this.job(id);
     if (!Number.isInteger(index) || index < 0 || index >= job.total) throw new HttpError(404, "Passage not found.");
     if (job.requests[index].cached) throw new HttpError(410, "This passage was already cached on the device.");
+    // Playback can observe queued work, but cannot bypass the reading's machine
+    // reservation by starting a second voice on an occupied worker.
+    while (job.state === "running" && !this.active.has(job.id) && !job.completed.includes(index)) await this.wait(job);
     // Only read completed or in-flight work; playback never starts a cancelled job.
     if (job.state === "error" && !job.completed.includes(index)) throw new HttpError(410, "This passage was not prepared. Retry speech generation.");
-    return this.audioFor(job.requests[index], () => job.state === "running");
+    const worker = this.discovery.workers.find((worker) => worker.id === job.workerId) || this.discovery.workers[0];
+    return this.audioFor(job.requests[index], () => job.state === "running" && this.active.has(job.id), worker);
   }
 
-  private audioFor(item: PreparationRequest, allowed: () => boolean): Promise<Audio> {
-    const key = digest([this.target, item.protocol, item.engine, item.voice, !!item.profile, item.text]);
+  private audioFor(item: PreparationRequest, allowed: () => boolean, worker: PreparationWorker): Promise<Audio> {
+    const key = digest([worker.target, item.protocol, item.engine, item.voice, !!item.profile, item.text]);
     const existing = this.inflight.get(key);
     if (existing) {
       existing.consumers.add(allowed);
@@ -169,7 +266,7 @@ export class PreparationService {
       // Only misses enter the single-worker queue, one passage per job at a time.
       const generate = async () => {
         if (![...consumers].some((isAllowed) => isAllowed())) throw new HttpError(410, "Audio preparation was cancelled or expired.");
-        const response = await this.synthesize(item);
+        const response = await this.synthesize(item, worker);
         const body = Buffer.from(await response.arrayBuffer());
         const type = response.headers.get("content-type") || "audio/mpeg";
         if (!body.length || (!type.startsWith("audio/") && type !== "application/octet-stream" && !(item.protocol === "readaloud" && type.includes("json")))) {
@@ -180,8 +277,8 @@ export class PreparationService {
         await this.atomic(`${key}.json`, JSON.stringify(metadata));
         return { body, ...metadata };
       };
-      const pending = this.queue.then(generate, generate);
-      this.queue = pending.catch(() => {});
+      const pending = (this.queues.get(worker.id) || Promise.resolve()).then(generate, generate);
+      this.queues.set(worker.id, pending.catch(() => {}));
       return pending;
     };
     const pending = run();
@@ -190,11 +287,11 @@ export class PreparationService {
     return pending;
   }
 
-  private async upstream(path: string, body?: unknown): Promise<Response> {
+  private async upstream(worker: PreparationWorker, path: string, body?: unknown): Promise<Response> {
     for (let attempt = 0; ; attempt++) {
-      const response = await fetch(`${this.target}${path}`, {
+      const response = await fetch(`${worker.target}${path}`, {
         method: body ? "POST" : "GET",
-        headers: { "Content-Type": "application/json", ...(this.env.VOICESTUDIO_API_KEY ? { Authorization: `Bearer ${this.env.VOICESTUDIO_API_KEY}` } : {}) },
+        headers: { "Content-Type": "application/json", ...(worker.key ? { Authorization: `Bearer ${worker.key}` } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(1_800_000),
       });
       if (response.status === 429 && attempt < 4) {
@@ -213,16 +310,16 @@ export class PreparationService {
     }
   }
 
-  private async synthesize(item: PreparationRequest) {
-    if (item.protocol === "readaloud") return this.upstream("/tts", { text: item.text, voice: item.voice, provider: item.engine, format: "mp3" });
+  private async synthesize(item: PreparationRequest, worker: PreparationWorker) {
+    if (item.protocol === "readaloud") return this.upstream(worker, "/tts", { text: item.text, voice: item.voice, provider: item.engine, format: "mp3" });
     if (item.profile) {
-      const response = await this.upstream("/engines");
+      const response = await this.upstream(worker, "/engines");
       const capabilities = await response.json() as { tts: { active: string; backends: { id: string; supports_cloning?: boolean }[] } };
       if (capabilities.tts.active !== item.engine || !capabilities.tts.backends.find((b) => b.id === item.engine)?.supports_cloning) {
         throw new HttpError(409, "The VoiceStudio cloning engine changed. Refresh Voices before preparing this saved voice.");
       }
     }
-    return this.upstream("/v1/audio/speech", {
+    return this.upstream(worker, "/v1/audio/speech", {
       model: item.profile || ALIAS.test(item.voice) ? "tts-1" : item.engine,
       input: item.text, voice: item.voice, response_format: "mp3", speed: 1,
       ...(["omnivoice", "omnivoice-subprocess"].includes(item.engine) ? { num_step: 16 } : {}),
