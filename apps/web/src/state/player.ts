@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
-import { hasApi } from "../engine/providers";
+import { hasSpeechApi } from "../engine/providers";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { segment } from "../lib/segment";
 import { getVoice, voiceLang, isLocalVoice } from "./voices";
@@ -52,7 +52,7 @@ export const engine = new PlaybackEngine({
   onOffline: () => {
     if (!usePlayer.getState().offline) {
       usePlayer.setState({ offline: true });
-      if (hasApi() && useSettings.getState().engine !== LOCAL_ENGINE) toast("Speech server unreachable — using the browser voice");
+      if (hasSpeechApi() && useSettings.getState().engine !== LOCAL_ENGINE) toast("Speech server unreachable — using the browser voice");
     }
   },
   onOnline: () => {
@@ -128,6 +128,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         await docStore.put(next);
         set({ record: next });
       }
+      set({ offline: false });
       engine.setVoice(v.id, voiceLang(v));
       set({ voiceId: v.id });
     },
@@ -147,6 +148,7 @@ useSettings.subscribe((s, prev) => {
     const p = usePlayer.getState();
     if (p.doc && !p.record?.voice) {
       const v = getVoice(s.voice);
+      usePlayer.setState({ offline: false });
       engine.setVoice(v.id, voiceLang(v));
       usePlayer.setState({ voiceId: v.id });
     }

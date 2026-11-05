@@ -105,6 +105,24 @@ OPENAI_API_KEY=sk-...                     # read by the proxy only
 
 The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; the Settings → Engine choice only affects cloned profiles and the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → Usage shows OpenAI characters for the month with a list-price estimate for text input. Every sentence sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
 
+### Fish Audio voices
+
+Add to the ignored `apps/web/.env.local` and restart Vite (rebuild for preview):
+
+```sh
+VITE_FISH_BASE=/api/fish
+VITE_FISH_TTS_MODEL=s2.1-pro
+FISH_API_KEY=<your Fish Audio API key>
+```
+
+The key is read only by the server proxy; never put it in a `VITE_` variable or the browser's Settings API-key field. Keep `.env.local` private (`chmod 600 apps/web/.env.local`). The proxy allows voice catalogue reads and speech generation only. Static hosting needs an equivalent backend proxy; Vite dev and preview include it.
+
+Choose a voice tagged **Fish Audio** on the Voices page. Sarah is included as a starter voice, alongside up to 12 English voices from Fish's catalogue. A failed refresh displays a retry action and keeps the existing voices available. Saved Fish voice IDs remain playable even if they fall outside the current catalogue page.
+
+Fish uses [`POST /v1/tts`](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech) with the voice's `reference_id` and returns MP3 audio. Sentence prefetch, playback speed, cache, and character usage work as before. Fish caches include the selected model, and cloud requests run independently of the local worker queue. Changing voices retries the connection after an offline fallback. Word highlighting uses estimated timing unless the existing optional VoiceStudio alignment is enabled.
+
+`s2.1-pro` requires API credit; an insufficient-credit response is shown without marking all providers offline. Other models can be selected using `VITE_FISH_TTS_MODEL`; consult Fish's current model documentation before changing it. Text read with a Fish voice is sent to Fish Audio. Leave `VITE_FISH_BASE` empty to hide this provider.
+
 ### Without VoiceStudio
 
 `LIVE=1 pnpm test:e2e` runs the `@live` specs against a real server (URL and key from `.env.local`) and prints the measured first-sentence latency. Without the flag, `tests/stub-voicestudio.mjs` imitates the API (bearer check, two cloned profiles, sine-tone audio, word timings). Playwright starts it automatically. To develop against it:

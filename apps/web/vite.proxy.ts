@@ -40,5 +40,19 @@ export function voiceStudioProxy(env: Record<string, string>): Record<string, Pr
   if (env.OPENAI_API_KEY) {
     routes["/api/oa"] = route("/api/oa", (env.OPENAI_URL || "https://api.openai.com").replace(/\/$/, ""), env.OPENAI_API_KEY, { secure: true });
   }
+  if (env.FISH_API_KEY) {
+    routes["^/api/fish(?:/|$)"] = route("/api/fish", "https://api.fish.audio", env.FISH_API_KEY, {
+      secure: true,
+      // Only expose the read-only voice catalogue and speech generation.
+      bypass(req, res) {
+        const path = new URL(req.url || "/", "http://localhost").pathname;
+        const allowed = (req.method === "GET" && /^\/api\/fish\/model(?:\/[a-zA-Z0-9_-]+)?$/.test(path))
+          || (req.method === "POST" && path === "/api/fish/v1/tts");
+        if (!allowed) {
+          return false;
+        }
+      },
+    });
+  }
   return routes;
 }

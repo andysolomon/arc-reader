@@ -12,10 +12,15 @@ export const DEFAULT_ENGINE: string = (import.meta.env.VITE_DEFAULT_ENGINE as st
 export const OPENAI_BASE = ((import.meta.env.VITE_OPENAI_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const OPENAI_MODEL: string = (import.meta.env.VITE_OPENAI_TTS_MODEL as string | undefined) || "gpt-4o-mini-tts";
 export const OPENAI_ENGINE = "openai";
+export const FISH_ENGINE = "fish";
+export const FISH_BASE = ((import.meta.env.VITE_FISH_BASE as string | undefined) ?? "").replace(/\/$/, "");
+export const FISH_MODEL = (import.meta.env.VITE_FISH_TTS_MODEL as string | undefined) || "s2.1-pro";
 export const hasApi = () => API_BASE.length > 0;
 export const hasOpenAI = () => OPENAI_BASE.length > 0;
+export const hasFish = () => FISH_BASE.length > 0;
+export const hasSpeechApi = () => hasApi() || hasOpenAI() || hasFish();
 /** Which server an engine lives on. */
-export const baseFor = (engine: string) => (engine === OPENAI_ENGINE ? OPENAI_BASE : API_BASE);
+export const baseFor = (engine: string) => engine === FISH_ENGINE ? FISH_BASE : engine === OPENAI_ENGINE ? OPENAI_BASE : API_BASE;
 
 /** OpenAI-style voice ids that VoiceStudio maps to the active engine's default voice. */
 const OPENAI_ALIAS = /^(alloy|ash|ballad|cedar|coral|echo|fable|marin|nova|onyx|sage|shimmer|verse)$/;
@@ -50,8 +55,8 @@ async function doFetch(url: string, init: RequestInit): Promise<Response> {
   if (!r.ok) {
     let detail = "";
     try {
-      const j = (await r.clone().json()) as { error?: { message?: string }; detail?: string };
-      detail = j.error?.message || j.detail || "";
+      const j = (await r.clone().json()) as { error?: { message?: string }; detail?: string; message?: string };
+      detail = j.error?.message || j.detail || j.message || "";
     } catch {
       /* not json */
     }
@@ -114,7 +119,46 @@ export async function readaloudSynthesize(req: TtsRequest): Promise<Chunk> {
   return { source: "api", audio: blob, mime: blob.type || "audio/mpeg", duration: dur > 0 ? dur : await measureDuration(blob, est), words };
 }
 
-const rawSynthesize = (req: TtsRequest & { profile?: boolean }) => (API_KIND === "readaloud" ? readaloudSynthesize(req) : openaiSpeechSynthesize(req));
+export async function fishSynthesize(req: TtsRequest): Promise<Chunk> {
+  if (!hasFish()) throw new ApiUnreachable("Fish Audio is not configured");
+  const reference = req.voice.replace(/^fish:/, "");
+  if (!reference) throw new ApiRejected(400, "Choose a Fish Audio voice");
+  const r = await doFetch(`${FISH_BASE}/v1/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "audio/mpeg", model: FISH_MODEL },
+    body: JSON.stringify({ text: req.text, reference_id: reference, format: "mp3", prosody: { speed: 1 } }),
+    signal: req.signal,
+  });
+  const blob = await r.blob();
+  if (!blob.size || (blob.type && !blob.type.startsWith("audio/") && blob.type !== "application/octet-stream")) {
+    throw new ApiRejected(502, "Fish Audio returned no playable audio");
+  }
+  const duration = await measureDuration(blob, estimateDuration(splitWords(req.text)));
+  return { source: "api", audio: blob, mime: "audio/mpeg", duration };
+}
+
+export interface FishVoice {
+  _id: string;
+  title: string;
+  languages?: string[];
+  tags?: string[];
+}
+
+export async function fetchFishVoices(signal?: AbortSignal): Promise<FishVoice[]> {
+  if (!hasFish()) return [];
+  const r = await doFetch(`${FISH_BASE}/model?page_size=12&language=en&licensed=true&sort_by=score`, {
+    signal, headers: { Accept: "application/json" },
+  });
+  const j = await r.json() as { items?: FishVoice[] };
+  if (!Array.isArray(j.items)) throw new ApiRejected(502, "Fish Audio returned an invalid voice list");
+  return j.items.filter((v) => typeof v._id === "string" && !!v._id && typeof v.title === "string");
+}
+
+const rawSynthesize = (req: TtsRequest & { profile?: boolean }) => {
+  if (req.engine === FISH_ENGINE) return fishSynthesize(req);
+  if (req.engine === OPENAI_ENGINE) return openaiSpeechSynthesize(req);
+  return API_KIND === "readaloud" ? readaloudSynthesize(req) : openaiSpeechSynthesize(req);
+};
 
 /**
  * VoiceStudio runs one CPU worker and queues at most one more request; a third
@@ -125,8 +169,10 @@ const rawSynthesize = (req: TtsRequest & { profile?: boolean }) => (API_KIND ===
 let chain: Promise<unknown> = Promise.resolve();
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((res, rej) => {
-    const t = setTimeout(res, ms);
-    signal?.addEventListener("abort", () => { clearTimeout(t); rej(new DOMException("Aborted", "AbortError")); }, { once: true });
+    const abort = () => { clearTimeout(t); rej(new DOMException("Aborted", "AbortError")); };
+    const t = setTimeout(() => { signal?.removeEventListener("abort", abort); res(); }, ms);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
   });
 
 export const BUSY_RETRIES = 4;
@@ -134,6 +180,7 @@ export const BUSY_RETRIES = 4;
 export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<Chunk> {
   const run = async () => {
     for (let attempt = 0; ; attempt++) {
+      if (req.signal?.aborted) throw new DOMException("Aborted", "AbortError");
       try {
         return await rawSynthesize(req);
       } catch (e) {
@@ -143,7 +190,7 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
     }
   };
   // OpenAI handles concurrency; only the single-worker local server is serialized.
-  if (req.engine === OPENAI_ENGINE) return run();
+  if (req.engine === OPENAI_ENGINE || req.engine === FISH_ENGINE) return run();
   const p = chain.then(run, run);
   chain = p.catch(() => undefined);
   return p;
@@ -151,7 +198,8 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
 
 /** Cache key: engine + voice + text. Switching engines never replays another engine's audio. */
 export function cacheKey(req: Pick<TtsRequest, "text" | "voice" | "engine">): string {
-  return `${req.engine}|${req.voice}|${hash(req.text)}`;
+  const engine = req.engine === FISH_ENGINE ? `${FISH_ENGINE}:${FISH_MODEL}` : req.engine;
+  return `${engine}|${req.voice}|${hash(req.text)}`;
 }
 
 export async function fromCache(req: TtsRequest): Promise<Chunk | null> {

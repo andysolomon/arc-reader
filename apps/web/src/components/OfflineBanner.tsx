@@ -1,7 +1,7 @@
 import { WifiOff, X } from "lucide-react";
 import { IconButton } from "@readaloud/ui";
 import { usePlayer } from "../state/player";
-import { hasApi } from "../engine/providers";
+import { hasSpeechApi } from "../engine/providers";
 import { useSettings } from "../state/settings";
 import { LOCAL_ENGINE } from "../engine/types";
 
@@ -16,7 +16,7 @@ export function OfflineBanner() {
     <div role="status" data-testid="offline-banner" className="flex items-center gap-2.5 border-b border-line bg-bg2 px-4 py-2 text-[13px] text-fg2 animate-fadein">
       <WifiOff size={16} strokeWidth={1.5} aria-hidden className="shrink-0 text-danger" />
       <span className="min-w-0 flex-1">
-        {hasApi() ? "Speech server unreachable — reading with the browser voice. Cached sentences still play." : "No speech server configured — reading with the browser voice."}
+        {hasSpeechApi() ? "Speech server unreachable — reading with the browser voice. Cached sentences still play." : "No speech server configured — reading with the browser voice."}
       </span>
       <IconButton label="Dismiss" size={32} onClick={clear}>
         <X size={16} strokeWidth={1.5} />

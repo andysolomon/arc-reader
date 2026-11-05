@@ -9,7 +9,7 @@ import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
 import { getUsage, getUsageByEngine, PLAN_LIMIT, OPENAI_PRICE_PER_M } from "../lib/usage";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
-import { hasApi, hasOpenAI, OPENAI_MODEL } from "../engine/providers";
+import { hasApi, hasOpenAI, hasFish, OPENAI_MODEL, FISH_MODEL } from "../engine/providers";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -130,7 +130,7 @@ export function SettingsPage() {
           <div className="text-[13px] text-fg2">
             {hasApi()
               ? `Installed engines reported by the speech server${notInstalled > 0 ? `; ${notInstalled} more can be installed from VoiceStudio's Model Catalogue` : ""}. Preset voices name their own engine; cloned voices use this one.`
-              : "No speech server configured, so only the browser voice is available. Set VITE_API_BASE to use VoiceStudio."}
+              : "No local speech server configured. Cloud voices use their own engine; choose one from Voices."}
           </div>
         </Section>
 
@@ -147,6 +147,9 @@ export function SettingsPage() {
                       {" · OpenAI "}
                       {(byEngine.openai ?? 0).toLocaleString()} chars ≈ ${(((byEngine.openai ?? 0) / 1_000_000) * (OPENAI_PRICE_PER_M[OPENAI_MODEL] ?? 15)).toFixed(2)} ({OPENAI_MODEL}, text only)
                     </>
+                  )}
+                  {hasFish() && (byEngine.fish ?? 0) > 0 && (
+                    <> · Fish Audio {(byEngine.fish ?? 0).toLocaleString()} chars ({FISH_MODEL})</>
                   )}
                 </span>
                 <button type="button" onClick={() => toast("Billing opens on the web account page")} className="border-0 bg-transparent p-0 text-accent hover:text-fg">

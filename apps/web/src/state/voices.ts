@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { DEFAULT_VOICES, DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
-import { fetchServerVoices, hasApi, hasOpenAI, API_KIND, DEFAULT_ENGINE, OPENAI_ENGINE, type ServerEngine } from "../engine/providers";
+import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, FISH_DEFAULT_VOICE, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
+import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, DEFAULT_ENGINE, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
 import { LOCAL_ENGINE } from "../engine/types";
 
 export interface EngineOption {
@@ -13,8 +13,11 @@ interface VoicesState {
   voices: Voice[];
   engines: EngineOption[];
   loaded: boolean;
+  fishError: string | null;
   /** Fetch voices/engines from the speech server; keeps the defaults when it is unreachable. */
   load: () => Promise<void>;
+  loadFish: () => Promise<void>;
+  loadServer: () => Promise<void>;
 }
 
 const ENGINE_LABELS: Record<string, string> = {
@@ -27,9 +30,10 @@ const ENGINE_LABELS: Record<string, string> = {
   cosyvoice: "CosyVoice 3",
   [LOCAL_ENGINE]: "Browser voice",
   [OPENAI_ENGINE]: "OpenAI",
+  [FISH_ENGINE]: "Fish Audio",
 };
 
-const cloud = () => (hasOpenAI() ? OPENAI_VOICES : []);
+const cloud = () => [...(hasOpenAI() ? OPENAI_VOICES : []), ...(hasFish() ? [FISH_DEFAULT_VOICE] : [])];
 
 export const engineLabel = (id: string) => ENGINE_LABELS[id] ?? id;
 
@@ -47,13 +51,31 @@ function langLabel(l: string | null | undefined): string {
 }
 
 export const useVoices = create<VoicesState>()((set, get) => ({
-  voices: [...cloud(), ...DEFAULT_VOICES],
+  voices: [...cloud(), ...(hasApi() ? PRESET_VOICES : []), LOCAL_VOICE],
   engines: defaultEngines(),
   loaded: false,
+  fishError: null,
   async load() {
+    await Promise.all([get().loadFish(), get().loadServer()]);
+    set({ loaded: true });
+  },
+  async loadFish() {
+    if (!hasFish()) return;
+    try {
+      const voices = await fetchFishVoices();
+      const fish: Voice[] = voices.map((v) => ({
+        id: `fish:${v._id}`, name: v.title, lang: `${langLabel(v.languages?.[0])} · Fish Audio`,
+        tags: ["Fish Audio", ...(v.tags ?? []).filter((t) => typeof t === "string").slice(0, 1)],
+        hue: hueFor(`fish:${v._id}`), engine: FISH_ENGINE, kind: "preset",
+      }));
+      if (!fish.some((v) => v.id === FISH_DEFAULT_VOICE.id)) fish.unshift(FISH_DEFAULT_VOICE);
+      set({ voices: [...get().voices.filter((v) => v.engine !== FISH_ENGINE), ...fish], fishError: null });
+    } catch (error) {
+      set({ fishError: error instanceof Error ? error.message : "Could not load Fish Audio voices" });
+    }
+  },
+  async loadServer() {
     if (!hasApi() || API_KIND !== "openai") {
-      set({ voices: [...cloud(), ...(hasApi() ? PRESET_VOICES : [])], loaded: true });
-      if (!hasApi()) set({ voices: [...cloud(), LOCAL_VOICE] });
       return;
     }
     try {
@@ -66,16 +88,23 @@ export const useVoices = create<VoicesState>()((set, get) => ({
       const engineOpts: EngineOption[] = (engines as ServerEngine[])
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false }))
         .concat([{ id: LOCAL_ENGINE, label: engineLabel(LOCAL_ENGINE), available: true }]);
-      set({ voices: [...cloud(), ...profiles, ...presets, LOCAL_VOICE], engines: engineOpts.length > 1 ? engineOpts : get().engines, loaded: true });
+      const clouds = get().voices.filter((v) => v.engine === OPENAI_ENGINE || v.engine === FISH_ENGINE);
+      set({ voices: [...clouds, ...profiles, ...presets, LOCAL_VOICE], engines: engineOpts.length > 1 ? engineOpts : get().engines });
     } catch {
-      set({ loaded: true });
+      // Keep available voices if the local speech server is offline.
     }
   },
 }));
 
 export function getVoice(id: string | null | undefined): Voice {
   const list = useVoices.getState().voices;
-  return list.find((v) => v.id === id) ?? list.find((v) => v.id === DEFAULT_VOICE_ID) ?? list[0];
+  const found = list.find((v) => v.id === id);
+  if (found) return found;
+  // A saved document can reference a voice outside the current catalogue page.
+  if (hasFish() && id?.startsWith("fish:") && id.length > 5) {
+    return { ...FISH_DEFAULT_VOICE, id, name: "Fish Audio voice", hue: hueFor(id) };
+  }
+  return list.find((v) => v.id === DEFAULT_VOICE_ID) ?? list[0];
 }
 
 export const isLocalVoice = (id: string | null | undefined) => id === LOCAL_VOICE_ID;

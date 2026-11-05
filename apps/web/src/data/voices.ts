@@ -59,6 +59,12 @@ export const OPENAI_VOICES: Voice[] = [
   openai("verse", "Verse", ["expressive", "podcast"]),
 ];
 
+// Fish's documented example voice; stays available if catalogue discovery fails.
+export const FISH_DEFAULT_VOICE: Voice = {
+  id: "fish:933563129e564b19a115bedd57b7406a", name: "Sarah", lang: "EN-US · Fish Audio",
+  tags: ["Fish Audio", "narrator"], hue: hueFor("fish:sarah"), engine: "fish", kind: "preset",
+};
+
 export const LOCAL_VOICE: Voice = { id: LOCAL_VOICE_ID, name: "Browser voice", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null, engine: LOCAL_ENGINE, kind: "local" };
 
 /** The list shown before (or without) a speech server. */

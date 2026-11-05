@@ -8,7 +8,7 @@ import { usePlayer } from "../state/player";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { docs } from "../lib/db";
-import { synthesize } from "../engine/providers";
+import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
 
 const PREVIEW_MS = 3000;
 
@@ -21,6 +21,7 @@ export function VoicesPage() {
   const engineId = useSettings((s) => s.engine);
   const VOICES = useVoices((s) => s.voices);
   const reload = useVoices((s) => s.load);
+  const fishError = useVoices((s) => s.fishError);
   const speed = usePlayer((s) => s.speed);
   const loadedDoc = usePlayer((s) => s.doc);
   const docVoice = usePlayer((s) => s.voiceId);
@@ -52,6 +53,7 @@ export function VoicesPage() {
 
   const preview = async (id: string) => {
     stopPreview();
+    usePlayer.getState().clearOffline();
     const v = getVoice(id);
     setPreviewing(id);
     const text = `Hi, I'm ${v.name}. This is how I sound at your current speed.`;
@@ -63,7 +65,7 @@ export function VoicesPage() {
       engine: v.kind === "preset" ? v.engine : v.kind === "local" ? LOCAL_ENGINE : engineId,
       profile: v.kind === "profile",
       signal: ac.signal,
-      forceLocal: isLocalVoice(v.id) || engineId === LOCAL_ENGINE || usePlayer.getState().offline,
+      forceLocal: isLocalVoice(v.id) || (v.kind === "profile" && engineId === LOCAL_ENGINE),
       onOffline: () => usePlayer.setState({ offline: true }),
       onRejected: (m) => toast(m),
     }).catch(() => null);
@@ -86,6 +88,8 @@ export function VoicesPage() {
 
   const use = async (id: string) => {
     const v = getVoice(id);
+    if (v.kind === "preset" && engineId === LOCAL_ENGINE) set("engine", DEFAULT_ENGINE);
+    usePlayer.getState().clearOffline();
     if (forDoc) {
       if (loadedDoc?.id === forDoc) await usePlayer.getState().setDocVoice(id);
       else {
@@ -112,6 +116,12 @@ export function VoicesPage() {
             {forDoc ? `Choosing a voice for “${docTitle ?? "this document"}”.` : "Selected voice is remembered. Override per document from the player menu."}
           </span>
         </div>
+        {fishError && (
+          <div role="status" className="rounded-panel border border-line bg-bg2 p-4 text-[13px] text-fg2">
+            Fish Audio voices could not refresh: {fishError}. Your other voices are still available.
+            <button type="button" onClick={() => void reload()} className="ml-2 border-0 bg-transparent text-accent underline">Retry</button>
+          </div>
+        )}
         <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
           {VOICES.map((v) => (
             <VoiceCard key={v.id} voice={v} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
