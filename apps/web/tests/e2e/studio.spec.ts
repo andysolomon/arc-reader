@@ -289,6 +289,58 @@ test("Voices identifies each provider", async ({ page }) => {
   await expect(page.locator('[data-voice="local"]').getByLabel("Voice source: Browser")).toBeVisible();
 });
 
+test("gallery filters narrow the catalog and favorites", async ({ page }) => {
+  await mockStudio(page);
+  const queries: URLSearchParams[] = [];
+  const librarian = { id: "librarian", name: "The Librarian", language: "English", use_case: "narration", instruct: "female, low pitch, british accent", attrs: {}, facets: { gender: "female", pitch: "low pitch", accent: "british accent", whisper: false, lang: "English" } };
+  const guide = { id: "guide", name: "The Calm Guide", language: "English", use_case: "narration", instruct: "male, whisper", attrs: {}, facets: { gender: "male", whisper: true, lang: "English" } };
+  await page.route("**/api/vs/archetypes?**", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    queries.push(params);
+    const items = [librarian, guide].filter((v) => !params.get("gender") || v.facets.gender === params.get("gender"));
+    return route.fulfill({ json: { total: items.length, items } });
+  });
+  await page.goto("/studio/gallery");
+  await expect(page.getByRole("article")).toHaveCount(2);
+  await page.getByLabel("Gender").selectOption("male");
+  await page.getByLabel("Accent").selectOption("british accent");
+  await expect.poll(() => queries.at(-1)?.get("accent")).toBe("british accent");
+  expect(queries.at(-1)?.get("gender")).toBe("male");
+  await page.getByRole("button", { name: "Clear filters (2)" }).click();
+  await expect.poll(() => queries.at(-1)?.has("gender")).toBe(false);
+  await expect(page.getByRole("article")).toHaveCount(2);
+  await page.getByRole("button", { name: "Favorite The Librarian", exact: true }).click();
+  await page.getByRole("button", { name: "Favorite The Calm Guide", exact: true }).click();
+  await page.getByRole("button", { name: "Favorites (2)", exact: true }).click();
+  await page.getByLabel("Delivery").selectOption("true");
+  await expect(page.getByRole("article")).toHaveCount(1);
+  await expect(page.getByRole("article", { name: "The Calm Guide" })).toBeVisible();
+  await page.getByLabel("Gender").selectOption("female");
+  await expect(page.getByText("No voices match these filters.")).toBeVisible();
+});
+
+test("Voices filters by source, language, type and search", async ({ page }) => {
+  await mockStudio(page);
+  await page.goto("/voices");
+  const cards = page.locator("[data-voice]");
+  await expect(page.locator('[data-voice="voice-1"]')).toBeVisible();
+  const total = await cards.count();
+  await page.getByRole("group", { name: "Voice source" }).getByRole("button", { name: /^ChatGPT/ }).click();
+  await expect(page.locator('[data-voice="alloy"]')).toBeVisible();
+  await expect(page.locator('[data-voice="local"]')).toHaveCount(0);
+  await page.getByLabel("Search voices").fill("podcast");
+  await expect(cards).toHaveCount(2);
+  await page.getByRole("button", { name: "Clear filters (2)" }).click();
+  await expect(cards).toHaveCount(total);
+  await page.getByLabel("Type").selectOption("cloned");
+  await expect(cards).toHaveCount(1);
+  await expect(page.locator('[data-voice="voice-1"]')).toBeVisible();
+  await page.getByLabel("Type").selectOption("");
+  await page.getByLabel("Language").selectOption("MULTI");
+  await expect(page.locator('[data-voice="local"]')).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: `of ${total} voices` })).toBeVisible();
+});
+
 test("gallery favorites and preview indicators are accessible on a phone", async ({ page }) => {
   await mockStudio(page);
   await page.setViewportSize({ width: 390, height: 844 });
