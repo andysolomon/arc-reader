@@ -38,3 +38,37 @@ Regenerated through `/generate` with the same script and voice instruction (`fem
 Replaced `/app/omnivoice_data/outputs/archetype_previews/327adafa22e5967d.wav` atomically in the persistent Docker data volume after validation. The original is preserved beside it as `327adafa22e5967d.failed-20261105.wav.bak`, with repair metadata in `327adafa22e5967d.repair.json`. Verified the live preview endpoint serves the exact replacement bytes. This repairs the saved preview; backend generation defaults and automatic speech-quality validation remain unchanged. If this disk cache is cleared, regenerate using the verified settings above and validate before replacing it.
 
 Gallery playback now revalidates audio with the server on each open instead of holding completed blobs in an application cache. HTTP caching can still reuse unchanged bytes; a repaired clip is picked up without a page reload. A regression test replaces the served clip between opens and verifies the new audio duration, alongside existing timeout/error tests.
+
+## Mac preparation tuning (2026-11-05)
+
+The Mac mini runs VoiceStudio 0.5.7 natively on an M4 Pro with 24 GB of unified memory. `/health` reports `device=mps`, and the active OmniVoice implementation is `OmniVoiceMPSSubprocessBackend`. The model already loads on MPS in float16; its audio tokenizer runs on CPU because the model's tokenizer does not support MPS. Increasing request concurrency does not remove this bottleneck: VoiceStudio deliberately serializes MPS synthesis through one worker.
+
+Two differences between the isolated and in-process OmniVoice implementations added work to every passage:
+
+- The isolated worker omitted `num_step` when the API caller omitted it, falling through to the model's **32** steps. The ordinary VoiceStudio adapter uses **16**. ReadAloud now explicitly requests 16 steps for OmniVoice, and the Mac worker defaults to 16 as well. This is a synthesis quality/speed preset change, not a change in playback speed. Explicit overrides, including 32 and 64 steps, remain supported; gallery requests with explicit settings keep those settings.
+- The worker reused encoded reference prompts only for references without transcripts. Saved voices with transcripts encoded their reference audio on CPU again for every passage. Those references now use the existing bounded prompt cache too, with the same invalidation and fallback behavior.
+
+The backend fixes are applied in `~/VoiceStudio/backend/engines/omnivoice_subprocess/main.py` on the Mac mini. The isolated worker was unloaded through the busy-guarded `/model/unload/sidecar:omnivoice` endpoint, retrying when it reported busy until an idle gap; the next request loaded the patched worker. The parent service did not need restarting. This activates the backend fix for existing ReadAloud clients, independently of rebuilding the web app.
+
+The [backend patch and regression tests](patches/voicestudio-0.5.7-mps-preparation.patch) are preserved here because upstream updates can replace local edits. Against the matching VoiceStudio 0.5.7 source:
+
+```sh
+git apply --check /path/to/voicestudio-0.5.7-mps-preparation.patch
+git apply /path/to/voicestudio-0.5.7-mps-preparation.patch
+PYTHONPATH=backend .venv/bin/pytest -q backend/tests/test_omnivoice_subprocess.py tests/test_clone_prompt_cache.py tests/test_omnivoice_sidecar_cold_start.py
+# To undo, first check: git apply --reverse --check /path/to/voicestudio-0.5.7-mps-preparation.patch
+# Then: git apply --reverse /path/to/voicestudio-0.5.7-mps-preparation.patch
+```
+
+Measured with `POST /v1/audio/speech`, `model=tts-1`, `voice=demo0001`, `seed=42`, WAV output, and the same three-sentence English passage (about 10.09 seconds of audio):
+
+| Configuration | Observed request times |
+| --- | --- |
+| Original worker, 32 steps | 20.217 s, 22.043 s |
+| Original worker, explicit 16 steps | 15.266 s, 16.386 s |
+| Patched worker, default 16 steps, first request after reload | 10.487 s |
+| Patched worker, default 16 steps, warm reference cache | 6.168 s, 6.868 s |
+
+Warm requests averaged 6.518 seconds versus 21.130 seconds before the fixes, about **3.2×** the throughput for this sample. These are small-sample wall-clock measurements on a shared server while reading preparation was active; they include any queue wait and are not an isolated model benchmark. Designed voices without an audio reference benefit from the step default but not reference caching. Existing prepared browser clips are retained. The patched and original 16-step WAVs were byte-for-byte identical for this seed and sample, establishing that reference reuse preserved output. The 16-step preset can produce different audio from 32 steps.
+
+Validation: 71 backend tests and 119 ReadAloud tests passed, along with type checking and the production build. Provider tests verify the 16-step request for OmniVoice and that other providers do not receive the extension. The installed local faster-whisper recognizer recovered the complete sample transcript without word errors. The Mac's selected MLX Whisper model was not installed, so that check used the existing CPU speech server on Omarchy without changing the Mac's ASR settings.

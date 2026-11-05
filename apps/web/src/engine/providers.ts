@@ -94,12 +94,15 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
   const model = req.engine === OPENAI_ENGINE ? openaiModelFor(req) : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
   const steerable = req.engine === OPENAI_ENGINE && isTokenSpeechModel(model);
   const streamUsage = steerable;
+  // Match VoiceStudio's normal 16-step setting. Its isolated Mac worker otherwise
+  // falls through to the model's slower 32-step default.
+  const omniVoice = req.engine === "omnivoice" || req.engine === "omnivoice-subprocess";
   // Only gpt-4o-mini-tts follows `instructions`; an accent voice adds its own on top of the steady delivery.
   const instructions = steerable ? (accent ? `${accent.instructions} ${STEADY_NARRATION}` : STEADY_NARRATION) : accent?.instructions;
   const r = await doFetch(`${base}/v1/audio/speech`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: streamUsage ? "text/event-stream, audio/mpeg" : "audio/mpeg, audio/*" },
-    body: JSON.stringify({ model, input: req.text, voice: accent?.voice ?? req.voice, instructions, response_format: "mp3", speed: 1, ...(streamUsage ? { stream_format: "sse" } : {}) }),
+    body: JSON.stringify({ model, input: req.text, voice: accent?.voice ?? req.voice, instructions, response_format: "mp3", speed: 1, ...(omniVoice ? { num_step: 16 } : {}), ...(streamUsage ? { stream_format: "sse" } : {}) }),
     signal: req.signal,
   });
   const streamed = r.headers.get("content-type")?.includes("text/event-stream") ? await readSpeechStream(r) : null;

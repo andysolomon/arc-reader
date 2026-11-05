@@ -54,7 +54,7 @@ If you already have `apps/web/.env.local`, `ln -s apps/web/.env.local .env` uses
 
 #### VoiceStudio on another machine
 
-Cloned and designed voices use OmniVoice, which runs about 10× slower than real time on a laptop CPU. On an Apple Silicon Mac it uses the GPU (MPS) and runs faster than real time. To use VoiceStudio on such a machine, run its backend there from source with the same API key, and publish it on the tailnet:
+Cloned and designed voices use OmniVoice, which runs about 10× slower than real time on a laptop CPU. On an Apple Silicon Mac it uses the GPU (MPS); actual speed also depends on passage length, reference encoding, and synthesis steps. ReadAloud requests VoiceStudio's normal 16-step preset. See [Mac preparation tuning](docs/voicestudio-studio.md#mac-preparation-tuning-2026-11-05) for the isolated-worker fixes used on the Mac mini. To use VoiceStudio on such a machine, run its backend there from source with the same API key, and publish it on the tailnet:
 
 ```sh
 git clone --depth 1 --branch v0.5.7 https://github.com/debpalash/VoiceStudio.git && cd VoiceStudio

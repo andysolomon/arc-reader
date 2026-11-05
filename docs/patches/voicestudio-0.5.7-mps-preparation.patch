@@ -1,0 +1,80 @@
+diff --git a/backend/engines/omnivoice_subprocess/main.py b/backend/engines/omnivoice_subprocess/main.py
+index 09185da..6adf6aa 100644
+--- a/backend/engines/omnivoice_subprocess/main.py
++++ b/backend/engines/omnivoice_subprocess/main.py
+@@ -309,6 +309,8 @@ def _handle_synthesize(msg: dict, stdout) -> None:
+ 
+     model = _load_model(stdout)
+     gen_kw = {k: msg[k] for k in _GEN_KW_ALLOWLIST if k in msg}
++    # Match the in-process adapter; preserve explicit quality overrides.
++    gen_kw.setdefault("num_step", 16)
+ 
+     seed = msg.get("seed")
+     if seed is not None:
+@@ -322,13 +324,14 @@ def _handle_synthesize(msg: dict, stdout) -> None:
+     # Any reference still without a transcript takes this path, whatever its
+     # length: when resolution found no words, plain generate() would load the
+     # model's own ASR and (now) release it again on every line.
+-    untranscribed = isinstance(ref_audio, str) and not (ref_text or "").strip()
+-    if untranscribed:
++    # Reuse encoded prompts for transcribed references too. CPU reference
++    # encoding on MPS otherwise repeats for every passage of the same voice.
++    if isinstance(ref_audio, str):
+         _ensure_backend_on_path()
+         from services.tts_backend import generate_with_cached_ref  # noqa: PLC0415
+ 
+         audios = generate_with_cached_ref(
+-            model, text=text, ref_audio=ref_audio, ref_text=None,
++            model, text=text, ref_audio=ref_audio, ref_text=ref_text,
+             release_reference_asr=True, reference_asr=reference_asr, **gen_kw,
+         )
+     else:
+diff --git a/backend/tests/test_omnivoice_subprocess.py b/backend/tests/test_omnivoice_subprocess.py
+index 40098ea..3136a24 100644
+--- a/backend/tests/test_omnivoice_subprocess.py
++++ b/backend/tests/test_omnivoice_subprocess.py
+@@ -156,7 +156,8 @@ def test_reference_asr_hang_is_killed_and_next_request_recovers(monkeypatch, tmp
+         backend.shutdown()
+ 
+ 
+-def test_sidecar_synthesis_encodes_a_reference_once_per_sidecar(monkeypatch, tmp_path):
++@pytest.mark.parametrize("ref_text", [None, "Known reference words."])
++def test_sidecar_synthesis_encodes_a_reference_once_per_sidecar(monkeypatch, tmp_path, ref_text):
+     """Repeat requests reuse the cached clone prompt instead of re-selecting.
+ 
+     Without it a long reference reloads the passage-selection Whisper on
+@@ -190,7 +191,7 @@ def test_sidecar_synthesis_encodes_a_reference_once_per_sidecar(monkeypatch, tmp
+     tts_backend.clear_clone_prompt_cache()
+     try:
+         for line in ("one", "two", "three"):
+-            sidecar._handle_synthesize({"text": line, "ref_audio": str(ref)}, None)
++            sidecar._handle_synthesize({"text": line, "ref_audio": str(ref), "ref_text": ref_text}, None)
+     finally:
+         tts_backend.clear_clone_prompt_cache()
+ 
+@@ -985,7 +986,8 @@ def test_cached_model_load_emits_periodic_heartbeats(monkeypatch):
+     assert len(loading) >= 3, "cached model load went silent between 0% and 100%"
+ 
+ 
+-def test_sidecar_forwards_native_controls_and_applies_seed(monkeypatch):
++@pytest.mark.parametrize("num_step", [None, 8, 32])
++def test_sidecar_forwards_native_controls_and_applies_seed(monkeypatch, num_step):
+     import torch
+     from engines.omnivoice_subprocess import main as sidecar
+ 
+@@ -1008,6 +1010,7 @@ def test_sidecar_forwards_native_controls_and_applies_seed(monkeypatch):
+     )
+ 
+     sidecar._handle_synthesize({
++        **({"num_step": num_step} if num_step is not None else {}),
+         "text": "hello",
+         "seed": 123,
+         "t_shift": 0.4,
+@@ -1020,6 +1023,7 @@ def test_sidecar_forwards_native_controls_and_applies_seed(monkeypatch):
+ 
+     assert seeds == [123]
+     assert calls == [{
++        "num_step": 16 if num_step is None else num_step,
+         "text": "hello",
+         "ref_audio": None,
+         "ref_text": None,
