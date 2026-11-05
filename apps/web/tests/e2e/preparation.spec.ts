@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 test("composing automatically prepares all passages, continues with the page closed, and reuses audio on return", async ({ page, context }) => {
   const unique = Date.now().toString(36);

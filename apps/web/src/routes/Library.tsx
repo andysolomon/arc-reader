@@ -13,6 +13,7 @@ import { openDocument } from "../lib/openDoc";
 import { FOCUS_SEARCH_EVENT } from "../hooks/useShortcuts";
 import { useBreakpoint, useIsTouch } from "../hooks/useMedia";
 import { audioCache } from "../lib/db";
+import { syncLibrary, useLibrarySync } from "../lib/librarySync";
 import { PreparationQueue, PrepareDialog, PreparedStatus } from "../components/LibraryPreparation";
 
 export function LibraryPage() {
@@ -26,6 +27,7 @@ export function LibraryPage() {
   const openaiModel = useSettings((s) => s.openaiModel);
   const voices = useVoices((s) => s.voices);
   const hasDoc = usePlayer((s) => !!s.doc);
+  const sync = useLibrarySync();
   const [q, setQ] = useState("");
   const [vf, setVf] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -98,6 +100,10 @@ export function LibraryPage() {
               </IconButton>
             </div>
           )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-[13px] text-fg2" role="status" aria-label="Library sync">
+          <span>{sync.status === "synced" ? "Shared library · Synced" : sync.status === "syncing" ? "Shared library · Syncing…" : sync.pending ? "Saved on this device · Waiting to sync" : "Server unavailable · Showing saved library"}</span>
+          {sync.status === "offline" && <button type="button" title={sync.error ?? undefined} className="text-accent hover:text-fg" onClick={() => { void syncLibrary().then(() => refresh()); }}>Retry sync</button>}
         </div>
         {items.length > 0 && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by voice">

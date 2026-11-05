@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { composeAndListen, TEXT } from "./helpers";
 
 test.describe("keyboard flow", () => {

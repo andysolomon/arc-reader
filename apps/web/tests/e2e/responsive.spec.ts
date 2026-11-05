@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { composeAndListen } from "./helpers";
 
 test("phone: tab bar, compact bottom player, text controls in a sheet", async ({ page }) => {

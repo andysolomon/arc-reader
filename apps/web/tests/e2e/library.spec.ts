@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
 async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null]) {
@@ -6,7 +6,7 @@ async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null
   await page.getByRole("heading", { name: "Library", exact: true }).waitFor();
   await page.evaluate(async (voices) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("readaloud", 1);
+      const request = indexedDB.open("readaloud");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

@@ -29,6 +29,20 @@ docker compose up -d  # VoiceStudio + the built app on :4179 (see Voices below)
 
 Copy `apps/web/.env.example` to `.env` to point the app at a TTS backend.
 
+For parallel worktrees, give each Playwright run separate ports, for example `E2E_PORT=4184 E2E_VOICE_PORT=3987 E2E_OPENAI_PORT=3986 pnpm test:e2e`. Each run uses temporary server library storage; UI tests isolate their libraries while the shared-library test uses independent browsers against the real HTTP API.
+
+## Shared library
+
+Documents, selected document voices, saved Patois adaptations, and listening progress are shared by all clients of the same web server through `/api/library/sync`. There are no separate user accounts or private libraries: everyone who can reach that server uses the same library. Keep using the same Tailscale URL on each device.
+
+The server stores the library atomically in `LIBRARY_DATA_DIR/library.json` (default: `apps/web/.readaloud-library` when started from the app directory). The library has no expiry. Back up that directory; use a stable absolute `LIBRARY_DATA_DIR` when switching checkouts. Docker Compose mounts a persistent `library-data` volume.
+
+On first connection, each browser automatically merges its existing documents and listening positions into the server library. Existing IDs are retained; for conflicting edits or positions, the newest `updatedAt` wins, so client clocks should be accurate. Different IDs remain separate documents, even if their text is identical. Deletions are permanent across devices: the server retains tombstones so an offline browser cannot re-import a removed document.
+
+IndexedDB remains the offline copy. Local edits and deletions are committed alongside a persistent outgoing queue, retried after reconnecting, on focus, and every five seconds while the app is visible. The Library shows whether it has synced or is waiting. A fresh device can open a document link after syncing. Downloaded audio, app preferences, usage totals, and preparation queue controls remain local to each browser. Sync does not interrupt active playback; shared progress is used the next time a document opens.
+
+Run a single Vite dev or preview server per library directory. Static hosting needs an equivalent library API; without it, the app retains local changes and reports that sync is unavailable.
+
 ## Playback engine (`apps/web/src/engine`)
 
 - One audio clip per passage (a paragraph, or up to about 60 words of one); about a minute of listening ahead is prefetched (at least two passages, at most two requests at a time), so long paragraphs bank time for runs of short ones; OpenAI and Fish prefetch only the next passage, since they keep up and bill audio a pause or skip never plays. The reader still moves sentence by sentence: each clip's sentence starts are located from its pauses (or from word timings when enabled), clips are level-matched and their edge silences trimmed at the joins. One request per sentence made generative voices shift tone at every sentence; see `planPassages` in `src/lib/segment.ts`.
