@@ -356,7 +356,17 @@ describe("server-owned audio preparation", () => {
     const job = await service.submit({ requests: [{ ...item("first"), cached: true }, item("second")], start: 0 });
     await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
     expect(calls.map((call) => call.body.input)).toEqual(["second"]);
+    const listed = (await service.list()).jobs.find((entry) => entry.id === job.id)!;
+    expect(listed).toMatchObject({ keys: ["first", "second"], available: [1], engine: "kittentts", voice: "v", state: "done" });
+    expect(listed).not.toHaveProperty("requests");
+    expect((await new PreparationService(env, directory).list()).jobs[0]).toMatchObject({ id: job.id, available: [1] });
     await expect(service.audio(job.id, 0)).rejects.toThrow("already cached");
+    await service.publish(job.id, 0, { body: Buffer.from("original-device-audio"), type: "audio/mpeg", duration: "2" });
+    expect((await service.list()).jobs[0]).toMatchObject({ available: [0, 1], deviceOnly: [] });
+    expect((await service.audio(job.id, 0)).body.toString()).toBe("original-device-audio");
+    const restored = new PreparationService(env, directory);
+    expect((await restored.audio(job.id, 0)).body.toString()).toBe("original-device-audio");
+    expect(calls.map((call) => call.body.input)).toEqual(["second"]);
     await expect(service.submit({ requests: [{ ...item("paid"), engine: "openai" }], start: 0 })).rejects.toThrow("VoiceStudio");
     await expect(service.submit({ requests: [item("bad")], start: -1 })).rejects.toThrow("Invalid");
   });

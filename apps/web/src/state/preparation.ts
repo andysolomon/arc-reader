@@ -3,13 +3,15 @@ import { persist } from "zustand/middleware";
 import type { Voice } from "../data/voices";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { unavailableMessage } from "../engine/engine";
-import { isTransientPreparationError } from "../engine/preparation";
+import { isTransientPreparationError, refreshPreparationCatalog, sharedAudioRemaining } from "../engine/preparation";
 import { API_BASE, baseFor, cacheKey, isPaidEngine, prepareInBackground, synthesize } from "../engine/providers";
 import { ApiBusy, ApiUnreachable, LOCAL_ENGINE } from "../engine/types";
 import { audioCache, docs } from "../lib/db";
 import { preparePatois } from "../lib/patois";
 import { planPassages, segment } from "../lib/segment";
 import { useSettings } from "./settings";
+import { getVoice } from "./voices";
+import { sharedPreparationJobs } from "../lib/sharedPreparations";
 
 export interface PreparationJob {
   id: string;
@@ -23,6 +25,8 @@ export interface PreparationJob {
   total: number;
   message?: string;
   worker?: string;
+  serverId?: string;
+  remote?: boolean;
 }
 
 export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "saving"].includes(job.status);
@@ -40,10 +44,41 @@ interface PreparationState {
   cancelDocument: (docId: string) => void;
   cancelAll: () => void;
   dismissFinished: () => void;
+  sharedError: string | null;
+  sharing: number;
+  refreshShared: () => Promise<void>;
 }
+
+let sharedRefresh: Promise<void> | null = null;
+const hiddenSharedJobs = new Set<string>();
+const sameReading = (a: PreparationJob, b: PreparationJob) => a.docId === b.docId && a.voice.id === b.voice.id && a.voice.engine === b.voice.engine;
 
 export const usePreparation = create<PreparationState>()(persist((set, get) => ({
   jobs: [],
+  sharedError: null,
+  sharing: 0,
+  async refreshShared() {
+    if (API_BASE !== "/api/vs") return;
+    if (sharedRefresh) return sharedRefresh;
+    sharedRefresh = (async () => {
+      try {
+        const catalogue = await refreshPreparationCatalog();
+        const remote = sharedPreparationJobs(await docs.all(), catalogue, getVoice);
+        let jobs = get().jobs.filter((job) => !job.remote);
+        for (const job of remote) {
+          if (hiddenSharedJobs.has(job.id) && !isPreparing(job)) continue;
+          const local = jobs.find((other) => sameReading(job, other));
+          if (local && (isPreparing(local) || (local.serverId === job.serverId && local.status === job.status))) continue;
+          jobs = jobs.filter((other) => !sameReading(job, other));
+          jobs.push(job);
+        }
+        set({ jobs, sharedError: null, sharing: sharedAudioRemaining() });
+      } catch (error) {
+        set({ sharedError: (error as Error).message });
+      }
+    })().finally(() => { sharedRefresh = null; });
+    return sharedRefresh;
+  },
   enqueue(documents, voices) {
     const jobs: PreparationJob[] = [];
     const settings = useSettings.getState();
@@ -57,6 +92,14 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
     return jobs.length;
   },
   cancel(id) {
+    const job = get().jobs.find((job) => job.id === id);
+    if (job?.remote && job.serverId) {
+      void fetch(`/api/preparations/${job.serverId}`, { method: "DELETE" }).then((response) => {
+        if (!response.ok) throw new Error("Could not cancel server audio preparation.");
+        return get().refreshShared();
+      }).catch((error) => set({ sharedError: (error as Error).message }));
+      return;
+    }
     active.get(id)?.controller.abort();
     set({ jobs: get().jobs.map((job) => job.id === id && isPreparing(job) ? { ...job, status: "cancelled", message: undefined } : job) });
   },
@@ -66,10 +109,13 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   cancelAll() {
     for (const job of get().jobs) if (isPreparing(job)) get().cancel(job.id);
   },
-  dismissFinished() { set({ jobs: get().jobs.filter(isPreparing) }); },
+  dismissFinished() {
+    for (const job of get().jobs) if (job.remote && !isPreparing(job)) hiddenSharedJobs.add(job.id);
+    set({ jobs: get().jobs.filter(isPreparing) });
+  },
 }), {
   name: "readaloud:preparation-queue",
-  partialize: ({ jobs }) => ({ jobs }),
+  partialize: ({ jobs }) => ({ jobs: jobs.filter((job) => !job.remote) }),
   merge: (persisted, current) => {
     const { jobs = [] } = (persisted ?? {}) as { jobs?: PreparationJob[] };
     return { ...current, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined } : job) };
@@ -87,6 +133,7 @@ function drain() {
   const counts = new Map<string, number>();
   for (const { provider } of active.values()) counts.set(provider, (counts.get(provider) || 0) + 1);
   for (const job of usePreparation.getState().jobs) {
+    if (job.remote) continue;
     const provider = providerFor(job);
     const background = provider === "voicestudio" && API_BASE === "/api/vs";
     const limit = background ? PREPARATION_QUEUE_LIMIT : provider === "voicestudio" ? 1 : PREPARATION_CONCURRENCY;
@@ -124,7 +171,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {
-        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker });
+        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker, serverId: status?.id });
       }, signal);
       signal.throwIfAborted();
       update(job.id, { status: "saving", worker: undefined });

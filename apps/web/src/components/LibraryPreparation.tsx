@@ -93,8 +93,8 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
 }
 
 export function PreparationQueue() {
-  const { jobs, cancel, cancelAll, dismissFinished } = usePreparation();
-  if (!jobs.length) return null;
+  const { jobs, cancel, cancelAll, dismissFinished, sharedError, sharing } = usePreparation();
+  if (!jobs.length && !sharedError && !sharing) return null;
   const pending = jobs.filter(isPreparing);
   const preparing = pending.filter((job) => job.status === "preparing").length;
   const saving = pending.filter((job) => job.status === "saving").length;
@@ -102,6 +102,8 @@ export function PreparationQueue() {
   const finished = jobs.length - pending.length;
   return (
     <div className="rounded-card border border-line bg-bg2 p-4" role="region" aria-label="Audio preparation queue">
+      {sharedError && <p className="m-0 mb-3 text-sm text-fg2" role="status">Server audio status unavailable: {sharedError}</p>}
+      {sharing > 0 && <p className="m-0 mb-3 text-sm text-fg2" role="status">Sharing saved audio · {sharing} clips remaining. Keep this app open to finish.</p>}
       <div className="flex flex-wrap items-center gap-3">
         <Zap size={16} className="text-accent" aria-hidden />
         <span className="flex-1 text-sm" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}${saving ? ` · ${saving} saving` : ""}` : "Audio preparation finished"}</span>
@@ -114,7 +116,7 @@ export function PreparationQueue() {
             <div className="min-w-0 flex-1">
               <div className="truncate text-fg">{job.title} · {job.voice.name}</div>
               <div className={job.status === "error" ? "text-danger" : "text-fg2"}>
-                {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? "Prepared" : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? "Queued · waiting for a free machine"}
+                {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? "Queued · waiting for a free machine"}
               </div>
             </div>
             <VoiceSourceBadge source={voiceSource(job.voice)} />

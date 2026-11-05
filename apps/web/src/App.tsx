@@ -16,6 +16,7 @@ import { useThemeId } from "./state/settings";
 import { useLibrary } from "./state/library";
 import { useVoices } from "./state/voices";
 import { startLibrarySync } from "./lib/librarySync";
+import { usePreparation } from "./state/preparation";
 
 function ThemeSync() {
   const id = useThemeId();
@@ -30,7 +31,10 @@ export default function App() {
   useEffect(() => {
     void useLibrary.getState().refresh();
     void useVoices.getState().load();
-    return startLibrarySync(() => { void useLibrary.getState().refresh(); });
+    return startLibrarySync(() => {
+      void useLibrary.getState().refresh();
+      void usePreparation.getState().refreshShared().then(() => useLibrary.getState().refresh());
+    });
   }, []);
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}>
