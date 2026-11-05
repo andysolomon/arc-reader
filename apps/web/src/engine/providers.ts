@@ -1,10 +1,12 @@
 import { audioCache } from "../lib/db";
 import { hash } from "../lib/hash";
 import { estimateDuration, splitWords } from "../lib/segment";
-import { addUsage } from "../lib/usage";
+import { addUsage, isTokenSpeechModel } from "../lib/usage";
 import { measureDuration } from "./audio";
+import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
+import { OPENAI_ACCENTS } from "../data/voices";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
@@ -79,19 +81,23 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
     if (!active?.supports_cloning) throw new ApiRejected(409, "Select a cloning-capable engine in VoiceStudio to use saved voices. Using the browser voice for now.");
     if (capabilities.tts.active !== req.engine) throw new ApiRejected(409, "The VoiceStudio engine changed. Refresh Voices before playing this saved voice. Using the browser voice for now.");
   }
+  const accent = req.engine === OPENAI_ENGINE ? OPENAI_ACCENTS[req.voice] : undefined;
   const model = req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
+  const streamUsage = req.engine === OPENAI_ENGINE && isTokenSpeechModel(model);
   const r = await doFetch(`${base}/v1/audio/speech`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "audio/mpeg, audio/*" },
-    body: JSON.stringify({ model, input: req.text, voice: req.voice, response_format: "mp3", speed: 1 }),
+    headers: { "Content-Type": "application/json", Accept: streamUsage ? "text/event-stream, audio/mpeg" : "audio/mpeg, audio/*" },
+    body: JSON.stringify({ model, input: req.text, voice: accent?.voice ?? req.voice, instructions: accent?.instructions, response_format: "mp3", speed: 1, ...(streamUsage ? { stream_format: "sse" } : {}) }),
     signal: req.signal,
   });
-  const blob = await r.blob();
+  const streamed = r.headers.get("content-type")?.includes("text/event-stream") ? await readSpeechStream(r) : null;
+  const blob = streamed?.audio ?? await r.blob();
   if (blob.size === 0) throw new ApiRejected(502, "Empty audio from the speech server");
+  if (blob.type && !blob.type.startsWith("audio/") && blob.type !== "application/octet-stream") throw new ApiRejected(502, "Invalid audio from the speech server");
   const est = estimateDuration(splitWords(req.text));
   const mime = blob.type || r.headers.get("content-type") || "audio/mpeg";
   const duration = await measureDuration(blob, est);
-  return { source: "api", audio: blob, mime, duration };
+  return { source: "api", audio: blob, mime, duration, ...(streamed?.tokens ? { tokens: streamed.tokens } : {}) };
 }
 
 /**
@@ -188,7 +194,11 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
     for (let attempt = 0; ; attempt++) {
       if (req.signal?.aborted) throw new DOMException("Aborted", "AbortError");
       try {
-        return await rawSynthesize(req);
+        const chunk = await rawSynthesize(req);
+        if (!chunk.audio?.size) throw new ApiRejected(502, "Empty audio from the speech server");
+        await addUsage({ engine: req.engine, model: req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.engine === FISH_ENGINE ? FISH_MODEL : req.engine,
+          text: req.text, audioSeconds: chunk.duration, tokens: chunk.tokens });
+        return chunk;
       } catch (e) {
         if (!(e instanceof ApiBusy) || attempt >= BUSY_RETRIES) throw e;
         await sleep(e.retryAfterMs || 400 * 2 ** attempt, req.signal);
@@ -255,7 +265,6 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
   try {
     const chunk = await apiSynthesize(opts);
     opts.onOnline?.();
-    addUsage(opts.text.length, opts.engine);
     if (opts.wordTimings && chunk.audio && opts.words?.length) {
       try {
         chunk.words = (await fetchWordTimings(chunk.audio, opts.words, opts.signal)) ?? undefined;

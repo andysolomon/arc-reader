@@ -9,7 +9,7 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
-import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
+import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 
 const PREVIEW_MS = 3000;
@@ -140,7 +140,7 @@ export function VoicesPage() {
         {VOICES.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
         <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
           {VOICES.map((v) => (
-            <VoiceCard key={v.id} voice={v} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
+            <VoiceCard key={v.id} voice={v} source={voiceSource(v)} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
           ))}
         </div>
       </div>

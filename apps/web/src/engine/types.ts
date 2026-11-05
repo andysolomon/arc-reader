@@ -1,4 +1,5 @@
 import type { WordTiming } from "../lib/db";
+import type { TokenUsage } from "../lib/usage";
 
 /** Legacy custom-contract provider hint (only used when VITE_TTS_PROVIDER=readaloud). */
 export type ProviderId = "auto" | "openai" | "elevenlabs" | "piper";
@@ -17,6 +18,8 @@ export interface Chunk {
   duration: number;
   /** Word timings at 1×, when the provider has them */
   words?: WordTiming[];
+  /** Reported by the provider for a new generation; never reused from cache. */
+  tokens?: TokenUsage;
 }
 
 export interface TtsRequest {

@@ -9,6 +9,13 @@ export interface Voice extends UiVoice {
   kind: "preset" | "profile" | "local";
 }
 
+export function voiceSource(voice: Pick<Voice, "engine">): string {
+  if (voice.engine === "openai") return "ChatGPT";
+  if (voice.engine === "fish") return "Fish";
+  if (voice.engine === LOCAL_ENGINE) return "Browser";
+  return "VoiceStudio";
+}
+
 export const LOCAL_VOICE_ID = "local";
 export const JAMAICAN_PATOIS_VOICE_ID = "fish:0724e14ccf884007a641908722575fdf";
 
@@ -58,6 +65,25 @@ export const OPENAI_VOICES: Voice[] = [
   openai("sage", "Sage", ["calm", "documentary"]),
   openai("shimmer", "Shimmer", ["light", "podcast"]),
   openai("verse", "Verse", ["expressive", "podcast"]),
+];
+
+const READ_AS_WRITTEN = "Read the text exactly as written: change pronunciation, rhythm and intonation only, never add or swap words.";
+
+/**
+ * Regional accent voices: an OpenAI voice steered by gpt-4o-mini-tts `instructions`.
+ * Ids are ours (`<base>~<accent>`), so each accent gets its own cache entries.
+ */
+export const OPENAI_ACCENTS: Record<string, { voice: string; instructions: string }> = {
+  "coral~georgia": {
+    voice: "coral",
+    instructions: `Speak with a warm Georgia Southern accent. Use a gentle drawl that stretches stressed vowels, say "I" closer to "ah", glide vowels in words like "day" and "ride", and keep a relaxed, unhurried, friendly pace with a soft melodic rise and fall. ${READ_AS_WRITTEN}`,
+  },
+};
+
+const accent = (id: string, name: string, tags: string[]): Voice => ({ id, name, lang: "EN-US · cloud", tags, hue: hueFor("openai:" + id), engine: "openai", kind: "preset" });
+
+export const OPENAI_ACCENT_VOICES: Voice[] = [
+  accent("coral~georgia", "Savannah", ["Georgia", "Southern"]),
 ];
 
 // Fish's documented example voice; stays available if catalogue discovery fails.

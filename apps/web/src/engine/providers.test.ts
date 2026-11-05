@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiRejected, ApiUnreachable } from "./types";
-import { openaiSpeechSynthesize, synthesize, cacheKey } from "./providers";
+import { apiSynthesize, openaiSpeechSynthesize, synthesize, cacheKey } from "./providers";
+import { addUsage } from "../lib/usage";
+import { audioCache } from "../lib/db";
 
 vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
-vi.mock("../lib/usage", () => ({ addUsage: vi.fn() }));
+vi.mock("../lib/usage", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/usage")>(), addUsage: vi.fn() }));
 
 // VITE_API_BASE=/api/vs comes from vitest.config.ts
 describe("openaiSpeechSynthesize", () => {
@@ -132,6 +134,15 @@ describe("OpenAI engine routing", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-4o-mini-tts", voice: "nova" });
   });
 
+  it("sends accent voices as their base voice with accent instructions", async () => {
+    const { openaiSpeechSynthesize } = await import("./providers");
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    await openaiSpeechSynthesize({ text: "x", voice: "coral~georgia", engine: "openai" });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body).toMatchObject({ model: "gpt-4o-mini-tts", voice: "coral" });
+    expect(body.instructions).toMatch(/Georgia Southern accent/);
+  });
+
   it("does not queue OpenAI requests behind VoiceStudio ones", async () => {
     const { apiSynthesize } = await import("./providers");
     let inFlight = 0, maxInFlight = 0;
@@ -143,5 +154,51 @@ describe("OpenAI engine routing", () => {
     });
     await Promise.all([1, 2, 3].map((i) => apiSynthesize({ text: `s${i}`, voice: "nova", engine: "openai" })));
     expect(maxInFlight).toBe(3);
+  });
+});
+
+describe("generation accounting", () => {
+  const req = { text: "Hello there.", voice: "nova", engine: "openai" };
+  const fetchMock = vi.fn();
+  beforeEach(() => { vi.clearAllMocks(); vi.stubGlobal("fetch", fetchMock); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("requests speech events and records the model plus reported tokens once", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(
+      'data: {"type":"speech.audio.delta","audio":"AQID"}\n\ndata: {"type":"speech.audio.done","usage":{"input_tokens":4,"output_tokens":50}}\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    ));
+    const chunk = await synthesize(req);
+    expect(chunk.source).toBe("api");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: "gpt-4o-mini-tts", stream_format: "sse" });
+    expect(addUsage).toHaveBeenCalledTimes(1);
+    expect(addUsage).toHaveBeenCalledWith(expect.objectContaining({ engine: "openai", model: "gpt-4o-mini-tts", text: req.text, tokens: { inputTokens: 4, outputTokens: 50 } }));
+  });
+
+  it("records only a successful retry", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "0.001" } }))
+      .mockResolvedValueOnce(new Response(new Blob(["audio"], { type: "audio/mpeg" })));
+    await apiSynthesize(req);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(addUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not count cache playback, local speech, failed requests, or cancellations", async () => {
+    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob(["audio"]), mime: "audio/mpeg", duration: 1, createdAt: 0 });
+    expect((await synthesize(req)).source).toBe("cache");
+    await synthesize({ ...req, forceLocal: true });
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
+    await synthesize(req);
+    const ac = new AbortController(); ac.abort();
+    await expect(synthesize({ ...req, signal: ac.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(addUsage).not.toHaveBeenCalled();
+  });
+
+  it("does not count truncated streams or empty audio", async () => {
+    fetchMock.mockResolvedValueOnce(new Response('data: {"type":"speech.audio.delta","audio":"AQID"}\n\n', { headers: { "content-type": "text/event-stream" } }))
+      .mockResolvedValueOnce(new Response(""));
+    await synthesize(req);
+    await synthesize(req);
+    expect(addUsage).not.toHaveBeenCalled();
   });
 });

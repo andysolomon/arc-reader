@@ -51,6 +51,12 @@ createServer(async (req, res) => {
     const seconds = Math.max(0.3, words / 2.83 / (j.speed || 1));
     const hz = 180 + (String(j.voice).length * 23) % 200;
     const audio = wav(seconds, hz);
+    if (j.stream_format === "sse") {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({ type: "speech.audio.delta", audio: audio.toString("base64") })}\n\n`);
+      // Fixed usage values make accounting assertions independent of tokenizers.
+      return res.end(`data: ${JSON.stringify({ type: "speech.audio.done", usage: { input_tokens: 10, output_tokens: 100, total_tokens: 110 } })}\n\n`);
+    }
     res.writeHead(200, { "content-type": "audio/wav", "content-length": audio.length, "x-stub-requests": String(requests) });
     return res.end(audio);
   }
