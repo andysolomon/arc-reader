@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, FISH_DEFAULT_VOICE, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
+import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
 import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, DEFAULT_ENGINE, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
 import { studioJson, type Profile } from "../lib/studio";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -34,7 +34,7 @@ const ENGINE_LABELS: Record<string, string> = {
   [FISH_ENGINE]: "Fish Audio",
 };
 
-const cloud = () => [...(hasOpenAI() ? OPENAI_VOICES : []), ...(hasFish() ? [FISH_DEFAULT_VOICE] : [])];
+const cloud = () => [...(hasOpenAI() ? [...OPENAI_ACCENT_VOICES, ...OPENAI_VOICES] : []), ...(hasFish() ? [FISH_DEFAULT_VOICE] : [])];
 
 export const engineLabel = (id: string) => ENGINE_LABELS[id] ?? id;
 
