@@ -78,7 +78,11 @@ export function VoicesPage() {
       profile: v.kind === "profile",
       signal: ac.signal,
       forceLocal: isLocalVoice(v.id) || (v.kind === "profile" && engineId === LOCAL_ENGINE),
-      onOffline: () => usePlayer.setState({ offline: true }),
+      onOffline: () => {
+        // No document is open here, so the offline banner can't explain the fallback: say it.
+        usePlayer.setState({ offline: true });
+        toast("Speech server unreachable — previewing with the browser voice, so every voice sounds alike");
+      },
       onRejected: (m) => toast(m),
     }).catch(() => null);
     if (ac.signal.aborted) return;
