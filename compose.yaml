@@ -41,10 +41,14 @@ services:
       VOICESTUDIO_API_KEY: ${VOICESTUDIO_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       FISH_API_KEY: ${FISH_API_KEY:-}
+      PREPARATION_DATA_DIR: /app/preparations
+    volumes:
+      - preparation-data:/app/preparations
     depends_on:
       - voicestudio
 
 volumes:
+  preparation-data:
   # Fixed name so models downloaded by an earlier `docker run -v voicestudio-data:…` carry over.
   voicestudio-data:
     name: voicestudio-data

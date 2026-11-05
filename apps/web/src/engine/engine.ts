@@ -1,6 +1,6 @@
 import type { WordTiming } from "../lib/db";
 import { estimateDuration, planPassages, type Passage, type Segmented, type Sentence } from "../lib/segment";
-import { isPaidEngine, synthesize } from "./providers";
+import { isPaidEngine, synthesize, type SynthOptions } from "./providers";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type EngineId } from "./types";
 
 export interface EngineDoc extends Segmented {
@@ -40,6 +40,8 @@ export interface EngineOptions {
   openaiModel?: () => string;
   isProfileVoice: (voiceId: string) => boolean;
   offline: () => boolean;
+  /** Submit all passages as one server-owned job before hydrating the local cache. */
+  prepareAudio?: (requests: SynthOptions[], start: number, progress?: (done: number, total: number) => void, signal?: AbortSignal) => Promise<void>;
   onRejected: (message: string) => void;
   onOffline: () => void;
   onOnline: () => void;
@@ -324,16 +326,20 @@ export class PlaybackEngine {
   /**
    * Render every passage into the cache, from the current one to the end and then
    * from the start, so a slow engine never stalls playback. Safe alongside playback:
-   * both share the chunk promises and the provider's request queue.
+   * the server job owns generation and the browser hydrates completed clips.
    */
   async prepare(onProgress?: (done: number, total: number) => void, signal?: AbortSignal): Promise<void> {
     const doc = this.doc;
     if (!doc) return;
     const n = this.passageList.length;
     const start = this.passageOf[this.index] ?? 0;
+    if (this.opts.prepareAudio) {
+      await this.opts.prepareAudio(this.passageList.map((_, i) => this.requestFor(i)), start, onProgress, signal);
+    }
     for (let k = 0; k < n; k++) {
       if (signal?.aborted || this.doc !== doc) return;
-      await this.ensureChunk((start + k) % n).catch(() => {});
+      await this.ensureChunk((start + k) % n);
+      if (signal?.aborted || this.doc !== doc) return;
       onProgress?.(k + 1, n);
     }
   }
@@ -385,22 +391,7 @@ export class PlaybackEngine {
     let p = this.chunks.get(passage);
     if (!p) {
       const g = this.passageList[passage];
-      p = synthesize({
-        text: g.text,
-        voice: doc.voice,
-        engine: this.opts.engine(doc.voice),
-        openaiModel: this.opts.openaiModel?.(),
-        profile: this.opts.isProfileVoice(doc.voice),
-        wordTimings: this.opts.wordTimings(),
-        words: g.parts.flat(),
-        parts: g.parts,
-        sentences: doc.sentences.slice(g.start, g.end).map((s) => s.text),
-        forceLocal: this.opts.offline() || doc.voice === "local" || this.opts.engine(doc.voice) === LOCAL_ENGINE,
-        fallbackLocal: false,
-        onOffline: this.opts.onOffline,
-        onOnline: this.opts.onOnline,
-        onRejected: this.opts.onRejected,
-      }).then((c) => {
+      p = synthesize(this.requestFor(passage)).then((c) => {
         if (this.doc === doc) {
           this.applyDurations(g, c);
           this.noteSpeed(c);
@@ -410,9 +401,30 @@ export class PlaybackEngine {
         return c;
       });
       this.chunks.set(passage, p);
-      p.catch(() => this.chunks.delete(passage));
+      p.catch(() => { if (this.chunks.get(passage) === p) this.chunks.delete(passage); });
     }
     return p;
+  }
+
+  private requestFor(passage: number): SynthOptions {
+    const doc = this.doc!;
+    const g = this.passageList[passage];
+    return {
+      text: g.text,
+      voice: doc.voice,
+      engine: this.opts.engine(doc.voice),
+      openaiModel: this.opts.openaiModel?.(),
+      profile: this.opts.isProfileVoice(doc.voice),
+      wordTimings: this.opts.wordTimings(),
+      words: g.parts.flat(),
+      parts: g.parts,
+      sentences: doc.sentences.slice(g.start, g.end).map((s) => s.text),
+      forceLocal: this.opts.offline() || doc.voice === "local" || this.opts.engine(doc.voice) === LOCAL_ENGINE,
+      fallbackLocal: false,
+      onOffline: this.opts.onOffline,
+      onOnline: this.opts.onOnline,
+      onRejected: this.opts.onRejected,
+    };
   }
 
   /**

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
-import { hasSpeechApi, isPaidEngine } from "../engine/providers";
+import { API_BASE, API_KIND, cacheKey, fromCache, hasSpeechApi, isPaidEngine, type SynthOptions } from "../engine/providers";
+import { hasActivePreparation, prepareAudio, type PreparationRequest } from "../engine/preparation";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { segment } from "../lib/segment";
 import { getVoice, voiceLang, isLocalVoice } from "./voices";
@@ -13,6 +14,7 @@ import { hasPatois, preparePatois } from "../lib/patois";
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
 let retryPreparation: (() => Promise<boolean>) | null = null;
+const preparationRequests = (requests: SynthOptions[]): PreparationRequest[] => requests.map((r) => ({ key: cacheKey(r), text: r.text, voice: r.voice, engine: r.engine, profile: r.profile, protocol: API_KIND }));
 const variant = (id: string) => id === JAMAICAN_PATOIS_VOICE_ID ? "patois" : "original";
 
 export interface PlayerState extends EngineSnapshot {
@@ -29,7 +31,7 @@ export interface PlayerState extends EngineSnapshot {
   preparationError: string | null;
   /** The chosen voice could not be generated; playback is stopped until the user retries or switches voice. */
   speechError: string | null;
-  /** "Prepare audio" in progress: sentences rendered into the cache so far */
+  /** "Prepare audio" in progress: passages rendered so far */
   prerendering: { done: number; total: number } | null;
 }
 
@@ -73,6 +75,12 @@ export const engine = new PlaybackEngine({
   openaiModel: () => useSettings.getState().openaiModel,
   isProfileVoice: (id) => getVoice(id).kind === "profile",
   offline: () => usePlayer.getState().offline || useSettings.getState().engine === LOCAL_ENGINE,
+  prepareAudio: async (requests, start, progress, signal) => {
+    if (API_BASE !== "/api/vs") throw new Error("Background preparation needs the built-in /api/vs connection.");
+    const items = preparationRequests(requests);
+    await Promise.all(items.map(async (item, index) => { item.cached = !!await fromCache(requests[index]); }));
+    return prepareAudio(items, start, progress, signal);
+  },
   onRejected: (m) => toast(m),
   onOffline: () => {
     if (!usePlayer.getState().offline) {
@@ -154,6 +162,8 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       engine.load(doc, index, offset);
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
       set({ doc, record: prepared, voiceId: voice.id, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
+      const requests = engine.passages.map((p) => ({ text: p.text, voice: voice.id, engine: voice.engine, profile: voice.kind === "profile" }));
+      if (hasActivePreparation(preparationRequests(requests))) void get().prerender();
       if (opts.autoplay) void engine.play();
       retryPreparation = null;
       return true;
@@ -193,8 +203,14 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       prerendering = controller;
       set({ prerendering: { done: 0, total: engine.passages.length } });
       try {
-        await engine.prepare((done, total) => { if (prerendering === controller) set({ prerendering: { done, total } }); }, controller.signal);
+        let completed = 0;
+        await engine.prepare((done, total) => {
+          completed = Math.max(completed, done);
+          if (prerendering === controller) set({ prerendering: { done: completed, total } });
+        }, controller.signal);
         if (!controller.signal.aborted && get().doc === doc) toast("Audio prepared — playback no longer waits on the server");
+      } catch (error) {
+        if (!controller.signal.aborted) toast(`Audio preparation failed: ${error instanceof Error ? error.message : "Please retry."}`);
       } finally {
         if (prerendering === controller) {
           prerendering = null;

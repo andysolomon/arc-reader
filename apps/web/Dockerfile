@@ -6,6 +6,7 @@ ENV CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /app
 RUN chown node:node /app
+RUN mkdir /app/preparations && chown node:node /app/preparations
 USER node
 
 COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./

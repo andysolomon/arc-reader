@@ -21,9 +21,9 @@ const paraDoc = (sizes: number[]): EngineDoc => {
 };
 const chunk = (extra: Partial<Chunk> = {}): Chunk => ({ source: "api", audio: new Blob([new Uint8Array(4)]), duration: 2, ...extra });
 
-function make(onSlow = vi.fn(), onUnavailable = vi.fn(), engineId = "omnivoice") {
+function make(onSlow = vi.fn(), onUnavailable = vi.fn(), engineId = "omnivoice", prepareAudio?: ConstructorParameters<typeof PlaybackEngine>[0]["prepareAudio"]) {
   const e = new PlaybackEngine({
-    engine: () => engineId, wordTimings: () => false, isProfileVoice: () => true, offline: () => false,
+    engine: () => engineId, wordTimings: () => false, isProfileVoice: () => true, offline: () => false, prepareAudio,
     onRejected: () => {}, onOffline: () => {}, onOnline: () => {}, onPersist: () => {}, onError: () => {}, onSlow, onUnavailable,
   });
   return { e, onSlow, onUnavailable };
@@ -39,6 +39,29 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => synth.mockReset());
 
 describe("prepare", () => {
+  it("submits the entire document to the server before downloading its clips", async () => {
+    const job = deferred<void>();
+    const prepareAudio = vi.fn<NonNullable<ConstructorParameters<typeof PlaybackEngine>[0]["prepareAudio"]>>(() => job.promise);
+    synth.mockResolvedValue(chunk());
+    const { e } = make(undefined, undefined, "omnivoice", prepareAudio);
+    e.load(doc(3), 1);
+    const run = e.prepare();
+    expect(prepareAudio.mock.calls[0][0].map((r) => r.text)).toEqual(["s0", "s1", "s2"]);
+    expect(prepareAudio.mock.calls[0][1]).toBe(1);
+    expect(synth).not.toHaveBeenCalled();
+    job.resolve();
+    await run;
+    expect(synth).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports generation errors instead of claiming success", async () => {
+    synth.mockRejectedValueOnce(new ApiUnreachable());
+    const { e } = make();
+    e.load(doc(2));
+    const progress = vi.fn();
+    await expect(e.prepare(progress)).rejects.toBeInstanceOf(ApiUnreachable);
+    expect(progress).not.toHaveBeenCalled();
+  });
   it("renders from the current sentence to the end, then the start, reporting progress", async () => {
     synth.mockImplementation(async () => chunk());
     const { e } = make();
