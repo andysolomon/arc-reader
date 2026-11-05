@@ -132,6 +132,15 @@ describe("OpenAI engine routing", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-4o-mini-tts", voice: "nova" });
   });
 
+  it("sends accent voices as their base voice with accent instructions", async () => {
+    const { openaiSpeechSynthesize } = await import("./providers");
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    await openaiSpeechSynthesize({ text: "x", voice: "coral~georgia", engine: "openai" });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body).toMatchObject({ model: "gpt-4o-mini-tts", voice: "coral" });
+    expect(body.instructions).toMatch(/Georgia Southern accent/);
+  });
+
   it("does not queue OpenAI requests behind VoiceStudio ones", async () => {
     const { apiSynthesize } = await import("./providers");
     let inFlight = 0, maxInFlight = 0;

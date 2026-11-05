@@ -5,6 +5,7 @@ import { addUsage } from "../lib/usage";
 import { measureDuration } from "./audio";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
+import { OPENAI_ACCENTS } from "../data/voices";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
@@ -79,11 +80,12 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
     if (!active?.supports_cloning) throw new ApiRejected(409, "Select a cloning-capable engine in VoiceStudio to use saved voices. Using the browser voice for now.");
     if (capabilities.tts.active !== req.engine) throw new ApiRejected(409, "The VoiceStudio engine changed. Refresh Voices before playing this saved voice. Using the browser voice for now.");
   }
+  const accent = req.engine === OPENAI_ENGINE ? OPENAI_ACCENTS[req.voice] : undefined;
   const model = req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
   const r = await doFetch(`${base}/v1/audio/speech`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "audio/mpeg, audio/*" },
-    body: JSON.stringify({ model, input: req.text, voice: req.voice, response_format: "mp3", speed: 1 }),
+    body: JSON.stringify({ model, input: req.text, voice: accent?.voice ?? req.voice, instructions: accent?.instructions, response_format: "mp3", speed: 1 }),
     signal: req.signal,
   });
   const blob = await r.blob();

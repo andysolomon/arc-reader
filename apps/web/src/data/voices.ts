@@ -59,6 +59,25 @@ export const OPENAI_VOICES: Voice[] = [
   openai("verse", "Verse", ["expressive", "podcast"]),
 ];
 
+const READ_AS_WRITTEN = "Read the text exactly as written: change pronunciation, rhythm and intonation only, never add or swap words.";
+
+/**
+ * Regional accent voices: an OpenAI voice steered by gpt-4o-mini-tts `instructions`.
+ * Ids are ours (`<base>~<accent>`), so each accent gets its own cache entries.
+ */
+export const OPENAI_ACCENTS: Record<string, { voice: string; instructions: string }> = {
+  "coral~georgia": {
+    voice: "coral",
+    instructions: `Speak with a warm Georgia Southern accent. Use a gentle drawl that stretches stressed vowels, say "I" closer to "ah", glide vowels in words like "day" and "ride", and keep a relaxed, unhurried, friendly pace with a soft melodic rise and fall. ${READ_AS_WRITTEN}`,
+  },
+};
+
+const accent = (id: string, name: string, tags: string[]): Voice => ({ id, name, lang: "EN-US · cloud", tags, hue: hueFor("openai:" + id), engine: "openai", kind: "preset" });
+
+export const OPENAI_ACCENT_VOICES: Voice[] = [
+  accent("coral~georgia", "Savannah", ["Georgia", "Southern"]),
+];
+
 // Fish's documented example voice; stays available if catalogue discovery fails.
 export const FISH_DEFAULT_VOICE: Voice = {
   id: "fish:933563129e564b19a115bedd57b7406a", name: "Sarah", lang: "EN-US · Fish Audio",
