@@ -12,6 +12,21 @@ body {
 }
 html {
   font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+/* No double-tap zoom on repeated taps (play, skip); pinch zoom still works. */
+* {
+  touch-action: manipulation;
+}
+/* iOS Safari zooms into any focused field under 16px. Inputs and selects outrank text-size
+   utilities here; textareas don't, so larger reading sizes (Compose) still apply. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]),
+  select:not([multiple]),
+  textarea {
+    font-size: 16px;
+  }
 }
 body {
   background: var(--bg);

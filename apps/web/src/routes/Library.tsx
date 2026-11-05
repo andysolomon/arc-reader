@@ -157,7 +157,8 @@ function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: s
   );
 }
 
-const SWIPE_W = 132;
+/** Three 44px actions, their gaps and the panel's padding. */
+const SWIPE_W = 3 * 44 + 2 * 2 + 16;
 
 /** List row. Hover reveals actions; on touch, swipe left reveals them. */
 function Row(props: ItemProps & { touch: boolean }) {
@@ -188,7 +189,7 @@ function Row(props: ItemProps & { touch: boolean }) {
 
   return (
     <li
-      className="group relative overflow-hidden border-b border-line last:border-b-0"
+      className="group relative touch-pan-y overflow-hidden border-b border-line last:border-b-0"
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
@@ -201,7 +202,7 @@ function Row(props: ItemProps & { touch: boolean }) {
         </div>
       )}
       <div
-        className="grid grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-4 bg-bg2 px-[18px] py-3.5 transition-[background-color,transform] duration-fast group-hover:bg-bg3"
+        className="relative grid grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-4 bg-bg2 px-[18px] py-3.5 transition-[background-color,transform] duration-fast group-hover:bg-bg3"
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
       >
         <ProgressRing value={it.progress} />

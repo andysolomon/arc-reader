@@ -30,14 +30,14 @@ export function Sheet({ open, onClose, title, children, className }: SheetProps)
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          "flex w-full flex-col gap-4 rounded-t-card border border-b-0 border-line bg-bg2 p-5 pb-[max(env(safe-area-inset-bottom),20px)] shadow-overlay animate-rise",
+          "flex max-h-[85dvh] w-full flex-col gap-4 overflow-y-auto overscroll-contain rounded-t-card border border-b-0 border-line bg-bg2 p-5 pb-[max(env(safe-area-inset-bottom),20px)] shadow-overlay animate-rise",
           className,
         )}
       >
         <div className="mx-auto -mt-1 h-1 w-9 rounded-pill bg-line" aria-hidden />
         <div className="flex items-center justify-between">
           <div className="text-[15px] font-semibold">{title}</div>
-          <button type="button" onClick={onClose} className="border-0 bg-transparent p-0 text-[13px] text-fg2 hover:text-fg">
+          <button type="button" onClick={onClose} className="-my-3 -mr-3 border-0 bg-transparent p-3 text-[13px] text-fg2 hover:text-fg">
             Done
           </button>
         </div>
