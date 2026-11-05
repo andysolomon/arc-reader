@@ -1,9 +1,11 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Voice } from "../data/voices";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { unavailableMessage } from "../engine/engine";
+import { isTransientPreparationError } from "../engine/preparation";
 import { API_BASE, baseFor, cacheKey, isPaidEngine, prepareInBackground, synthesize } from "../engine/providers";
-import { LOCAL_ENGINE } from "../engine/types";
+import { ApiBusy, ApiUnreachable, LOCAL_ENGINE } from "../engine/types";
 import { audioCache, docs } from "../lib/db";
 import { preparePatois } from "../lib/patois";
 import { planPassages, segment } from "../lib/segment";
@@ -38,7 +40,7 @@ interface PreparationState {
   dismissFinished: () => void;
 }
 
-export const usePreparation = create<PreparationState>()((set, get) => ({
+export const usePreparation = create<PreparationState>()(persist((set, get) => ({
   jobs: [],
   enqueue(documents, voices) {
     const jobs: PreparationJob[] = [];
@@ -63,6 +65,16 @@ export const usePreparation = create<PreparationState>()((set, get) => ({
     for (const job of get().jobs) if (isPreparing(job)) get().cancel(job.id);
   },
   dismissFinished() { set({ jobs: get().jobs.filter(isPreparing) }); },
+}), {
+  name: "readaloud:preparation-queue",
+  partialize: ({ jobs }) => ({ jobs }),
+  merge: (persisted, current) => {
+    const { jobs = [] } = (persisted ?? {}) as { jobs?: PreparationJob[] };
+    return { ...current, jobs: jobs.map((job) => job.status === "preparing" ? { ...job, status: "queued", message: undefined } : job) };
+  },
+  // Local storage hydrates synchronously, before usePreparation is initialized.
+  // Re-enter the worker afterwards; server jobs reconnect and saved audio is reused.
+  onRehydrateStorage: () => (_state, error) => { if (!error) queueMicrotask(() => { void drain(); }); },
 }));
 
 const update = (id: string, patch: Partial<PreparationJob>) => usePreparation.setState((state) => ({ jobs: state.jobs.map((job) => job.id === id ? { ...job, ...patch } : job) }));
@@ -128,6 +140,17 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     signal.throwIfAborted();
     update(job.id, { status: "ready" });
   } catch (error) {
-    update(job.id, signal.aborted ? { status: "cancelled", message: undefined } : { status: "error", message: unavailableMessage(error) });
+    if (!signal.aborted && (isTransientPreparationError(error) || error instanceof ApiUnreachable || error instanceof ApiBusy)) {
+      update(job.id, { message: "Waiting for the speech server to reconnect…" });
+      await new Promise<void>((resolve) => {
+        const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
+        const timer = setTimeout(finish, 1500);
+        signal.addEventListener("abort", finish, { once: true });
+        if (signal.aborted) finish();
+      });
+      update(job.id, { status: signal.aborted ? "cancelled" : "queued", message: undefined });
+    } else {
+      update(job.id, signal.aborted ? { status: "cancelled", message: undefined } : { status: "error", message: unavailableMessage(error) });
+    }
   }
 }

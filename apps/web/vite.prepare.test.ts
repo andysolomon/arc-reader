@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -19,9 +19,10 @@ describe("server-owned audio preparation", () => {
   let calls: { path: string; body: Record<string, unknown>; authorization?: string; origin?: string }[];
   let gate: ReturnType<typeof deferred> | undefined;
   let rejectSpeech: boolean;
+  let unavailable: boolean;
   let activeSpeech: number, peakSpeech: number;
   beforeEach(async () => {
-    calls = []; gate = undefined; rejectSpeech = false;
+    calls = []; gate = undefined; rejectSpeech = false; unavailable = false;
     activeSpeech = 0; peakSpeech = 0;
     directory = await mkdtemp(join(tmpdir(), "readaloud-preparation-"));
     upstream = createServer(async (req, res) => {
@@ -37,6 +38,10 @@ describe("server-owned audio preparation", () => {
         res.setHeader("content-type", "application/json");
         return res.end(JSON.stringify({ tts: { active: "kittentts", backends: [{ id: "kittentts", supports_cloning: false }] } }));
       }
+      if (unavailable) {
+        res.writeHead(503);
+        return res.end();
+      }
       if (rejectSpeech) {
         res.writeHead(400, { "content-type": "application/json" });
         return res.end(JSON.stringify({ detail: "Model terms need acceptance" }));
@@ -48,6 +53,7 @@ describe("server-owned audio preparation", () => {
     env = { VOICESTUDIO_URL: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`, VOICESTUDIO_API_KEY: "server-secret" };
   });
   afterEach(async () => {
+    vi.restoreAllMocks();
     gate?.resolve();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
@@ -79,7 +85,7 @@ describe("server-owned audio preparation", () => {
     const job = await service.submit({ requests: [item("first"), item("second")], start: 0 });
     await expect.poll(() => calls.length).toBe(1);
     const playback = service.audio(job.id, 0);
-    const duplicate = await service.submit({ requests: [item("first"), item("second")], start: 1 });
+    const duplicate = await service.submit({ requests: [{ ...item("first"), cached: true }, item("second")], start: 1 });
     expect(duplicate.id).toBe(job.id);
     await service.cancel(job.id);
     gate.resolve();
@@ -143,6 +149,28 @@ describe("server-owned audio preparation", () => {
     const service = new PreparationService(env, directory);
     await expect.poll(async () => (await service.get(id)).state).toBe("done");
     expect(calls.map((call) => call.body.input)).toEqual(["second"]);
+  });
+
+  it("keeps a restored job running until the speech server is available again", async () => {
+    const id = "12345678-1234-1234-1234-123456789abc";
+    await writeFile(join(directory, `job-${id}.json`), JSON.stringify({ id, requests: [item("first"), item("second")], completed: [0], start: 0, done: 1, total: 2, state: "running" }));
+    unavailable = true;
+    const service = new PreparationService(env, directory);
+    await expect.poll(() => calls.length).toBe(1);
+    expect(await service.get(id)).toMatchObject({ state: "running", done: 1 });
+    unavailable = false;
+    await expect.poll(async () => (await service.get(id)).state, { timeout: 5000 }).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["second", "second"]);
+  });
+
+  it("retries a dropped upstream connection without losing the job", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("fetch failed"));
+    const service = new PreparationService(env, directory);
+    const job = await service.submit({ requests: [item("first")], start: 0 });
+    await expect.poll(() => vi.mocked(fetch).mock.calls.length).toBe(1);
+    expect(await service.get(job.id)).toMatchObject({ state: "running", done: 0 });
+    await expect.poll(async () => (await service.get(job.id)).state, { timeout: 5000 }).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["first"]);
   });
 
   it("reports upstream failures without claiming the document was prepared", async () => {

@@ -1,16 +1,29 @@
+// @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JAMAICAN_PATOIS_VOICE_ID, FISH_PRESET_VOICES, OPENAI_VOICES, PRESET_VOICES } from "../data/voices";
 import { cacheKey, prepareInBackground, synthesize } from "../engine/providers";
 import { audioCache, db, docs, type DocRecord } from "../lib/db";
 import { preparePatois } from "../lib/patois";
-import { isPreparing, PREPARATION_CONCURRENCY, usePreparation } from "./preparation";
+import { isPreparing, PREPARATION_CONCURRENCY, usePreparation, type PreparationJob } from "./preparation";
+
+vi.hoisted(() => {
+  const storage = new Map<string, string>();
+  const local = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    clear: () => storage.clear(),
+  };
+  Object.defineProperty(window, "localStorage", { value: local, configurable: true });
+  vi.stubGlobal("localStorage", local);
+});
 
 vi.mock("../engine/providers", async (original) => ({ ...await original<typeof import("../engine/providers")>(), synthesize: vi.fn(), prepareInBackground: vi.fn() }));
 vi.mock("../lib/patois", async (original) => ({ ...await original<typeof import("../lib/patois")>(), preparePatois: vi.fn() }));
 const [bella, jasper] = PRESET_VOICES;
 const record = (id: string): DocRecord => ({ id, title: id, text: `First ${id}.\n\nSecond ${id}.`, voice: null, chars: 20, source: "paste", domain: "Text", createdAt: 0, updatedAt: 0 });
-const settled = async () => vi.waitFor(() => expect(usePreparation.getState().jobs.some(isPreparing)).toBe(false));
+const settled = async () => vi.waitFor(() => expect(usePreparation.getState().jobs.some(isPreparing)).toBe(false), { timeout: 5000 });
 function holdBackgroundJobs() {
   const pending: { signal: AbortSignal; release: () => void }[] = [];
   vi.mocked(prepareInBackground).mockImplementation((_requests, _start, _progress, signal) => new Promise<void>((resolve) => {
@@ -24,6 +37,7 @@ function holdBackgroundJobs() {
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  localStorage.clear();
   usePreparation.setState({ jobs: [] });
   const database = await db();
   await Promise.all([database.clear("docs"), database.clear("audio")]);
@@ -37,6 +51,58 @@ beforeEach(async () => {
 afterEach(async () => { usePreparation.getState().cancelAll(); await settled(); });
 
 describe("Library preparation queue", () => {
+  it("restores interrupted and queued readings automatically, keeping finished jobs and saved progress", async () => {
+    const job = (docId: string, status: PreparationJob["status"]): PreparationJob => ({
+      id: docId, docId, title: docId, voice: bella, openaiModel: "tts-1", wordTimings: true,
+      status, done: 1, total: 2, message: "Old preparation message",
+    });
+    localStorage.setItem("readaloud:preparation-queue", JSON.stringify({ state: { jobs: [
+      job("a", "preparing"), job("b", "queued"), job("ready", "ready"), job("cancelled", "cancelled"), job("error", "error"),
+    ] }, version: 0 }));
+    await usePreparation.persist.rehydrate();
+    await settled();
+    expect(usePreparation.getState().jobs.map((j) => [j.docId, j.status, j.done])).toEqual([
+      ["a", "ready", 2], ["b", "ready", 2], ["ready", "ready", 1], ["cancelled", "cancelled", 1], ["error", "error", 1],
+    ]);
+    expect(prepareInBackground).toHaveBeenCalledTimes(2);
+    expect(synthesize).toHaveBeenCalledTimes(4);
+    expect(synthesize).toHaveBeenCalledWith(expect.objectContaining({ openaiModel: "tts-1", wordTimings: true }));
+    const persisted = JSON.parse(localStorage.getItem("readaloud:preparation-queue")!).state.jobs;
+    expect(persisted[0]).toMatchObject({ status: "ready", done: 2 });
+    expect(persisted[0].message).toBeUndefined();
+  });
+
+  it("resumes downloading after a restart and reuses passages already saved on the device", async () => {
+    const generate = vi.mocked(synthesize).getMockImplementation()!;
+    let disconnected = false;
+    const generated: string[] = [];
+    vi.mocked(synthesize).mockImplementation(async (req) => {
+      if (req.text === "Second a." && !disconnected) {
+        disconnected = true;
+        throw new TypeError("Server restarted");
+      }
+      const cached = await audioCache.get(cacheKey(req));
+      if (cached) return { source: "cache", audio: cached.blob, duration: cached.duration };
+      generated.push(req.text);
+      return generate(req);
+    });
+    usePreparation.getState().enqueue([record("a")], [bella]);
+    await vi.waitFor(() => expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "preparing", done: 1, message: expect.stringContaining("reconnect") }));
+    await settled();
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "ready", done: 2 });
+    expect(generated).toEqual(["First a.", "Second a."]);
+  });
+
+  it("cancels a reading waiting for reconnection and advances the queue", async () => {
+    vi.mocked(synthesize).mockRejectedValueOnce(new TypeError("Server restarted"));
+    usePreparation.getState().enqueue([record("a"), record("b")], [bella]);
+    await vi.waitFor(() => expect(usePreparation.getState().jobs[0].message).toContain("reconnect"));
+    usePreparation.getState().cancel(usePreparation.getState().jobs[0].id);
+    await settled();
+    expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["cancelled", "ready"]);
+    expect(synthesize).toHaveBeenCalledTimes(3);
+  });
+
   it("starts bounded concurrent readings and fills a slot as soon as one finishes", async () => {
     const pending = holdBackgroundJobs();
     usePreparation.getState().enqueue([record("a"), record("b")], [bella, jasper]);
