@@ -20,7 +20,7 @@ export function useOperation() {
     const ac = new AbortController(); controller.current = ac;
     setBusy(true); setError(""); setStatus("");
     try { await work(ac.signal); }
-    catch (e) { if (!ac.signal.aborted) setError(e instanceof Error ? e.message : "Something went wrong."); }
+    catch (e) { if (!ac.signal.aborted) { setStatus(""); setError(e instanceof Error ? e.message : "Something went wrong."); } }
     finally { if (controller.current === ac) { controller.current = undefined; setBusy(false); } }
   };
   return { busy, error, setError, status, setStatus, run, cancel: () => { controller.current?.abort(); setStatus("Stopped waiting. Server tasks can be resumed."); } };
