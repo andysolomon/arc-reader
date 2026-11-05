@@ -4,6 +4,7 @@ import { VitePWA } from "vite-plugin-pwa";
 import { tailnetUrl } from "./vite.tailnet";
 import { voiceStudioProxy } from "./vite.proxy";
 import { pageFetch } from "./vite.fetch";
+import { siteFavicons } from "./vite.favicon";
 import { audioPreparation } from "./vite.prepare";
 import { sharedLibrary } from "./vite.library";
 
@@ -16,6 +17,7 @@ export default defineConfig(({ mode }) => {
     react(),
     tailnetUrl(),
     pageFetch(),
+    siteFavicons(),
     audioPreparation(env),
     sharedLibrary(env),
     VitePWA({
