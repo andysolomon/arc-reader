@@ -13,6 +13,9 @@ services:
       OMNIVOICE_SERVER_MODE: "1"
       OMNIVOICE_ANALYTICS_DISABLED: "1"
       OMNIVOICE_DATA_DIR: /app/omnivoice_data
+      # The CPU performance profile otherwise picks the smallest installed Whisper on
+      # every start. Turbo matches the Mac's MLX Turbo; install it from the Model Manager.
+      ASR_MODEL_FASTER: ${VOICESTUDIO_ASR_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
     volumes:
       - voicestudio-data:/app/omnivoice_data
 
