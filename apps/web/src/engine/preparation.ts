@@ -26,6 +26,8 @@ interface SavedPreparation {
 class PreparationHttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
+export const isTransientPreparationError = (error: unknown) => error instanceof TypeError || (error as Error)?.name === "AbortError"
+  || (error instanceof PreparationHttpError && (error.status === 408 || error.status === 429 || error.status >= 500));
 const STORAGE = "readaloud:preparations";
 const BASE = "/api/preparations";
 // Retain the mapping even when browser storage is unavailable.
@@ -71,9 +73,20 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
   if (!entry) {
     // Do not abort the submission: if Cancel races the response, obtain the job id
     // first so the server job can be cancelled explicitly.
-    const status = await json<PreparationStatus>("", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requests, start }),
-    });
+    let status: PreparationStatus;
+    for (;;) {
+      signal?.throwIfAborted();
+      try {
+        status = await json<PreparationStatus>("", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requests, start }),
+        });
+        break;
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (!isTransientPreparationError(error)) throw error;
+        await delay(signal);
+      }
+    }
     entry = { id: status.id, signature: fingerprint, keys: requests.map((r) => r.key), active: true };
     save([...saved().filter((job) => job.signature !== fingerprint), entry].slice(-20));
   }
@@ -93,9 +106,7 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
         signal?.throwIfAborted();
         // A suspended phone can lose its connection. The job remains on the
         // server; retry observing it when the browser has connectivity again.
-        const transient = error instanceof TypeError || (error as Error)?.name === "AbortError"
-          || (error instanceof PreparationHttpError && (error.status === 408 || error.status === 429 || error.status >= 500));
-        if (!transient) {
+        if (!isTransientPreparationError(error)) {
           save(saved().map((job) => job.id === id ? { ...job, active: false } : job));
           throw error;
         }
@@ -125,7 +136,7 @@ export async function preparedAudio(key: string, signal?: AbortSignal): Promise<
   if (response.status === 404 || response.status === 410) return null;
   if (!response.ok) {
     const data = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(data?.error || "Could not fetch prepared audio.");
+    throw new PreparationHttpError(response.status, data?.error || "Could not fetch prepared audio.");
   }
   return response;
 }

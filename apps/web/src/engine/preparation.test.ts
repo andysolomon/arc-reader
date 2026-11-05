@@ -15,6 +15,32 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("background preparation client", () => {
+  it("retries submission while the web server restarts", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockRejectedValueOnce(new TypeError("Connection refused"))
+      .mockResolvedValueOnce(new Response("", { status: 503 }))
+      .mockResolvedValueOnce(response(status("running", 1)))
+      .mockResolvedValueOnce(response(status("done", 2)));
+    const run = prepareAudio(requests, 0);
+    await vi.advanceTimersByTimeAsync(3000);
+    await run;
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(3);
+    expect(hasActivePreparation(requests)).toBe(false);
+  });
+
+  it("can cancel while waiting for the web server to return", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockRejectedValue(new TypeError("Connection refused"));
+    const controller = new AbortController();
+    const run = prepareAudio(requests, 0, undefined, controller.signal);
+    const rejection = expect(run).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await rejection;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("submits all passages once, reconnects after reload, and retrieves stored audio", async () => {
     vi.useFakeTimers();
     fetchMock.mockResolvedValueOnce(response(status("running", 0)))

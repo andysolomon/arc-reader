@@ -14,9 +14,11 @@ interface Audio { body: Buffer; type: string; duration?: string; words?: string 
 class HttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
+class RetryableError extends Error {}
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const ALIAS = /^(alloy|ash|ballad|cedar|coral|echo|fable|marin|nova|onyx|sage|shimmer|verse)$/;
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const signature = (requests: PreparationRequest[]) => digest(requests.map(({ cached: _, ...item }) => item));
 
 /** Disk-backed jobs belong to the web server, never to an HTTP connection. */
 export class PreparationService {
@@ -81,7 +83,8 @@ export class PreparationService {
         throw new HttpError(400, "Preparation supports VoiceStudio voices only.");
       }
     }
-    const existing = [...this.jobs.values()].find((job) => job.state === "running" && JSON.stringify(job.requests) === JSON.stringify(requests));
+    const fingerprint = signature(requests);
+    const existing = [...this.jobs.values()].find((job) => job.state === "running" && signature(job.requests) === fingerprint);
     if (existing) return this.status(existing);
     if ([...this.jobs.values()].filter((job) => job.state === "running").length >= 20) throw new HttpError(429, "Too many audio preparations. Try again later.");
     const job: Job = { id: randomUUID(), requests, start: start!, completed: [], done: 0, total: requests.length, state: "running" };
@@ -113,7 +116,19 @@ export class PreparationService {
         if (job.state !== "running") return;
         const index = (job.start + k) % job.total;
         if (job.completed.includes(index)) continue;
-        if (!job.requests[index].cached) await this.audioFor(job.requests[index], () => job.state === "running");
+        for (let attempt = 0; ; attempt++) {
+          try {
+            if (!job.requests[index].cached) await this.audioFor(job.requests[index], () => job.state === "running");
+            break;
+          } catch (error) {
+            if (job.state !== "running") return;
+            // A restarting speech server must not turn durable work into a
+            // terminal error. Keep this passage pending until it comes back.
+            if (!(error instanceof TypeError) && !(error instanceof RetryableError) && (error as Error)?.name !== "TimeoutError") throw error;
+            await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5))));
+            if (job.state !== "running") return;
+          }
+        }
         job.completed.push(index);
         job.done = job.completed.length;
         await this.persist(job);
@@ -180,7 +195,9 @@ export class PreparationService {
       }
       if (!response.ok) {
         const data = await response.json().catch(() => null) as { detail?: string | { message?: string }; error?: { message?: string } } | null;
-        throw new HttpError(502, (typeof data?.detail === "string" ? data.detail : data?.detail?.message) || data?.error?.message || `Speech generation failed (HTTP ${response.status}).`);
+        const message = (typeof data?.detail === "string" ? data.detail : data?.detail?.message) || data?.error?.message || `Speech generation failed (HTTP ${response.status}).`;
+        if (response.status === 408 || response.status === 429 || response.status >= 500) throw new RetryableError(message);
+        throw new HttpError(502, message);
       }
       return response;
     }
