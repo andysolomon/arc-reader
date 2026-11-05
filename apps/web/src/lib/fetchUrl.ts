@@ -1,4 +1,4 @@
-/** Fetch a web page and extract readable text. Direct fetch first, then an optional readability proxy. */
+/** Fetch a web page and extract readable text. Direct fetch first, then the built-in /api/fetch route, then an optional readability proxy. */
 export interface Fetched {
   title: string;
   text: string;
@@ -45,29 +45,38 @@ function markdownToText(md: string): string {
     .trim();
 }
 
+async function readResponse(r: Response, url: string, domain: string): Promise<Fetched> {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const ct = r.headers.get("content-type") ?? "";
+  const body = await r.text();
+  if (ct.includes("html")) {
+    const f = htmlToText(body, url);
+    if (f.text.length > 40) return f;
+  } else if (body.trim().length > 40) {
+    return { title: domain, text: body, domain };
+  }
+  throw new Error("No readable text");
+}
+
+/** Direct fetch (works for CORS-enabled pages), then the dev/preview server's /api/fetch, then VITE_FETCH_PROXY. */
 export async function fetchReadable(input: string, signal?: AbortSignal): Promise<Fetched> {
   const url = normalizeUrl(input);
   const domain = hostOf(url);
   try {
-    const r = await fetch(url, { signal, mode: "cors" });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const ct = r.headers.get("content-type") ?? "";
-    const body = await r.text();
-    if (ct.includes("html")) {
-      const f = htmlToText(body, url);
-      if (f.text.length > 40) return f;
-    } else if (body.trim().length > 40) {
-      return { title: domain, text: body, domain };
-    }
-    throw new Error("No readable text");
+    return await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain);
   } catch (e) {
-    if (!PROXY) throw e;
-    const r = await fetch(PROXY.replace("{url}", url), { signal, headers: { Accept: "text/plain" } });
-    if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
-    const md = await r.text();
-    const title = md.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || domain;
-    const text = markdownToText(md);
-    if (text.length < 40) throw new Error("No readable text");
-    return { title, text, domain };
+    if (signal?.aborted) throw e;
   }
+  try {
+    return await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain);
+  } catch (e) {
+    if (!PROXY || signal?.aborted) throw e;
+  }
+  const r = await fetch(PROXY.replace("{url}", url), { signal, headers: { Accept: "text/plain" } });
+  if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
+  const md = await r.text();
+  const title = md.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || domain;
+  const text = markdownToText(md);
+  if (text.length < 40) throw new Error("No readable text");
+  return { title, text, domain };
 }

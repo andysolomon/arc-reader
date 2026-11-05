@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { tailnetUrl } from "./vite.tailnet";
 import { voiceStudioProxy } from "./vite.proxy";
+import { pageFetch } from "./vite.fetch";
 
 export default defineConfig(({ mode }) => {
   // Server-side only (no VITE_ prefix): never reaches the bundle.
@@ -12,6 +13,7 @@ export default defineConfig(({ mode }) => {
   plugins: [
     react(),
     tailnetUrl(),
+    pageFetch(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icons/*.svg", "icons/*.png", "splash.svg"],
