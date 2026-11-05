@@ -9,6 +9,7 @@ import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
 import { getUsage, getUsageByEngine, PLAN_LIMIT, OPENAI_PRICE_PER_M } from "../lib/usage";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
+import { studioJson, jsonBody } from "../lib/studio";
 import { hasApi, hasOpenAI, OPENAI_MODEL } from "../engine/providers";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -41,6 +42,7 @@ export function SettingsPage() {
   const allEngines = useVoices((v) => v.engines);
   const engines = allEngines.filter((e) => e.available || e.id === s.engine);
   const notInstalled = allEngines.length - engines.length;
+  const [engineBusy, setEngineBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [usage, setUsage] = useState(getUsage());
   const [byEngine, setByEngine] = useState(getUsageByEngine());
@@ -122,14 +124,21 @@ export function SettingsPage() {
         <Section title="Engine">
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="TTS engine">
             {engines.map((e) => (
-              <Chip key={e.id} size="sm" selected={s.engine === e.id} disabled={!e.available} onClick={() => s.set("engine", e.id)} title={e.available ? undefined : "Not installed on the speech server"}>
+              <Chip key={e.id} size="sm" selected={s.engine === e.id} disabled={!e.available || engineBusy} onClick={() => {
+                if (e.id === "local" || !hasApi()) { s.set("engine", e.id); return; }
+                setEngineBusy(true);
+                void studioJson("/engines/select", jsonBody({ family: "tts", backend_id: e.id }))
+                  .then(async () => { s.set("engine", e.id); await useVoices.getState().load(); })
+                  .catch((error: Error) => toast(error.message))
+                  .finally(() => setEngineBusy(false));
+              }} title={e.available ? undefined : "Not installed on the speech server"}>
                 {e.label}
               </Chip>
             ))}
           </div>
           <div className="text-[13px] text-fg2">
             {hasApi()
-              ? `Installed engines reported by the speech server${notInstalled > 0 ? `; ${notInstalled} more can be installed from VoiceStudio's Model Catalogue` : ""}. Preset voices name their own engine; cloned voices use this one.`
+              ? `Installed engines reported by the speech server${notInstalled > 0 ? `; ${notInstalled} more can be installed from VoiceStudio's Model Catalogue` : ""}. Preset voices name their own engine. This selects VoiceStudio’s active engine for saved voices; choose a cloning engine for clones and designs.`
               : "No speech server configured, so only the browser voice is available. Set VITE_API_BASE to use VoiceStudio."}
           </div>
         </Section>

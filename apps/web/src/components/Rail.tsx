@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { PenLine, Library, Mic, SlidersHorizontal, Terminal, PanelLeft } from "lucide-react";
+import { PenLine, Library, Mic, SlidersHorizontal, Terminal, PanelLeft, AudioLines } from "lucide-react";
 import { THEMES, getTheme } from "@readaloud/tokens";
 import { ThemeIcon, cn } from "@readaloud/ui";
 import { useSettings, useThemeId } from "../state/settings";
@@ -8,6 +8,7 @@ export const NAV = [
   { to: "/", label: "Compose", Icon: PenLine, end: true },
   { to: "/library", label: "Library", Icon: Library },
   { to: "/voices", label: "Voices", Icon: Mic },
+  { to: "/studio", label: "Studio", Icon: AudioLines },
   { to: "/settings", label: "Settings", Icon: SlidersHorizontal },
   { to: "/linux", label: "Linux client", Icon: Terminal },
 ];

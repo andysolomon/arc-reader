@@ -43,7 +43,7 @@ interface Actions {
 export const engine = new PlaybackEngine({
   engine: (voiceId) => {
     const v = getVoice(voiceId);
-    return v.kind === "preset" ? v.engine : v.kind === "local" ? LOCAL_ENGINE : useSettings.getState().engine;
+    return v.engine;
   },
   wordTimings: () => useSettings.getState().wordTimings,
   isProfileVoice: (id) => getVoice(id).kind === "profile",
