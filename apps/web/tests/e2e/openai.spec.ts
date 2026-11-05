@@ -43,8 +43,13 @@ test.describe("OpenAI voices (stub server)", () => {
     await page.waitForURL(/\/read\//);
     await page.waitForResponse((r) => r.url().includes("/api/oa/v1/audio/speech"));
     // usage is recorded after the clip is decoded; wait for the counter rather than the response
-    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("readaloud:usage") ?? "{}").byEngine?.openai ?? 0), { timeout: 10_000 }).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() => {
+      const rows = JSON.parse(localStorage.getItem("readaloud:usage") ?? "{}").rows ?? [];
+      return rows.filter((r: { provider: string }) => r.provider === "openai").reduce((sum: number, r: { characters: number }) => sum + r.characters, 0);
+    }), { timeout: 10_000 }).toBeGreaterThan(0);
     await page.goto("/settings");
-    await expect(page.getByText(/OpenAI .* chars ≈ \$/)).toBeVisible();
+    const usage = page.locator('[data-provider-usage="openai"]');
+    await expect(usage.getByText(/input \/ .* output tokens/)).toBeVisible();
+    await expect(usage.getByText(/≈ \$/)).toBeVisible();
   });
 });

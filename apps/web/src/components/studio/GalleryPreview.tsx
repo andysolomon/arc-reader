@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { Button } from "@readaloud/ui";
-import { idPath, studioFetch, studioJson } from "../../lib/studio";
+import { idPath, studioFetch, studioJson, type PreviewSource } from "../../lib/studio";
 import { ErrorNotice, panelClass } from "./shared";
 
 const TIMEOUT_MS = 180_000;
-interface PreviewSource { source: "gallery" | "cached" | "rendering" | "no_model"; message: string }
 
-export function GalleryPreview({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+export function GalleryPreview({ id, name, onClose, onReady }: { id: string; name: string; onClose: () => void; onReady: (id: string) => void }) {
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState("Checking preview…");
   const [error, setError] = useState("");
@@ -36,6 +35,7 @@ export function GalleryPreview({ id, name, onClose }: { id: string; name: string
         if (!clip.size) throw new Error("VoiceStudio returned an empty preview. Please retry.");
         if (ac.signal.aborted) return;
         objectUrl = URL.createObjectURL(clip);
+        onReady(id);
         setUrl(objectUrl); setStatus("Preview ready. Press play if it doesn’t start automatically.");
       } catch (e) {
         if (timedOut) setError("This preview is taking longer than expected. VoiceStudio may still finish in the background. Retry to check for the saved audio.");
@@ -43,7 +43,7 @@ export function GalleryPreview({ id, name, onClose }: { id: string; name: string
       } finally { clearInterval(clock); clearTimeout(timeout); }
     })();
     return () => { ac.abort(); clearInterval(clock); clearTimeout(timeout); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [id, attempt]);
+  }, [id, attempt, onReady]);
   return <div className={`${panelClass} flex flex-col gap-3`}>
     <p className="text-sm">Preview · {name}</p>
     {!error && <p role="status" className="text-sm text-fg2">{status}{!url && elapsed > 0 ? ` · ${elapsed}s elapsed` : ""}</p>}

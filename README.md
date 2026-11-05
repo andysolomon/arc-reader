@@ -107,7 +107,7 @@ VITE_OPENAI_TTS_MODEL=gpt-4o-mini-tts   # or tts-1 / tts-1-hd
 OPENAI_API_KEY=sk-...                     # read by the proxy only
 ```
 
-The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; Settings → Engine selects VoiceStudio’s active engine for saved profiles or enables the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → Usage shows OpenAI characters for the month with a list-price estimate for text input. Every sentence sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
+The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; Settings → Engine selects VoiceStudio’s active engine for saved profiles or enables the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → API usage & spending shows monthly requests, reported input/audio output tokens, and list-price cost estimates. GPT-4o mini TTS requests use speech events to retain reported usage; binary-only compatible servers remain playable, with tokens and cost marked unavailable. Every sentence sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
 
 ### Fish Audio voices
 
@@ -126,6 +126,12 @@ Choose a voice tagged **Fish Audio** on the Voices page. Sarah is included as a 
 Fish uses [`POST /v1/tts`](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech) with the voice's `reference_id` and returns MP3 audio. Sentence prefetch, playback speed, cache, and character usage work as before. Fish caches include the selected model, and cloud requests run independently of the local worker queue. Changing voices retries the connection after an offline fallback. Word highlighting uses estimated timing unless the existing optional VoiceStudio alignment is enabled.
 
 `s2.1-pro` requires API credit; an insufficient-credit response is shown without marking all providers offline. Other models can be selected using `VITE_FISH_TTS_MODEL`; consult Fish's current model documentation before changing it. Text read with a Fish voice is sent to Fish Audio. Leave `VITE_FISH_BASE` empty to hide this provider.
+
+### API usage & spending
+
+Settings groups speech usage by provider and model, with monthly history and a daily spend chart. Only completed generations are recorded, including prefetch; cached playback and browser voices add no usage. OpenAI GPT-4o mini TTS uses provider-reported input and audio output tokens; TTS-1 uses Unicode character counts, and Fish uses UTF-8 bytes. Prices are snapshots of list rates checked November 5, 2026 ([OpenAI](https://developers.openai.com/api/docs/models/gpt-4o-mini-tts), [TTS-1](https://developers.openai.com/api/docs/models/tts-1), [TTS-1 HD](https://developers.openai.com/api/docs/models/tts-1-hd), [Fish Audio](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)). Unknown models or missing usage show unavailable costs rather than a guessed rate.
+
+Daily aggregates live in `readaloud:usage` in this browser's local storage. They contain no API keys, document text, or audio. Keys used with the same provider share totals; other devices, apps, Studio operations (including dubbing/transcription), hosting costs, tax, and credits are excluded. Failed/interrupted requests may still incur provider charges. Account links lead to actual billing information. Clearing site data clears history. Existing character counters migrate with their original month; their missing model, token, and cost data stays unavailable. Estimates are saved when generated so changing a model or rate does not reprice history.
 
 ### Without VoiceStudio
 

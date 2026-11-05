@@ -29,6 +29,7 @@ export async function studioJson<T>(path: string, init?: RequestInit): Promise<T
 export const jsonBody = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 export interface Profile { id: string; name: string; kind: "clone" | "design"; language: string; instruct?: string }
 export interface Archetype { id: string; name: string; instruct: string; language: string; use_case: string; attrs: Record<string, string> }
+export interface PreviewSource { source: "gallery" | "cached" | "rendering" | "no_model"; message: string }
 export interface Design { attrs: Record<string, string>; instruct: string; unmatched: string[] }
 export interface Segment { id?: string | number; start: number; end: number; text: string; speaker?: string; profile_id?: string }
 export interface Transcript { text: string; segments?: Segment[]; language?: string }

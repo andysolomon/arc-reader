@@ -9,6 +9,13 @@ export interface Voice extends UiVoice {
   kind: "preset" | "profile" | "local";
 }
 
+export function voiceSource(voice: Pick<Voice, "engine">): string {
+  if (voice.engine === "openai") return "ChatGPT";
+  if (voice.engine === "fish") return "Fish";
+  if (voice.engine === LOCAL_ENGINE) return "Browser";
+  return "VoiceStudio";
+}
+
 export const LOCAL_VOICE_ID = "local";
 
 /** Stable avatar hue from the id, so a voice keeps its colour across reloads and devices. */

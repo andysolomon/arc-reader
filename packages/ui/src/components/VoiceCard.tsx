@@ -13,12 +13,13 @@ export interface VoiceCardProps {
   voice: Voice;
   selected?: boolean;
   previewing?: boolean;
+  source?: string;
   onPreview: () => void;
   onSelect: () => void;
   className?: string;
 }
 
-export function VoiceCard({ voice, selected, previewing, onPreview, onSelect, className }: VoiceCardProps) {
+export function VoiceCard({ voice, selected, previewing, source, onPreview, onSelect, className }: VoiceCardProps) {
   return (
     <Card interactive selected={selected} className={cn("flex min-h-[200px] flex-col gap-3.5", className)} data-voice={voice.id}>
       <div className="flex items-center justify-between">
@@ -35,6 +36,7 @@ export function VoiceCard({ voice, selected, previewing, onPreview, onSelect, cl
         <div className="font-mono text-[12px] text-fg2">{voice.lang}</div>
       </div>
       <div className="flex flex-wrap gap-1.5">
+        {source && <span className="rounded-pill border border-line px-2 py-0.5 text-xs font-medium text-fg2" aria-label={`Voice source: ${source}`}>{source}</span>}
         {voice.tags.map((t) => (
           <Chip key={t} tag>
             {t}
