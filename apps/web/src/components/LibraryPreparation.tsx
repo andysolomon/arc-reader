@@ -32,7 +32,7 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
         // While a job is active, its confirmed passage count is the live progress.
         const fraction = job && job.total > 0 ? Math.max(0, Math.min(1, job.done / job.total)) : voice.fraction;
         const percent = Math.floor(fraction * 100);
-        const stage = job && (job.message ?? (job.status === "queued" ? "Queued" : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing"));
+        const stage = job && (job.message ?? (job.status === "queued" ? (job.waitingFor ? `Waiting for ${job.waitingFor}` : "Queued") : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing"));
         const progress = job && job.total > 0 ? `${percent}% generated · ${job.done}/${job.total} passages` : `${percent}% prepared`;
         const label = `${voice.name}: ${progress}${stage ? ` · ${stage}` : ""}`;
         // A full ring already says "ready"; only partial audio needs words.
@@ -128,7 +128,7 @@ export function PreparationQueue() {
                   <VoiceServiceName source={voiceSource(job.voice)} className="shrink-0">{job.voice.name}</VoiceServiceName>
                   <span aria-hidden className="text-fg3">·</span>
                   <span className={cn("truncate", job.status === "error" && "text-danger", job.status === "preparing" && "text-accent")}>
-                    {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? "Queued · waiting for a free machine"}
+                    {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? `Queued · waiting for ${job.waitingFor ?? "a free machine"}`}
                   </span>
                 </div>
               </div>

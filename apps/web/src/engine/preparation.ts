@@ -19,6 +19,8 @@ export interface PreparationStatus {
   error?: string;
   queued?: boolean;
   worker?: string;
+  /** The only machine a queued reading can run on, when the other can't take it. */
+  waitingFor?: string;
 }
 export interface SharedPreparation extends PreparationStatus {
   keys: string[];

@@ -268,6 +268,31 @@ describe("server-owned audio preparation", () => {
     await expect.poll(async () => (await service.get(first.id)).state).toBe("done");
   });
 
+  it("gives a free Mac the reading only it can prepare and leaves the shared one for the secondary", async () => {
+    await addSecondary();
+    const macGate = deferred(); gate = macGate; secondaryGate = deferred();
+    const service = new PreparationService(env, directory);
+    await service.submit({ requests: [item("mac")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    await service.submit({ requests: [item("cpu")], start: 0 });
+    await expect.poll(() => secondaryCalls.length).toBe(1);
+    const shared = await service.submit({ requests: [item("preset")], start: 0 });
+    const macOnly = await service.submit({ requests: [{ ...item("saved"), engine: "omnivoice" }], start: 0 });
+    await expect.poll(async () => (await service.get(macOnly.id)).waitingFor).toBe("Mac");
+    expect(await service.get(shared.id)).toMatchObject({ queued: true });
+    expect(await service.get(shared.id)).not.toHaveProperty("waitingFor");
+    // The Mac frees up first; its next passage then waits on a new gate.
+    gate = deferred();
+    macGate.resolve();
+    await expect.poll(() => calls.filter((call) => call.path !== "/engines").map((call) => call.body.input)).toEqual(["mac", "saved"]);
+    expect(await service.get(shared.id)).toMatchObject({ queued: true });
+    secondaryGate.resolve();
+    await expect.poll(async () => (await service.get(shared.id)).state).toBe("done");
+    expect(secondaryCalls).toEqual(["cpu", "preset"]);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(macOnly.id)).state).toBe("done");
+  });
+
   it("does not delay the Mac's next reading while secondary discovery is stalled", async () => {
     await addSecondary();
     gate = deferred(); discoveryGate = deferred();
