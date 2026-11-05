@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2, Play, Star } from "lucide-react";
 import { Button, VoiceAvatar, cn } from "@readaloud/ui";
 import { useVoices } from "../../state/voices";
 import { galleryFavoriteKey, useGallery } from "../../state/gallery";
+import { usePreviews } from "../../state/previews";
 import { hueFor } from "../../data/voices";
 import { studioJson, studioUrl, idPath, type Archetype, type PreviewSource } from "../../lib/studio";
 import { GalleryPreview } from "./GalleryPreview";
@@ -20,9 +21,11 @@ export function VoiceGallery() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [preview, setPreview] = useState<{ id: string; name: string } | null>(null);
   const [sources, setSources] = useState<Record<string, PreviewSource["source"] | "unknown">>({});
-  const readyRevisions = useRef<Record<string, number>>({});
+  const preview = usePreviews((s) => s.active);
+  const generated = usePreviews((s) => s.ready);
+  const jobs = usePreviews((s) => s.jobs);
+  const openPreview = usePreviews((s) => s.open);
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const favorites = useGallery((s) => s.favorites);
   const toggleFavorite = useGallery((s) => s.toggleFavorite);
@@ -62,24 +65,17 @@ export function VoiceGallery() {
     const check = async () => {
       while (queue.length && !ac.signal.aborted) {
         const voice = queue.shift()!;
-        const revision = readyRevisions.current[voice.id];
         let source: PreviewSource["source"] | "unknown" = "unknown";
         try {
           const state = await studioJson<PreviewSource>(`/archetypes/${idPath(voice.id)}/preview/state`, { signal: AbortSignal.any([ac.signal, AbortSignal.timeout(10_000)]), cache: "no-cache" });
           source = state.source;
         } catch { /* Status failure must not block browsing or trying a preview. */ }
-        // A status check started before generation finished must not undo readiness.
-        if (!ac.signal.aborted && revision === readyRevisions.current[voice.id]) setSources((before) => ({ ...before, [voice.id]: source }));
+        if (!ac.signal.aborted) setSources((before) => ({ ...before, [voice.id]: source }));
       }
     };
     for (let i = 0; i < Math.min(4, visibleItems.length); i++) void check();
     return () => ac.abort();
   }, [visibleItems]);
-
-  const markReady = useCallback((id: string) => {
-    readyRevisions.current[id] = (readyRevisions.current[id] ?? 0) + 1;
-    setSources((before) => ({ ...before, [id]: "cached" }));
-  }, []);
 
   return <div className="flex flex-col gap-5">
     <div><h2 className="font-serif text-xl">Designed voice gallery</h2><p className="mt-2 text-sm text-fg2">VoiceStudio’s original catalog. Preview a character, favorite it, or add its recipe to your saved voices. <Link to="/voices" className="underline">Find Fish and ChatGPT voices in Voices.</Link></p></div>
@@ -88,14 +84,16 @@ export function VoiceGallery() {
       <Button variant={favoritesOnly ? "primary" : "secondary"} aria-pressed={favoritesOnly} onClick={() => { setFavoritesOnly(true); setPage(0); }}><Star size={14} aria-hidden />Favorites ({favoriteVoices.length})</Button>
     </div>
     <div className="flex flex-wrap items-end gap-4"><div className="min-w-0 flex-1"><Field label="Search designed voices"><input className={fieldClass} value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} placeholder="Narrator, British, whisper…" /></Field></div>{!favoritesOnly && <label className="flex items-center gap-2 py-3 text-sm"><input type="checkbox" checked={featured} onChange={(e) => { setFeatured(e.target.checked); setPage(0); }} />Featured only</label>}</div>
-    {preview && <GalleryPreview key={preview.id} id={preview.id} name={preview.name} onClose={() => setPreview(null)} onReady={markReady} />}
+    {preview && <GalleryPreview id={preview.id} name={preview.name} />}
     <p role="status" className="text-sm text-fg2">{loading ? "Loading gallery…" : `${count} ${favoritesOnly ? "favorite voices" : "voices"}`}{op.status && ` · ${op.status}`}</p>
     <ErrorNotice error={loadError || op.error} />
     <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
       {visibleItems.map((voice) => {
         const favorite = !!favorites[galleryFavoriteKey(voice.id)];
         const source = sources[voice.id];
-        const ready = source === "cached" || source === "gallery";
+        // Session completion wins over a status check that started before it finished.
+        const ready = !!generated[voice.id] || source === "cached" || source === "gallery";
+        const generating = !ready && !!jobs[voice.id] && !jobs[voice.id].done;
         return <article key={voice.id} aria-label={voice.name} className={`${panelClass} flex flex-col gap-3`}>
           <div className="flex items-center justify-between gap-3">
             <VoiceAvatar voice={{ name: voice.name, hue: hueFor(voice.id) }} size={40} />
@@ -106,11 +104,11 @@ export function VoiceGallery() {
             <span className="rounded-pill border border-line px-2 py-0.5 text-xs font-medium text-fg2" aria-label="Voice source: VoiceStudio">VoiceStudio</span>
             <span className={cn("inline-flex items-center gap-1 text-xs", ready ? "text-accent" : "text-fg2")}>
               {ready && <CheckCircle2 size={14} aria-hidden />}
-              {ready ? "Preview ready" : source === "rendering" ? "Not generated" : source === "no_model" ? "Model required" : source ? "Preview status unavailable" : "Checking preview…"}
+              {ready ? "Preview ready" : generating ? "Generating preview…" : source === "rendering" ? "Not generated" : source === "no_model" ? "Model required" : source ? "Preview status unavailable" : "Checking preview…"}
             </span>
           </div>
           <p className="text-xs uppercase tracking-wide text-fg3">{voice.use_case} · {voice.language}</p><p className="flex-1 text-sm text-fg2">{voice.instruct}</p>
-          <div className="flex flex-wrap gap-2"><Button onClick={() => { op.setError(""); setPreview({ id: voice.id, name: voice.name }); }}>{ready && <Play size={14} aria-hidden />}{ready ? "Play preview" : "Preview"}</Button><Button disabled={op.busy || saved.has(voice.id)} onClick={() => void op.run(async (signal) => {
+          <div className="flex flex-wrap gap-2"><Button onClick={() => { op.setError(""); openPreview(voice.id, voice.name); }}>{ready && <Play size={14} aria-hidden />}{ready ? "Play preview" : "Preview"}</Button><Button disabled={op.busy || saved.has(voice.id)} onClick={() => void op.run(async (signal) => {
             const result = await studioJson<{ profile_id: string; name: string }>(`/archetypes/${idPath(voice.id)}/use`, { method: "POST", signal });
             setSaved((before) => new Set([...before, voice.id])); await useVoices.getState().load(); op.setStatus(`${result.name} added to Voices.`);
           })}>{saved.has(voice.id) ? "Added" : "Add to Voices"}</Button></div>
