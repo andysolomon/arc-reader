@@ -10,6 +10,7 @@ export interface Voice extends UiVoice {
 }
 
 export const LOCAL_VOICE_ID = "local";
+export const JAMAICAN_PATOIS_VOICE_ID = "fish:0724e14ccf884007a641908722575fdf";
 
 /** Stable avatar hue from the id, so a voice keeps its colour across reloads and devices. */
 export function hueFor(id: string): number {
@@ -64,6 +65,21 @@ export const FISH_DEFAULT_VOICE: Voice = {
   id: "fish:933563129e564b19a115bedd57b7406a", name: "Sarah", lang: "EN-US · Fish Audio",
   tags: ["Fish Audio", "narrator"], hue: hueFor("fish:sarah"), engine: "fish", kind: "preset",
 };
+
+/** Curated voices stay selectable even outside the current Fish catalogue page. */
+export const FISH_PRESET_VOICES: Voice[] = [
+  FISH_DEFAULT_VOICE,
+  {
+    // https://fish.audio/m/d7988a7138db47cc8a4876a36625dff6/
+    id: "fish:d7988a7138db47cc8a4876a36625dff6", name: "Jamaican English", lang: "EN-JM · Fish Audio",
+    tags: ["Fish Audio", "Jamaican accent"], hue: hueFor("fish:d7988a7138db47cc8a4876a36625dff6"), engine: "fish", kind: "preset",
+  },
+  {
+    // https://fish.audio/m/0724e14ccf884007a641908722575fdf/
+    id: JAMAICAN_PATOIS_VOICE_ID, name: "Jamaican Patois", lang: "EN-JM · Fish Audio",
+    tags: ["Fish Audio", "rewrites to Patois"], hue: hueFor(JAMAICAN_PATOIS_VOICE_ID), engine: "fish", kind: "preset",
+  },
+];
 
 export const LOCAL_VOICE: Voice = { id: LOCAL_VOICE_ID, name: "Browser voice", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null, engine: LOCAL_ENGINE, kind: "local" };
 

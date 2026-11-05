@@ -10,6 +10,7 @@ import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
 import { useBreakpoint } from "../hooks/useMedia";
 import { useCycleTheme } from "../components/Rail";
+import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 
 export function Reader() {
   const { id } = useParams();
@@ -112,6 +113,7 @@ export function Reader() {
           </IconButton>
         )}
         <motion.div layoutId="doc-surface" className="mx-auto" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
+          {ready && doc.voice === JAMAICAN_PATOIS_VOICE_ID && <p className="mb-6 text-sm text-fg2">Jamaican Patois adaptation · Your original is saved. Choose another voice to read the original.</p>}
           {ready ? (
             <SentenceText
               paragraphs={doc.paragraphs}

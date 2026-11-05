@@ -9,6 +9,8 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
+import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
+import { preparePatois } from "../lib/patois";
 
 const PREVIEW_MS = 3000;
 
@@ -57,9 +59,18 @@ export function VoicesPage() {
     usePlayer.getState().clearOffline();
     const v = getVoice(id);
     setPreviewing(id);
-    const text = `Hi, I'm ${v.name}. This is how I sound at your current speed.`;
+    let text = `Hi, I'm ${v.name}. This is how I sound at your current speed.`;
     const ac = new AbortController();
     abort.current = ac;
+    if (id === JAMAICAN_PATOIS_VOICE_ID) {
+      try {
+        const sample = await preparePatois({ id: "preview", title: "Preview", text, voice: id, source: "sample", domain: "Sample", chars: text.length, createdAt: 0, updatedAt: 0 }, ac.signal, () => {});
+        text = sample.patois!.text;
+      } catch (error) {
+        if (!ac.signal.aborted) { toast(error instanceof Error ? error.message : "Patois preview failed"); stopPreview(); }
+        return;
+      }
+    }
     const chunk = await synthesize({
       text,
       voice: v.id,
@@ -92,7 +103,9 @@ export function VoicesPage() {
     if (v.kind === "preset" && engineId === LOCAL_ENGINE) set("engine", DEFAULT_ENGINE);
     usePlayer.getState().clearOffline();
     if (forDoc) {
-      if (loadedDoc?.id === forDoc) await usePlayer.getState().setDocVoice(id);
+      if (loadedDoc?.id === forDoc) {
+        if (!await usePlayer.getState().setDocVoice(id)) return;
+      }
       else {
         const rec = await docs.get(forDoc);
         if (rec) await docs.put({ ...rec, voice: id, updatedAt: Date.now() });
@@ -124,6 +137,7 @@ export function VoicesPage() {
           </div>
         )}
         <div className="flex flex-wrap gap-4 text-sm underline"><Link to="/studio/clone">Clone a voice</Link><Link to="/studio/design">Design a voice</Link><Link to="/studio/gallery">Browse designed voices</Link></div>
+        {VOICES.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
         <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
           {VOICES.map((v) => (
             <VoiceCard key={v.id} voice={v} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />

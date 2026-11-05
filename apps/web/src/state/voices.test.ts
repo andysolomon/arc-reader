@@ -15,6 +15,32 @@ const fish = [{ _id: "narrator", title: "Narrator", languages: ["en"] }];
 const local = { voices: [{ id: "profile", name: "My voice", type: "profile" }], engines: [{ id: "kittentts", available: true }] };
 
 describe("voice providers", () => {
+  it("keeps both Jamaican voices available before discovery, after failure, and without duplicate catalogue entries", async () => {
+    const englishId = "fish:d7988a7138db47cc8a4876a36625dff6";
+    const patoisId = "fish:0724e14ccf884007a641908722575fdf";
+    const checkVoices = () => {
+      for (const [id, name] of [[englishId, "Jamaican English"], [patoisId, "Jamaican Patois"]]) {
+        expect(useVoices.getState().voices.filter((v) => v.id === id)).toHaveLength(1);
+        expect(getVoice(id)).toMatchObject({ name, engine: "fish", kind: "preset" });
+      }
+    };
+    checkVoices();
+    vi.mocked(fetchFishVoices).mockRejectedValueOnce(new Error("Catalogue unavailable"));
+    await useVoices.getState().loadFish();
+    checkVoices();
+    vi.mocked(fetchFishVoices).mockResolvedValueOnce([
+      ...fish,
+      { _id: englishId.slice(5), title: "Jamaican Accent Male", languages: ["en"] },
+      { _id: patoisId.slice(5), title: "Jamaican Patois Male", languages: ["en"] },
+    ]);
+    await useVoices.getState().loadFish();
+    checkVoices();
+    expect(getVoice("fish:narrator").name).toBe("Narrator");
+    vi.mocked(fetchFishVoices).mockResolvedValueOnce([]);
+    await useVoices.getState().loadFish();
+    checkVoices();
+  });
+
   it.each([true, false])("preserves both catalogues when Fish finishes first: %s", async (fishFirst) => {
     let finishFish!: (value: typeof fish) => void;
     let finishLocal!: (value: typeof local) => void;

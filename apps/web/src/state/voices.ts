@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, FISH_DEFAULT_VOICE, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
+import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
 import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, DEFAULT_ENGINE, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
 import { studioJson, type Profile } from "../lib/studio";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -34,7 +34,7 @@ const ENGINE_LABELS: Record<string, string> = {
   [FISH_ENGINE]: "Fish Audio",
 };
 
-const cloud = () => [...(hasOpenAI() ? OPENAI_VOICES : []), ...(hasFish() ? [FISH_DEFAULT_VOICE] : [])];
+const cloud = () => [...(hasOpenAI() ? OPENAI_VOICES : []), ...(hasFish() ? FISH_PRESET_VOICES : [])];
 
 export const engineLabel = (id: string) => ENGINE_LABELS[id] ?? id;
 
@@ -69,8 +69,8 @@ export const useVoices = create<VoicesState>()((set, get) => ({
         tags: ["Fish Audio", ...(v.tags ?? []).filter((t) => typeof t === "string").slice(0, 1)],
         hue: hueFor(`fish:${v._id}`), engine: FISH_ENGINE, kind: "preset",
       }));
-      if (!fish.some((v) => v.id === FISH_DEFAULT_VOICE.id)) fish.unshift(FISH_DEFAULT_VOICE);
-      set({ voices: [...get().voices.filter((v) => v.engine !== FISH_ENGINE), ...fish], fishError: null });
+      const presetIds = new Set(FISH_PRESET_VOICES.map((v) => v.id));
+      set({ voices: [...get().voices.filter((v) => v.engine !== FISH_ENGINE), ...FISH_PRESET_VOICES, ...fish.filter((v) => !presetIds.has(v.id))], fishError: null });
     } catch (error) {
       set({ fishError: error instanceof Error ? error.message : "Could not load Fish Audio voices" });
     }

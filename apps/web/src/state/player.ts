@@ -7,6 +7,12 @@ import { getVoice, voiceLang, isLocalVoice } from "./voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "./settings";
 import { toast } from "./toast";
+import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
+import { hasPatois, preparePatois } from "../lib/patois";
+
+let opening: AbortController | null = null;
+let retryPreparation: (() => Promise<boolean>) | null = null;
+const variant = (id: string) => id === JAMAICAN_PATOIS_VOICE_ID ? "patois" : "original";
 
 export interface PlayerState extends EngineSnapshot {
   doc: EngineDoc | null;
@@ -18,10 +24,15 @@ export interface PlayerState extends EngineSnapshot {
   shortcutsOpen: boolean;
   /** Effective voice id for the loaded doc (override or default) */
   voiceId: string;
+  preparing: string | null;
+  preparationError: string | null;
 }
 
 interface Actions {
-  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean }) => Promise<void>;
+  /** `persist` saves the record (e.g. a voice change) once preparation succeeds. */
+  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean }) => Promise<boolean>;
+  cancelPreparation: () => void;
+  retryPreparation: () => Promise<boolean>;
   close: () => void;
   toggle: () => void;
   play: () => void;
@@ -33,7 +44,7 @@ interface Actions {
   seekFraction: (f: number) => void;
   setSpeed: (v: number) => void;
   nudgeSpeed: (delta: number) => void;
-  setDocVoice: (voiceId: string | null) => Promise<void>;
+  setDocVoice: (voiceId: string | null) => Promise<boolean>;
   setFocus: (v: boolean) => void;
   setMenuOpen: (v: boolean) => void;
   setShortcutsOpen: (v: boolean) => void;
@@ -61,7 +72,7 @@ export const engine = new PlaybackEngine({
   onPersist: (snap) => {
     const { doc } = usePlayer.getState();
     if (!doc || !snap.docId) return;
-    void positions.put({ docId: snap.docId, index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() });
+    void positions.put({ docId: snap.docId, variant: variant(doc.voice), index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() });
   },
   onError: (m) => toast(m),
 });
@@ -81,37 +92,80 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
     menuOpen: false,
     shortcutsOpen: false,
     voiceId: useSettings.getState().voice,
+    preparing: null,
+    preparationError: null,
 
     async open(rec, opts = {}) {
+      opening?.abort();
+      const controller = new AbortController();
+      opening = controller;
+      const { signal } = controller;
+      retryPreparation = () => get().open(rec, opts);
+      set({ preparationError: null });
+      try {
       const voiceId = rec.voice ?? useSettings.getState().voice;
       const voice = getVoice(voiceId);
-      const seg = segment(rec.text);
+      const rewrite = voiceId === JAMAICAN_PATOIS_VOICE_ID && !hasPatois(rec);
+      if (rewrite) {
+        engine.pause();
+        set({ preparing: "Rewriting into Jamaican Patois…" });
+      }
+      const prepared = voiceId === JAMAICAN_PATOIS_VOICE_ID
+        ? await preparePatois(rec, signal, (preparing) => { if (!signal.aborted) set({ preparing }); })
+        : rec;
+      signal.throwIfAborted();
+      const seg = segment(voiceId === JAMAICAN_PATOIS_VOICE_ID ? prepared.patois!.text : prepared.text);
       const doc: EngineDoc = { id: rec.id, title: rec.title, voice: voice.id, lang: voiceLang(voice), ...seg };
       let index = 0, offset = 0;
       if (opts.resume !== false) {
         const pos = await positions.get(rec.id).catch(() => undefined);
-        if (pos && pos.fraction < 0.995) {
+        if (pos && (pos.variant ?? "original") === variant(voiceId) && pos.fraction < 0.995) {
           index = pos.index;
           offset = pos.offset;
         }
       }
+      signal.throwIfAborted();
+      if (rewrite || opts.persist) await docStore.put(prepared);
+      signal.throwIfAborted();
       engine.load(doc, index, offset);
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
-      set({ doc, record: rec, voiceId: voice.id, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
+      set({ doc, record: prepared, voiceId: voice.id, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
       if (opts.autoplay) void engine.play();
+      retryPreparation = null;
+      return true;
+      } catch (error) {
+        if (!signal.aborted) {
+          const message = error instanceof Error ? error.message : "Could not prepare this reading.";
+          set({ preparationError: message });
+        }
+        return false;
+      } finally {
+        if (opening === controller) {
+          opening = null;
+          set({ preparing: null });
+        }
+      }
     },
+    cancelPreparation() {
+      opening?.abort();
+      opening = null;
+      retryPreparation = null;
+      set({ preparing: null, preparationError: null });
+    },
+    retryPreparation: async () => retryPreparation ? retryPreparation() : false,
     close() {
+      get().cancelPreparation();
       engine.unload();
       set({ doc: null, record: null, focus: false, menuOpen: false });
     },
-    toggle: () => engine.toggle(),
-    play: () => void engine.play(),
+    toggle: () => { if (!get().preparing) engine.toggle(); },
+    play: () => { if (!get().preparing) void engine.play(); },
     pause: () => engine.pause(),
     stop: () => engine.stop(),
-    prev: () => engine.prev(),
-    next: () => engine.next(),
-    seek: (i) => engine.seek(i),
-    seekFraction: (f) => engine.seekFraction(f),
+    prev: () => { if (!get().preparing) engine.prev(); },
+    next: () => { if (!get().preparing) engine.next(); },
+    seek: (i) => { if (!get().preparing) engine.seek(i); },
+    seekFraction: (f) => { if (!get().preparing) engine.seekFraction(f); },
     setSpeed(v) {
       const s = clampSpeed(v);
       engine.setSpeed(s);
@@ -123,14 +177,21 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
     async setDocVoice(voiceId) {
       const { record } = get();
       const v = getVoice(voiceId ?? useSettings.getState().voice);
+      const wasPlaying = get().playing;
+      get().cancelPreparation();
       if (record) {
         const next = { ...record, voice: voiceId, updatedAt: Date.now() };
+        if (variant(v.id) !== variant(get().voiceId) || v.id === JAMAICAN_PATOIS_VOICE_ID) {
+          set({ offline: false });
+          return get().open(next, { autoplay: wasPlaying, resume: variant(v.id) === variant(get().voiceId), persist: true });
+        }
         await docStore.put(next);
         set({ record: next });
       }
       set({ offline: false });
       engine.setVoice(v.id, voiceLang(v));
-      set({ voiceId: v.id });
+      set({ voiceId: v.id, doc: get().doc ? { ...get().doc!, voice: v.id, lang: voiceLang(v) } : null });
+      return true;
     },
     setFocus: (v) => set({ focus: v }),
     setMenuOpen: (v) => set({ menuOpen: v }),
@@ -146,11 +207,9 @@ engine.setSpeed(useSettings.getState().defaultSpeed);
 useSettings.subscribe((s, prev) => {
   if (s.voice !== prev.voice) {
     const p = usePlayer.getState();
+    p.cancelPreparation();
     if (p.doc && !p.record?.voice) {
-      const v = getVoice(s.voice);
-      usePlayer.setState({ offline: false });
-      engine.setVoice(v.id, voiceLang(v));
-      usePlayer.setState({ voiceId: v.id });
+      void p.setDocVoice(null).catch((error: Error) => toast(error.message));
     }
   }
 });
