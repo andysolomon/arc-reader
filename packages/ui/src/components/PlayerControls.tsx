@@ -75,7 +75,7 @@ export function TimeReadout({ elapsed, remaining, status, className }: { elapsed
   return (
     <div className={cn("whitespace-nowrap font-mono text-[12px] text-fg2 tabular-nums", className)} aria-live="off">
       <span aria-label="Elapsed">{fmtTime(elapsed)}</span> <span className="text-fg3">/</span> <span aria-label="Remaining">−{fmtTime(remaining)}</span>
-      {status ? <span className="ml-2 font-sans text-fg3" aria-live="polite">{status}</span> : null}
+      {status ? <span className="ml-2 font-sans text-fg2" aria-live="polite">{status}</span> : null}
     </div>
   );
 }
