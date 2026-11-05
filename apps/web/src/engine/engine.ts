@@ -1,5 +1,5 @@
 import type { WordTiming } from "../lib/db";
-import { estimateDuration, type Segmented, type Sentence } from "../lib/segment";
+import { estimateDuration, planPassages, type Passage, type Segmented, type Sentence } from "../lib/segment";
 import { synthesize } from "./providers";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type EngineId } from "./types";
 
@@ -65,11 +65,18 @@ export function unavailableMessage(e: unknown): string {
 const PREFETCH = 2;
 /** Render time ÷ audio time above which a voice cannot keep up with playback. */
 export const SLOW_FACTOR = 1.5;
+/** Seconds of a clip's trailing silence that are still played before the next passage starts. */
+const TAIL_KEEP = 0.25;
+/** A passage never plays below this share of its own level when matched to its neighbours (−6 dB). */
+const MIN_GAIN = 0.5;
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 /**
- * Sentence-level playback engine.
- * - One audio element per sentence chunk; the next two are prefetched.
+ * Passage-level playback engine with sentence-level position.
+ * - One request and one audio element per passage (a run of sentences, see planPassages);
+ *   the next two passages are prefetched. The reader still moves sentence by sentence:
+ *   each clip carries its sentence starts, and crossing one advances the index without
+ *   touching the audio.
  * - Advances with requestAnimationFrame using real elapsed time (never a fixed step).
  * - When audio exists, audio.currentTime is the source of truth; otherwise the
  *   clock runs on the estimate (2.83 words/s × speed) or follows Web Speech boundaries.
@@ -77,8 +84,15 @@ const now = () => (typeof performance !== "undefined" ? performance.now() : Date
 export class PlaybackEngine {
   private doc: EngineDoc | null = null;
   private durations: number[] = [];
+  private passageList: Passage[] = [];
+  /** Sentence index → passage index */
+  private passageOf: number[] = [];
   private chunks = new Map<number, Promise<Chunk>>();
   private current: Chunk | null = null;
+  /** Quietest passage level heard so far (dBFS); louder passages are brought down to it. */
+  private levelRef: number | null = null;
+  private timingsFor = -1;
+  private timings: WordTiming[] | undefined;
   private index = 0;
   private offset = 0;
   private wordIndex = -1;
@@ -118,6 +132,10 @@ export class PlaybackEngine {
     return this.doc?.sentences ?? [];
   }
 
+  get passages(): Passage[] {
+    return this.passageList;
+  }
+
   /** Load a document. Does not start playback (no autoplay without a gesture). */
   load(doc: EngineDoc, index = 0, offset = 0) {
     this.stopMedia();
@@ -125,7 +143,12 @@ export class PlaybackEngine {
     this.doc = doc;
     this.chunks.clear();
     this.current = null;
+    this.levelRef = null;
+    this.timingsFor = -1;
     this.durations = doc.sentences.map((s) => estimateDuration(s.words));
+    this.passageList = planPassages(doc.sentences);
+    this.passageOf = [];
+    for (const p of this.passageList) for (let i = p.start; i < p.end; i++) this.passageOf[i] = p.index;
     this.index = Math.max(0, Math.min(doc.sentences.length - 1, index));
     this.offset = Math.max(0, offset);
     this.wordIndex = -1;
@@ -142,6 +165,8 @@ export class PlaybackEngine {
     this.doc = null;
     this.chunks.clear();
     this.current = null;
+    this.passageList = [];
+    this.passageOf = [];
     this.durations = [];
     this.index = 0;
     this.offset = 0;
@@ -159,6 +184,8 @@ export class PlaybackEngine {
     this.chunks.clear();
     this.stopMedia();
     this.current = null;
+    this.levelRef = null;
+    this.timingsFor = -1;
     this.slowNoted = false;
     if (wasPlaying) void this.play();
     else this.emit();
@@ -183,10 +210,11 @@ export class PlaybackEngine {
     }
     const token = ++this.token;
     this.stopMedia();
-    const pending = !this.chunks.has(this.index);
+    const passage = this.passageOf[this.index];
+    const pending = !this.chunks.has(passage);
     if (pending) {
-      // Nothing plays until this sentence's audio exists: `playing` stays as it was
-      // (false from a cold start, true between sentences) and the clock is frozen so
+      // Nothing plays until this passage's audio exists: `playing` stays as it was
+      // (false from a cold start, true between passages) and the clock is frozen so
       // the wait is not counted as listening time.
       this.loading = true;
       cancelAnimationFrame(this.raf);
@@ -194,7 +222,7 @@ export class PlaybackEngine {
     }
     let chunk: Chunk;
     try {
-      chunk = await this.ensureChunk(this.index);
+      chunk = await this.ensureChunk(passage);
     } catch (e) {
       if (token !== this.token) return;
       this.loading = false;
@@ -208,7 +236,7 @@ export class PlaybackEngine {
     this.loading = false;
     this.playing = true;
     this.current = chunk;
-    if (chunk.duration > 0) this.durations[this.index] = chunk.duration;
+    this.timingsFor = -1;
     this.prefetch();
     this.startChunk(chunk, token);
     this.last = now();
@@ -290,15 +318,15 @@ export class PlaybackEngine {
   }
 
   /**
-   * Render every sentence into the cache, from the current one to the end and then
+   * Render every passage into the cache, from the current one to the end and then
    * from the start, so a slow engine never stalls playback. Safe alongside playback:
    * both share the chunk promises and the provider's request queue.
    */
   async prepare(onProgress?: (done: number, total: number) => void, signal?: AbortSignal): Promise<void> {
     const doc = this.doc;
     if (!doc) return;
-    const n = doc.sentences.length;
-    const start = this.index;
+    const n = this.passageList.length;
+    const start = this.passageOf[this.index] ?? 0;
     for (let k = 0; k < n; k++) {
       if (signal?.aborted || this.doc !== doc) return;
       await this.ensureChunk((start + k) % n).catch(() => {});
@@ -306,14 +334,14 @@ export class PlaybackEngine {
     }
   }
 
-  /** Fetch every chunk (for download). Resolves to the audio blobs in order, or null when a sentence has no audio. */
+  /** Fetch every passage (for download). Resolves to the audio blobs in order, or null when a passage has no audio. */
   async collectAudio(onProgress?: (done: number, total: number) => void): Promise<(Blob | null)[]> {
     if (!this.doc) return [];
     const out: (Blob | null)[] = [];
-    for (let i = 0; i < this.doc.sentences.length; i++) {
+    for (let i = 0; i < this.passageList.length; i++) {
       const c = await this.ensureChunk(i);
       out.push(c.audio ?? null);
-      onProgress?.(i + 1, this.doc.sentences.length);
+      onProgress?.(i + 1, this.passageList.length);
     }
     return out;
   }
@@ -324,18 +352,43 @@ export class PlaybackEngine {
     return this.durations.reduce((a, b) => a + b, 0);
   }
 
-  private ensureChunk(i: number): Promise<Chunk> {
+  private passageAt(sentence: number): Passage {
+    return this.passageList[this.passageOf[sentence]];
+  }
+
+  /** Where a sentence starts inside its passage's clip, in seconds. */
+  private clipStart(chunk: Chunk, sentence: number): number {
+    return chunk.starts?.[sentence - this.passageAt(sentence).start] ?? 0;
+  }
+
+  /** Per-sentence durations from a passage clip's sentence starts (a one-sentence passage is the whole clip). */
+  private applyDurations(passage: Passage, c: Chunk) {
+    if (!(c.duration > 0)) return;
+    const n = passage.end - passage.start;
+    const starts = c.starts && c.starts.length === n ? c.starts : null;
+    if (!starts) {
+      if (n === 1) this.durations[passage.start] = c.duration;
+      return;
+    }
+    for (let k = 0; k < n; k++) {
+      const d = (k + 1 < n ? starts[k + 1] : c.duration) - starts[k];
+      if (d > 0) this.durations[passage.start + k] = d;
+    }
+  }
+
+  private ensureChunk(passage: number): Promise<Chunk> {
     const doc = this.doc!;
-    let p = this.chunks.get(i);
+    let p = this.chunks.get(passage);
     if (!p) {
-      const s = doc.sentences[i];
+      const g = this.passageList[passage];
       p = synthesize({
-        text: s.text,
+        text: g.text,
         voice: doc.voice,
         engine: this.opts.engine(doc.voice),
         profile: this.opts.isProfileVoice(doc.voice),
         wordTimings: this.opts.wordTimings(),
-        words: s.words,
+        words: g.parts.flat(),
+        parts: g.parts,
         forceLocal: this.opts.offline() || doc.voice === "local" || this.opts.engine(doc.voice) === LOCAL_ENGINE,
         fallbackLocal: false,
         onOffline: this.opts.onOffline,
@@ -343,15 +396,46 @@ export class PlaybackEngine {
         onRejected: this.opts.onRejected,
       }).then((c) => {
         if (this.doc === doc) {
-          if (c.duration > 0) this.durations[i] = c.duration;
+          this.applyDurations(g, c);
           this.noteSpeed(c);
+          // Progress bar and ticks follow the measured clip, also while paused or preparing.
+          if (!this.playing) this.emit();
         }
         return c;
       });
-      this.chunks.set(i, p);
-      p.catch(() => this.chunks.delete(i));
+      this.chunks.set(passage, p);
+      p.catch(() => this.chunks.delete(passage));
     }
     return p;
+  }
+
+  /**
+   * Level matching: each voice generation lands at a slightly different loudness.
+   * The element can only turn a clip down, so every passage is brought down to the
+   * quietest one heard so far (within MIN_GAIN), which keeps joins from popping.
+   */
+  private gainFor(chunk: Chunk): number {
+    if (chunk.loudness === undefined || !Number.isFinite(chunk.loudness)) return 1;
+    this.levelRef = this.levelRef === null ? chunk.loudness : Math.min(this.levelRef, chunk.loudness);
+    return Math.max(MIN_GAIN, Math.min(1, 10 ** ((this.levelRef - chunk.loudness) / 20)));
+  }
+
+  /** The current sentence's word timings, relative to the sentence's start in the clip. */
+  private sentenceTimings(): WordTiming[] | undefined {
+    if (this.timingsFor === this.index) return this.timings;
+    this.timingsFor = this.index;
+    this.timings = undefined;
+    const c = this.current;
+    if (!c?.words?.length) return undefined;
+    const g = this.passageAt(this.index);
+    let from = 0;
+    for (let k = g.start; k < this.index; k++) from += g.parts[k - g.start].length;
+    const n = g.parts[this.index - g.start].length;
+    const base = this.clipStart(c, this.index);
+    const slice = c.words.slice(from, from + n);
+    if (slice.length !== n) return undefined;
+    this.timings = slice.map((w) => ({ start: w.start - base, end: w.end - base }));
+    return this.timings;
   }
 
   private noteSpeed(c: Chunk) {
@@ -364,9 +448,10 @@ export class PlaybackEngine {
 
   private prefetch() {
     if (!this.doc) return;
+    const from = this.passageOf[this.index];
     for (let k = 1; k <= PREFETCH; k++) {
-      const i = this.index + k;
-      if (i < this.doc.sentences.length) void this.ensureChunk(i).catch(() => {});
+      const i = from + k;
+      if (i < this.passageList.length) void this.ensureChunk(i).catch(() => {});
     }
   }
 
@@ -383,16 +468,21 @@ export class PlaybackEngine {
     this.audioUrl = url;
     a.preload = "auto";
     a.playbackRate = this.speed;
+    a.volume = this.gainFor(chunk);
+    const passage = this.passageAt(this.index);
+    let at = this.clipStart(chunk, this.index) + this.offset;
+    // From the top of a clip, skip the encoder's leading silence so passages join without a dead gap.
+    if (this.index === passage.start && this.offset === 0 && chunk.lead) at = Math.max(0, chunk.lead - 0.05);
     a.onloadedmetadata = () => {
       if (token !== this.token) return;
-      if (Number.isFinite(a.duration) && a.duration > 0) this.durations[this.index] = a.duration;
-      if (this.offset > 0) a.currentTime = Math.min(this.offset, a.duration - 0.05);
+      if (passage.end - passage.start === 1 && Number.isFinite(a.duration) && a.duration > 0) this.durations[this.index] = a.duration;
+      if (at > 0) a.currentTime = Math.min(at, a.duration - 0.05);
     };
     a.onended = () => {
-      if (token === this.token) this.advance();
+      if (token === this.token) this.finishPassage();
     };
     a.onerror = () => {
-      if (token === this.token) this.advance();
+      if (token === this.token) this.finishPassage();
     };
     a.play().catch((e: Error) => {
       if (token !== this.token) return;
@@ -476,7 +566,21 @@ export class PlaybackEngine {
     this.last = t;
     const dur = this.durations[this.index] || 0.01;
     if (this.audio && !this.audio.paused && this.audio.readyState >= 2) {
-      this.offset = this.audio.currentTime;
+      const t = this.audio.currentTime;
+      const c = this.current!;
+      const g = this.passageAt(this.index);
+      // Crossing into the next sentence of the same clip: move the reader, leave the audio alone.
+      while (this.index + 1 < g.end && c.starts && t >= c.starts[this.index + 1 - g.start]) {
+        this.index++;
+        this.wordIndex = -1;
+        this.persistSoon();
+      }
+      this.offset = Math.max(0, t - this.clipStart(c, this.index));
+      // Trailing silence: hand over to the next passage once the voice has finished.
+      if (c.tail && c.tail > TAIL_KEEP && t >= c.duration - c.tail + TAIL_KEEP) {
+        this.finishPassage();
+        return;
+      }
     } else if (!this.utter) {
       this.offset += dt * this.speed;
     } else {
@@ -489,7 +593,7 @@ export class PlaybackEngine {
       return;
     }
     const s = this.doc.sentences[this.index];
-    const w = this.wordFromOffset(this.offset, s.words.length, this.current?.words);
+    const w = this.wordFromOffset(this.offset, s.words.length, this.sentenceTimings());
     if (!this.utter || w > this.wordIndex) this.wordIndex = w;
     this.emit();
     this.raf = requestAnimationFrame(this.loop);
@@ -504,6 +608,13 @@ export class PlaybackEngine {
     }
     const dur = this.durations[this.index] || estimateDuration(n);
     return Math.max(0, Math.min(n - 1, Math.floor((offset / dur) * n)));
+  }
+
+  /** The clip is over: whatever the sentence clock says, the passage's last sentence has been read. */
+  private finishPassage() {
+    if (!this.doc) return;
+    this.index = Math.max(this.index, this.passageAt(this.index).end - 1);
+    this.advance();
   }
 
   private advance() {

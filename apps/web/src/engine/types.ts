@@ -16,8 +16,15 @@ export interface Chunk {
   mime?: string;
   /** Duration in seconds at 1× */
   duration: number;
-  /** Word timings at 1×, when the provider has them */
+  /** Word timings at 1×, when the provider has them (clip time, across every sentence in the clip) */
   words?: WordTiming[];
+  /** Where each sentence of the passage starts inside the clip, in seconds; `starts[0]` is 0. Absent for one-sentence clips. */
+  starts?: number[];
+  /** Silence before the first and after the last voiced frame, in seconds. */
+  lead?: number;
+  tail?: number;
+  /** RMS level of the voiced frames in dBFS, for level matching between clips. */
+  loudness?: number;
   /** Reported by the provider for a new generation; never reused from cache. */
   tokens?: TokenUsage;
   /** Wall-clock seconds the server took to generate this chunk (new generations only, queue wait excluded). */

@@ -105,7 +105,7 @@ export function SettingsPage() {
             <RowItem label="Auto-play on share" hint="When text arrives from the share sheet, open the Reader already playing.">
               <Switch checked={s.autoplayShare} onChange={(v) => s.set("autoplayShare", v)} label="Auto-play on share" />
             </RowItem>
-            <RowItem label="Word timings from the server" hint="Asks the speech server to time each word after a sentence is synthesized. One extra request per sentence; off keeps the estimate." last>
+            <RowItem label="Word timings from the server" hint="Asks the speech server to time each word after a passage is synthesized. One extra request per passage; off keeps the estimate." last>
               <Switch checked={s.wordTimings} onChange={(v) => s.set("wordTimings", v)} label="Word timings from the server" disabled={!hasApi()} />
             </RowItem>
           </div>

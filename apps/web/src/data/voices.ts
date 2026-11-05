@@ -78,6 +78,12 @@ export const OPENAI_VOICES: Voice[] = [
 const READ_AS_WRITTEN = "Read the text exactly as written: change pronunciation, rhythm and intonation only, never add or swap words.";
 
 /**
+ * Sent with every gpt-4o-mini-tts request. Each passage is a separate generation,
+ * so the model is told to hold one delivery rather than re-interpret the mood per request.
+ */
+export const STEADY_NARRATION = `Narrate as one continuous reading: keep the same calm tone, pace, pitch and volume from the first word to the last, as if this were the next part of a longer recording. ${READ_AS_WRITTEN}`;
+
+/**
  * Regional accent voices: an OpenAI voice steered by gpt-4o-mini-tts `instructions`.
  * Ids are ours (`<base>~<accent>`), so each accent gets its own cache entries.
  */

@@ -91,7 +91,7 @@ export const engine = new PlaybackEngine({
   onUnavailable: (m) => usePlayer.setState({ speechError: m }),
   onSlow: (factor) => {
     const name = getVoice(usePlayer.getState().voiceId).name;
-    toast(`${name} takes ~${factor}× longer to generate than to play on this server, so reading pauses between sentences. Choose “Prepare audio” in the player menu, or a faster voice.`, 8000);
+    toast(`${name} takes ~${factor}× longer to generate than to play on this server, so reading pauses between passages. Choose “Prepare audio” in the player menu, or a faster voice.`, 8000);
   },
 });
 
@@ -188,10 +188,9 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       if (prerendering || !doc) return;
       const controller = new AbortController();
       prerendering = controller;
-      const total = doc.sentences.length;
-      set({ prerendering: { done: 0, total } });
+      set({ prerendering: { done: 0, total: engine.passages.length } });
       try {
-        await engine.prepare((done) => { if (prerendering === controller) set({ prerendering: { done, total } }); }, controller.signal);
+        await engine.prepare((done, total) => { if (prerendering === controller) set({ prerendering: { done, total } }); }, controller.signal);
         if (!controller.signal.aborted && get().doc === doc) toast("Audio prepared — playback no longer waits on the server");
       } finally {
         if (prerendering === controller) {

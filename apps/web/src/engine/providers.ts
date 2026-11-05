@@ -2,11 +2,11 @@ import { audioCache } from "../lib/db";
 import { hash } from "../lib/hash";
 import { estimateDuration, splitWords } from "../lib/segment";
 import { addUsage, isTokenSpeechModel } from "../lib/usage";
-import { measureDuration } from "./audio";
+import { analyzeClip, measureDuration, proportionalStarts } from "./audio";
 import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
-import { OPENAI_ACCENTS } from "../data/voices";
+import { OPENAI_ACCENTS, STEADY_NARRATION } from "../data/voices";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
@@ -83,11 +83,14 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
   }
   const accent = req.engine === OPENAI_ENGINE ? OPENAI_ACCENTS[req.voice] : undefined;
   const model = req.engine === OPENAI_ENGINE ? OPENAI_MODEL : req.profile || OPENAI_ALIAS.test(req.voice) ? "tts-1" : req.engine;
-  const streamUsage = req.engine === OPENAI_ENGINE && isTokenSpeechModel(model);
+  const steerable = req.engine === OPENAI_ENGINE && isTokenSpeechModel(model);
+  const streamUsage = steerable;
+  // Only gpt-4o-mini-tts follows `instructions`; an accent voice adds its own on top of the steady delivery.
+  const instructions = steerable ? (accent ? `${accent.instructions} ${STEADY_NARRATION}` : STEADY_NARRATION) : accent?.instructions;
   const r = await doFetch(`${base}/v1/audio/speech`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: streamUsage ? "text/event-stream, audio/mpeg" : "audio/mpeg, audio/*" },
-    body: JSON.stringify({ model, input: req.text, voice: accent?.voice ?? req.voice, instructions: accent?.instructions, response_format: "mp3", speed: 1, ...(streamUsage ? { stream_format: "sse" } : {}) }),
+    body: JSON.stringify({ model, input: req.text, voice: accent?.voice ?? req.voice, instructions, response_format: "mp3", speed: 1, ...(streamUsage ? { stream_format: "sse" } : {}) }),
     signal: req.signal,
   });
   const streamed = r.headers.get("content-type")?.includes("text/event-stream") ? await readSpeechStream(r) : null;
@@ -224,7 +227,7 @@ export async function fromCache(req: TtsRequest): Promise<Chunk | null> {
   try {
     const rec = await audioCache.get(cacheKey(req));
     if (!rec) return null;
-    return { source: "cache", audio: rec.blob, mime: rec.mime, duration: rec.duration, words: rec.words };
+    return { source: "cache", audio: rec.blob, mime: rec.mime, duration: rec.duration, words: rec.words, starts: rec.starts, lead: rec.lead, tail: rec.tail, loudness: rec.loudness };
   } catch {
     return null;
   }
@@ -233,23 +236,71 @@ export async function fromCache(req: TtsRequest): Promise<Chunk | null> {
 export async function toCache(req: TtsRequest, chunk: Chunk) {
   if (!chunk.audio) return;
   try {
-    await audioCache.put({ key: cacheKey(req), blob: chunk.audio, mime: chunk.mime ?? "audio/mpeg", duration: chunk.duration, words: chunk.words, createdAt: Date.now() });
+    await audioCache.put({
+      key: cacheKey(req), blob: chunk.audio, mime: chunk.mime ?? "audio/mpeg", duration: chunk.duration, words: chunk.words,
+      starts: chunk.starts, lead: chunk.lead, tail: chunk.tail, loudness: chunk.loudness, createdAt: Date.now(),
+    });
   } catch {
     /* quota or private mode: ignore */
   }
 }
 
-/** Local voice: the browser's speech engine (or pure timing when there is none). */
-export function localChunk(text: string): Chunk {
+/** Local voice: the browser's speech engine (or pure timing when there is none). Spoken sentence by sentence, so each part keeps its own estimate. */
+export function localChunk(text: string, parts?: string[][]): Chunk {
   const supported = typeof window !== "undefined" && "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
-  return { source: supported ? "local" : "estimate", duration: estimateDuration(splitWords(text)) };
+  const source = supported ? "local" : "estimate";
+  if (!parts || parts.length <= 1) return { source, duration: estimateDuration(splitWords(text)) };
+  const starts: number[] = [];
+  let acc = 0;
+  for (const words of parts) {
+    starts.push(acc);
+    acc += estimateDuration(words);
+  }
+  return { source, duration: acc, starts };
+}
+
+/** Sentence starts from word timings: the first word of each sentence, a hair early so the highlight leads the voice. */
+export function startsFromWords(words: WordTiming[], parts: string[][]): number[] | null {
+  const starts = [0];
+  let i = 0;
+  for (let k = 0; k < parts.length - 1; k++) {
+    i += parts[k].length;
+    const w = words[i];
+    if (!w) return null;
+    starts.push(Math.max(starts[k], w.start - 0.03));
+  }
+  return starts;
+}
+
+/**
+ * A passage clip plays as one file while the reader follows sentence by sentence,
+ * so playback needs each sentence's start inside the clip, plus the clip's level
+ * and edge silences for joining it to its neighbours. Clips written before this
+ * existed carry none of it and are inspected on the way out of the cache.
+ */
+async function locateSentences(chunk: Chunk, parts: string[][] | undefined): Promise<Chunk> {
+  if (!chunk.audio) return chunk;
+  const partWords = parts?.map((p) => p.length) ?? [];
+  const multi = partWords.length > 1;
+  const fromWords = multi && chunk.words && parts ? startsFromWords(chunk.words, parts) : null;
+  if (fromWords) chunk.starts = fromWords;
+  if (chunk.loudness !== undefined && (!multi || chunk.starts)) return chunk;
+  const a = await analyzeClip(chunk.audio, chunk.duration, multi ? partWords : [1]);
+  if (a.duration > 0) chunk.duration = a.duration;
+  chunk.lead = a.lead;
+  chunk.tail = a.tail;
+  chunk.loudness = a.loudness;
+  if (multi && !chunk.starts) chunk.starts = a.starts.length === partWords.length ? a.starts : proportionalStarts(chunk.duration, partWords);
+  return chunk;
 }
 
 export interface SynthOptions extends TtsRequest {
-  /** Phase 4: ask the server for word timings after synthesis (one extra request per sentence) */
+  /** Phase 4: ask the server for word timings after synthesis (one extra request per passage) */
   wordTimings?: boolean;
-  /** The sentence's words, for alignment */
+  /** Every word of the text, in order, for alignment */
   words?: string[];
+  /** The words of each sentence in the text, when it holds more than one; playback follows them inside the clip */
+  parts?: string[][];
   /** Cloned profile voice (sent with the active-engine alias) */
   profile?: boolean;
   /**
@@ -266,9 +317,9 @@ export interface SynthOptions extends TtsRequest {
 
 /** Cache → API → local fallback. */
 export async function synthesize(opts: SynthOptions): Promise<Chunk> {
-  if (opts.forceLocal || opts.engine === LOCAL_ENGINE) return localChunk(opts.text);
+  if (opts.forceLocal || opts.engine === LOCAL_ENGINE) return localChunk(opts.text, opts.parts);
   const cached = await fromCache(opts);
-  if (cached) return cached;
+  if (cached) return locateSentences(cached, opts.parts);
   try {
     const chunk = await apiSynthesize(opts);
     opts.onOnline?.();
@@ -280,6 +331,7 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
         /* timings are optional: keep the estimate */
       }
     }
+    await locateSentences(chunk, opts.parts);
     void toCache(opts, chunk);
     return chunk;
   } catch (e) {
@@ -287,8 +339,8 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
     if (opts.fallbackLocal === false && baseFor(opts.engine)) throw e;
     if (e instanceof ApiUnreachable) opts.onOffline?.();
     else if (e instanceof ApiRejected) opts.onRejected?.(e.message);
-    else if (e instanceof ApiBusy) opts.onRejected?.("The speech server is busy; this sentence uses the browser voice");
-    return localChunk(opts.text);
+    else if (e instanceof ApiBusy) opts.onRejected?.("The speech server is busy; this passage uses the browser voice");
+    return localChunk(opts.text, opts.parts);
   }
 }
 
@@ -299,7 +351,7 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
 export async function fetchWordTimings(audio: Blob, words: string[], signal?: AbortSignal): Promise<WordTiming[] | null> {
   if (!hasApi() || API_KIND !== "openai" || !words.length) return null;
   const form = new FormData();
-  form.append("file", audio, "sentence.mp3");
+  form.append("file", audio, "passage.mp3");
   form.append("model", "whisper-1");
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "word");
@@ -311,7 +363,7 @@ export async function fetchWordTimings(audio: Blob, words: string[], signal?: Ab
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
-/** Align transcript words to the sentence's words. Exact count match or a clean token match wins; anything else is rejected. */
+/** Align transcript words to the text's words. Exact count match or a clean token match wins; anything else is rejected. */
 export function alignWords(got: { word: string; start: number; end: number }[], words: string[]): WordTiming[] | null {
   if (!got.length) return null;
   if (got.length === words.length) return got.map((w) => ({ start: w.start, end: w.end }));

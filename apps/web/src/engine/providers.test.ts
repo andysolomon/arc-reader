@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiRejected, ApiUnreachable } from "./types";
-import { apiSynthesize, openaiSpeechSynthesize, synthesize, cacheKey } from "./providers";
+import { apiSynthesize, openaiSpeechSynthesize, synthesize, cacheKey, localChunk, startsFromWords } from "./providers";
 import { addUsage } from "../lib/usage";
 import { audioCache } from "../lib/db";
 
@@ -141,13 +141,29 @@ describe("OpenAI engine routing", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-4o-mini-tts", voice: "nova" });
   });
 
-  it("sends accent voices as their base voice with accent instructions", async () => {
+  it("asks gpt-4o-mini-tts for one steady delivery on every request", async () => {
+    const { openaiSpeechSynthesize } = await import("./providers");
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    await openaiSpeechSynthesize({ text: "x", voice: "sage", engine: "openai" });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body.instructions).toMatch(/same calm tone, pace, pitch and volume/);
+    expect(body.instructions).toMatch(/exactly as written/);
+  });
+
+  it("sends accent voices as their base voice with accent instructions ahead of the steady delivery", async () => {
     const { openaiSpeechSynthesize } = await import("./providers");
     fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
     await openaiSpeechSynthesize({ text: "x", voice: "coral~georgia", engine: "openai" });
     const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
     expect(body).toMatchObject({ model: "gpt-4o-mini-tts", voice: "coral" });
-    expect(body.instructions).toMatch(/Georgia Southern accent/);
+    expect(body.instructions).toMatch(/Georgia Southern accent.*same calm tone/);
+  });
+
+  it("leaves VoiceStudio and tts-1 requests without instructions", async () => {
+    const { openaiSpeechSynthesize } = await import("./providers");
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    await openaiSpeechSynthesize({ text: "x", voice: "expr-voice-2-f", engine: "kittentts" });
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).not.toHaveProperty("instructions");
   });
 
   it("does not queue OpenAI requests behind VoiceStudio ones", async () => {
@@ -207,5 +223,44 @@ describe("generation accounting", () => {
     await synthesize(req);
     await synthesize(req);
     expect(addUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("passage clips", () => {
+  it("a local passage speaks sentence by sentence, each with its own estimate", () => {
+    const c = localChunk("a b. c d e.", [["a", "b."], ["c", "d", "e."]]);
+    expect(c.starts).toEqual([0, (2 + 1.2) / 2.83]);
+    expect(c.duration).toBeCloseTo((2 + 1.2) / 2.83 + (3 + 1.2) / 2.83);
+    expect(localChunk("a b.").starts).toBeUndefined();
+  });
+
+  it("derives sentence starts from word timings, a hair ahead of the first word", () => {
+    const words = [{ start: 0.1, end: 0.4 }, { start: 0.5, end: 0.9 }, { start: 1.6, end: 2.0 }, { start: 2.1, end: 2.4 }];
+    expect(startsFromWords(words, [["a", "b"], ["c", "d"]])).toEqual([0, 1.57]);
+    expect(startsFromWords(words.slice(0, 2), [["a", "b"], ["c", "d"]])).toBeNull();
+  });
+
+  it("stores and replays sentence starts with the cached clip, and shares a one-sentence clip without them", async () => {
+    const fetchMock = vi.fn(async () => new Response(new Blob([new Uint8Array(64)], { type: "audio/mpeg" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const put = vi.mocked(audioCache.put);
+    put.mockClear();
+    const parts = [["One", "two."], ["Three", "four", "five", "six."]];
+    const c = await synthesize({ text: "One two. Three four five six.", voice: "v", engine: "kittentts", parts, words: parts.flat() });
+    // No decoder under jsdom: word-share estimate over the estimated duration.
+    expect(c.starts).toHaveLength(2);
+    expect(c.starts![0]).toBe(0);
+    expect(c.starts![1]).toBeCloseTo(c.duration * (2 / 6));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0][0]).toMatchObject({ starts: c.starts });
+
+    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: "k", blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 3, starts: [0, 1.2], loudness: -20, createdAt: 0 });
+    const cached = await synthesize({ text: "One two. Three four five six.", voice: "v", engine: "kittentts", parts });
+    expect(cached).toMatchObject({ source: "cache", starts: [0, 1.2], loudness: -20 });
+
+    const single = await synthesize({ text: "Only one.", voice: "v", engine: "kittentts", parts: [["Only", "one."]] });
+    expect(single.starts).toBeUndefined();
+    vi.unstubAllGlobals();
   });
 });

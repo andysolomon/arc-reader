@@ -20,7 +20,7 @@ export interface Settings {
   autoplayShare: boolean;
   /** TTS engine id from the speech server, or "local" for the browser voice */
   engine: EngineId;
-  /** Phase 4: derive word timings from the server's transcription endpoint (extra request per sentence) */
+  /** Phase 4: derive word timings from the server's transcription endpoint (extra request per passage) */
   wordTimings: boolean;
   fontSize: number;
   wide: boolean;
