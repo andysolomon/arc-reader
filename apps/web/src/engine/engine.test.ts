@@ -22,11 +22,12 @@ const paraDoc = (sizes: number[]): EngineDoc => {
 const chunk = (extra: Partial<Chunk> = {}): Chunk => ({ source: "api", audio: new Blob([new Uint8Array(4)]), duration: 2, ...extra });
 
 function make(onSlow = vi.fn(), onUnavailable = vi.fn(), engineId = "omnivoice") {
+  const onPersist = vi.fn();
   const e = new PlaybackEngine({
     engine: () => engineId, wordTimings: () => false, isProfileVoice: () => true, offline: () => false,
-    onRejected: () => {}, onOffline: () => {}, onOnline: () => {}, onPersist: () => {}, onError: () => {}, onSlow, onUnavailable,
+    onRejected: () => {}, onOffline: () => {}, onOnline: () => {}, onPersist, onError: () => {}, onSlow, onUnavailable,
   });
-  return { e, onSlow, onUnavailable };
+  return { e, onSlow, onUnavailable, onPersist };
 }
 
 function deferred<T>() {
@@ -67,6 +68,15 @@ describe("prepare", () => {
     await swap;
     expect(synth).toHaveBeenCalledTimes(1);
   });
+});
+
+it("saves the current reading position immediately on pause, before navigation can unload the page", () => {
+  const { e, onPersist } = make();
+  e.load(doc(3));
+  e.seek(1, false);
+  e.pause();
+  expect(onPersist).toHaveBeenCalledWith(expect.objectContaining({ index: 1 }));
+  expect(onPersist.mock.calls[0][0].fraction).toBeCloseTo(1 / 3);
 });
 
 describe("passages", () => {
