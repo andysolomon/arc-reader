@@ -204,3 +204,27 @@ test("selects filtered documents and offers explicit paid voice preparation", as
   const library = page.locator('[data-screen="library"]');
   expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
+
+test("the player only offers voices with prepared audio for the open document", async ({ page }) => {
+  await seedLibrary(page, [null]);
+  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await page.getByRole("button", { name: "Prepare selected" }).click();
+  const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
+  await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
+  await dialog.getByRole("button", { name: "Prepare 2 readings" }).click();
+  await expect(page.getByRole("img", { name: "Jasper: 100% prepared", exact: true })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "First document", exact: true }).click();
+  await page.waitForURL(/\/read\//);
+  await page.getByRole("button", { name: "More" }).first().click();
+  await page.getByRole("menuitem", { name: "Change voice for this document" }).click();
+  await expect(page.getByText("Choosing a prepared voice for “First document”.", { exact: false })).toBeVisible();
+  await expect(page.locator('[data-voice="expr-voice-2-f"]')).toContainText("Selected");
+  await expect(page.locator('[data-voice="expr-voice-2-m"]')).toBeVisible();
+  await expect(page.locator("[data-voice]")).toHaveCount(2);
+  await expect(page.getByRole("status").filter({ hasText: "2 voices" })).toBeVisible();
+  // Re-voicing from the Library still offers the whole catalogue.
+  await page.goto("/library");
+  await page.getByRole("button", { name: "Re-voice" }).first().click();
+  await expect(page.getByText("Choosing a voice for “First document”.", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-voice="alloy"]')).toBeVisible();
+});
