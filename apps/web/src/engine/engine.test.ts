@@ -37,7 +37,8 @@ function deferred<T>() {
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-beforeEach(() => synth.mockReset());
+// A block body: a function returned from beforeEach would run as a cleanup hook.
+beforeEach(() => { synth.mockReset(); });
 
 describe("prepare", () => {
   it("submits the entire document to the server before downloading its clips", async () => {
@@ -225,10 +226,6 @@ describe("prefetch", () => {
     return synth.mock.calls.map((c) => c[0].text);
   };
 
-  it("keeps two passages ahead on a local server", async () => {
-    expect(await ahead("omnivoice")).toEqual(["s0", "s1", "s2"]);
-  });
-
   it("keeps one passage ahead on a paid engine, so a pause or skip bills less unheard audio", async () => {
     expect(await ahead("openai")).toEqual(["s0", "s1"]);
     synth.mockReset();
@@ -241,5 +238,76 @@ describe("prefetch", () => {
     e.load(paraDoc([2]));
     await e.play();
     expect(synth.mock.calls[0][0]).toMatchObject({ text: "p0s0. p0s1.", sentences: ["p0s0.", "p0s1."] });
+  });
+
+  /** Answers every request once the test lets it, so the refill order is observable. */
+  function controlled() {
+    const pending: { text: string; resolve: (c: Chunk) => void; reject: (e: unknown) => void }[] = [];
+    synth.mockImplementation((req) => new Promise<Chunk>((resolve, reject) => pending.push({ text: req.text, resolve, reject })));
+    return pending;
+  }
+  const estimate = (duration: number) => chunk({ source: "estimate", audio: undefined, duration });
+
+  it("keeps about a minute of listening ahead, two requests at a time, not a fixed two passages", async () => {
+    const pending = controlled();
+    const { e } = make();
+    e.load(doc(30));
+    const play = e.play();
+    pending.shift()!.resolve(estimate(10));
+    await play;
+    // The first two prefetches go out together.
+    expect(pending.map((p) => p.text)).toEqual(["s1", "s2"]);
+    while (pending.length) {
+      pending.shift()!.resolve(estimate(10));
+      await tick();
+      expect(pending.length).toBeLessThanOrEqual(2);
+    }
+    // Ten-second passages: six cover a minute; the refill may run one past while a duration is still an estimate.
+    const requested = synth.mock.calls.length - 1;
+    expect(requested).toBeGreaterThanOrEqual(6);
+    expect(requested).toBeLessThanOrEqual(7);
+  });
+
+  it("covers a minute at the current speed, so faster playback reads further ahead", async () => {
+    const pending = controlled();
+    const { e } = make();
+    e.load(doc(30));
+    e.setSpeed(2);
+    const play = e.play();
+    pending.shift()!.resolve(estimate(10));
+    await play;
+    while (pending.length) {
+      pending.shift()!.resolve(estimate(10));
+      await tick();
+    }
+    expect(synth.mock.calls.length - 1).toBeGreaterThanOrEqual(12);
+  });
+
+  it("stops refilling when a request fails instead of retrying in a loop", async () => {
+    const pending = controlled();
+    const { e } = make();
+    e.load(doc(30));
+    const play = e.play();
+    pending.shift()!.resolve(estimate(10));
+    await play;
+    pending.shift()!.reject(new ApiUnreachable());
+    pending.shift()!.reject(new ApiUnreachable());
+    await tick();
+    expect(pending).toHaveLength(0);
+    expect(synth).toHaveBeenCalledTimes(3);
+  });
+
+  it("drops a previous document's refill after a load", async () => {
+    const pending = controlled();
+    const { e } = make();
+    e.load(doc(30));
+    const play = e.play();
+    pending.shift()!.resolve(estimate(10));
+    await play;
+    const stale = pending.splice(0);
+    e.load(doc(3));
+    for (const p of stale) p.resolve(estimate(10));
+    await tick();
+    expect(pending).toHaveLength(0);
   });
 });

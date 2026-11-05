@@ -190,7 +190,7 @@ const rawSynthesize = (req: TtsRequest & { profile?: boolean }) => {
 
 /**
  * VoiceStudio runs one CPU worker and queues at most one more request; a third
- * concurrent request is refused with 429. The engine prefetches two passages
+ * concurrent request is refused with 429. The engine prefetches up to a minute
  * ahead, so speech requests are serialized here (one in flight) and a 429 from
  * another client is retried with backoff instead of falling back to the local voice.
  */

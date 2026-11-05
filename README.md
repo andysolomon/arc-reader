@@ -31,7 +31,7 @@ Copy `apps/web/.env.example` to `.env` to point the app at a TTS backend.
 
 ## Playback engine (`apps/web/src/engine`)
 
-- One audio clip per passage (a paragraph, or up to about 60 words of one); the next two are prefetched, or only the next one for OpenAI and Fish, which keep up and bill audio a pause or skip never plays. The reader still moves sentence by sentence: each clip's sentence starts are located from its pauses (or from word timings when enabled), clips are level-matched and their edge silences trimmed at the joins. One request per sentence made generative voices shift tone at every sentence; see `planPassages` in `src/lib/segment.ts`.
+- One audio clip per passage (a paragraph, or up to about 60 words of one); about a minute of listening ahead is prefetched (at least two passages, at most two requests at a time), so long paragraphs bank time for runs of short ones; OpenAI and Fish prefetch only the next passage, since they keep up and bill audio a pause or skip never plays. The reader still moves sentence by sentence: each clip's sentence starts are located from its pauses (or from word timings when enabled), clips are level-matched and their edge silences trimmed at the joins. One request per sentence made generative voices shift tone at every sentence; see `planPassages` in `src/lib/segment.ts`.
 - Advances with `requestAnimationFrame` on real elapsed time. With audio, `audio.currentTime` is the clock. Without provider timestamps, word timing is estimated at 2.83 words/s × speed.
 - Chunks are cached in IndexedDB (`audio` store, keyed by engine + voice + text) so documents replay offline. Positions persist per document (`positions` store) and drive the Library progress rings.
 - Provider chain: cache → speech server → browser voice. When the server is unreachable, a banner appears and the browser speech engine reads instead.
@@ -77,7 +77,7 @@ Measured on this laptop (Intel i7, 12 threads, CPU only, KittenTTS warm; the fir
 | "I went to the woods because I wished to live deliberately." | 11 | 1.2 s | 240 KB (WAV) |
 | "The quick brown fox … begin to call." | 22 | 2.3 s | 156 KB |
 
-Generation runs at roughly 3–4× real time, so the two-passage prefetch keeps up once playback starts (the numbers above are per sentence; a passage request is a few sentences long). MP3 is the cheapest format; WAV and PCM save nothing on latency. Saved profiles require an active cloning engine; ReadAloud checks this before requesting speech and reports an explicit browser fallback if it is unavailable. KittenTTS cannot clone. Re-measure with `apps/web/scripts/measure-tts.sh`:
+Generation runs at roughly 3–4× real time, so the prefetch keeps up once playback starts (the numbers above are per sentence; a passage request is a few sentences long). MP3 is the cheapest format; WAV and PCM save nothing on latency. Saved profiles require an active cloning engine; ReadAloud checks this before requesting speech and reports an explicit browser fallback if it is unavailable. KittenTTS cannot clone. Re-measure with `apps/web/scripts/measure-tts.sh`:
 
 ```sh
 VOICESTUDIO_API_KEY=… apps/web/scripts/measure-tts.sh   # three runs, first-byte and total time; or reads apps/web/.env.local

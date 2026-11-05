@@ -66,8 +66,11 @@ export function unavailableMessage(e: unknown): string {
   return (e as Error)?.message || "Could not prepare audio.";
 }
 
-/** Passages generated ahead of the one playing: two for slow servers, one for paid engines, which are quick and bill audio that a pause or skip never plays. */
-const PREFETCH = 2;
+/** Listening time (seconds at the current speed) kept generated past the current passage. */
+const PREFETCH_SECONDS = 60;
+/** Passages always kept ahead however long they are, and the most prefetch requests outstanding at once. */
+const PREFETCH_PASSAGES = 2;
+/** Paid engines keep up and bill audio that a pause or skip never plays: just the next passage. */
 const PAID_PREFETCH = 1;
 /** Render time ÷ audio time above which a voice cannot keep up with playback. */
 export const SLOW_FACTOR = 1.5;
@@ -80,7 +83,7 @@ const now = () => (typeof performance !== "undefined" ? performance.now() : Date
 /**
  * Passage-level playback engine with sentence-level position.
  * - One request and one audio element per passage (a run of sentences, see planPassages);
- *   the next passages are prefetched (see PREFETCH). The reader still moves sentence by sentence:
+ *   about a minute of listening is prefetched (see prefetch). The reader still moves sentence by sentence:
  *   each clip carries its sentence starts, and crossing one advances the index without
  *   touching the audio.
  * - Advances with requestAnimationFrame using real elapsed time (never a fixed step).
@@ -94,6 +97,9 @@ export class PlaybackEngine {
   /** Sentence index → passage index */
   private passageOf: number[] = [];
   private chunks = new Map<number, Promise<Chunk>>();
+  /** Prefetch requests outstanding; the generation drops callbacks from before a load or voice change. */
+  private prefetching = 0;
+  private prefetchGen = 0;
   private current: Chunk | null = null;
   /** Quietest passage level heard so far (dBFS); louder passages are brought down to it. */
   private levelRef: number | null = null;
@@ -148,6 +154,7 @@ export class PlaybackEngine {
     this.token++;
     this.doc = doc;
     this.chunks.clear();
+    this.resetPrefetch();
     this.current = null;
     this.levelRef = null;
     this.timingsFor = -1;
@@ -170,6 +177,7 @@ export class PlaybackEngine {
     this.token++;
     this.doc = null;
     this.chunks.clear();
+    this.resetPrefetch();
     this.current = null;
     this.passageList = [];
     this.passageOf = [];
@@ -188,6 +196,7 @@ export class PlaybackEngine {
     const wasPlaying = this.playing;
     this.doc = { ...this.doc, voice, lang };
     this.chunks.clear();
+    this.resetPrefetch();
     this.stopMedia();
     this.current = null;
     this.levelRef = null;
@@ -464,14 +473,40 @@ export class PlaybackEngine {
     this.opts.onSlow(Math.round(factor));
   }
 
+  /**
+   * Keep PREFETCH_SECONDS of listening generated past the current passage. Counting
+   * time rather than passages lets long paragraphs, which a slow voice renders faster
+   * than they play, bank enough to cover runs of headings and dialogue, which it does
+   * not (each request carries a fixed overhead). Refills as each clip arrives, at most
+   * PREFETCH_PASSAGES requests at a time, so a seek on the single-worker server waits
+   * behind no more stale clips than before. Paid engines keep just PAID_PREFETCH.
+   */
   private prefetch() {
     if (!this.doc) return;
-    const from = this.passageOf[this.index];
-    const ahead = isPaidEngine(this.opts.engine(this.doc.voice)) ? PAID_PREFETCH : PREFETCH;
-    for (let k = 1; k <= ahead; k++) {
-      const i = from + k;
-      if (i < this.passageList.length) void this.ensureChunk(i).catch(() => {});
+    const gen = this.prefetchGen;
+    const paid = isPaidEngine(this.opts.engine(this.doc.voice));
+    const passages = paid ? PAID_PREFETCH : PREFETCH_PASSAGES;
+    const target = paid ? 0 : PREFETCH_SECONDS * this.speed;
+    let ahead = 0;
+    for (let i = this.passageOf[this.index] + 1, n = 0; i < this.passageList.length && (n < passages || ahead < target); i++, n++) {
+      if (!this.chunks.has(i)) {
+        if (this.prefetching >= PREFETCH_PASSAGES) return;
+        this.prefetching++;
+        void this.ensureChunk(i).then(() => true, () => false).then((ok) => {
+          if (gen !== this.prefetchGen) return;
+          this.prefetching--;
+          // A failure stops the refill; the next passage start tries again.
+          if (ok) this.prefetch();
+        });
+      }
+      const g = this.passageList[i];
+      for (let s = g.start; s < g.end; s++) ahead += this.durations[s];
     }
+  }
+
+  private resetPrefetch() {
+    this.prefetchGen++;
+    this.prefetching = 0;
   }
 
   private startChunk(chunk: Chunk, token: number) {
