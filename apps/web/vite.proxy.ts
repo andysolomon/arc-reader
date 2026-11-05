@@ -3,7 +3,7 @@ import type { ProxyOptions } from "vite";
 /**
  * Forwards /api/vs/* to a VoiceStudio server and injects its API key.
  * Used by both `vite` and `vite preview`, so the browser never sees the key and
- * VoiceStudio only ever hears from loopback. Browser Origin/Referer headers are
+ * VoiceStudio only ever hears from the proxy. Browser Origin/Referer headers are
  * dropped: VoiceStudio's CSRF guard would reject an unknown origin, and a request
  * without one is treated as a non-browser client, which is what the proxy is.
  */

@@ -24,6 +24,7 @@ pnpm typecheck
 pnpm test             # tokens contrast check + vitest unit tests
 pnpm test:e2e         # Playwright: keyboard flow, responsive, axe per screen per theme
 pnpm contrast         # WCAG 2.2 AA table for every theme
+docker compose up -d  # VoiceStudio + the built app on :4179 (see Voices below)
 ```
 
 Copy `apps/web/.env.example` to `.env` to point the app at a TTS backend.
@@ -37,26 +38,23 @@ Copy `apps/web/.env.example` to `.env` to point the app at a TTS backend.
 
 ## Voices: VoiceStudio
 
-ReadAloud talks to [VoiceStudio](https://github.com/debpalash/VoiceStudio) through its OpenAI-compatible audio API. The browser never contacts VoiceStudio directly: the Vite dev and preview servers proxy `/api/vs/*` to it and inject the API key, so the key stays out of the bundle and VoiceStudio only hears from loopback.
+ReadAloud talks to [VoiceStudio](https://github.com/debpalash/VoiceStudio) through its OpenAI-compatible audio API. The browser never contacts VoiceStudio directly: the Vite dev and preview servers proxy `/api/vs/*` to it and inject the API key, so the key stays out of the bundle and only the proxy talks to VoiceStudio.
 
-### 1. Run VoiceStudio (CPU, Docker)
+### 1. Run VoiceStudio and ReadAloud (Docker Compose)
 
-Your user needs access to the Docker socket (`sudo usermod -aG docker $USER`, then log in again).
+Your user needs access to the Docker socket (`sudo usermod -aG docker $USER`, then log in again). `compose.yaml` defines VoiceStudio (CPU) with its `voicestudio-data` volume and the web app, built and served by `vite preview` with its proxies. It reads settings from `.env` in the repo root (gitignored):
 
 ```sh
-export OMNIVOICE_API_KEY="$(openssl rand -hex 32)"
-docker run -d --name voicestudio \
-  -p 127.0.0.1:3900:3900 \
-  -e OMNIVOICE_API_KEY \
-  -e OMNIVOICE_SERVER_MODE=1 \
-  -e OMNIVOICE_ANALYTICS_DISABLED=1 \
-  -e OMNIVOICE_DATA_DIR=/app/omnivoice_data \
-  -v voicestudio-data:/app/omnivoice_data \
-  ghcr.io/debpalash/voicestudio:stable
-echo "$OMNIVOICE_API_KEY"
+echo "VOICESTUDIO_API_KEY=$(openssl rand -hex 32)" > .env
+# optional: OPENAI_API_KEY=sk-...   FISH_API_KEY=...   VOICESTUDIO_TAG=sha-...   WEB_PORT=4179
+docker compose up -d
 ```
 
-Open http://127.0.0.1:3900, pick **KittenTTS** in the Model Manager (about 80 MB, runs on any CPU), and let it download. Pin the image to a `:sha-…` tag once it works; the project ships often.
+If you already have `apps/web/.env.local`, `ln -s apps/web/.env.local .env` uses it as-is; the variable names match. The app is at http://127.0.0.1:4179 and VoiceStudio at http://127.0.0.1:3900, both on loopback only. Both containers restart with Docker. OpenAI and Fish voices appear when their keys are set. Model names and the default engine (`VITE_DEFAULT_ENGINE`, `VITE_OPENAI_TTS_MODEL`, `VITE_PATOIS_MODEL`, `VITE_FISH_TTS_MODEL`) can also go in `.env`. Provider choices are baked in at build time, so run `docker compose up -d --build` after changing `.env` or pulling new code. To publish on the tailnet, run `tailscale serve --bg --https=<port> http://127.0.0.1:4179`.
+
+The volume has a fixed name, so models downloaded by an earlier `docker run -v voicestudio-data:…` carry over. Remove the old container first (`docker rm -f voicestudio`). Compose then warns once that the volume already exists; that is expected.
+
+Open http://127.0.0.1:3900, pick **KittenTTS** in the Model Manager (about 80 MB, runs on any CPU), and let it download. Pin the image with `VOICESTUDIO_TAG=sha-…` in `.env` once it works; the project ships often.
 
 Measured on this laptop (Intel i7, 12 threads, CPU only, KittenTTS warm; the first request after a cold start also downloads the 80 MB model and took about 19 s):
 
@@ -69,29 +67,30 @@ Measured on this laptop (Intel i7, 12 threads, CPU only, KittenTTS warm; the fir
 Generation runs at roughly 3–4× real time, so the two-sentence prefetch keeps up once playback starts. MP3 is the cheapest format; WAV and PCM save nothing on latency. Saved profiles require an active cloning engine; ReadAloud checks this before requesting speech and reports an explicit browser fallback if it is unavailable. KittenTTS cannot clone. Re-measure with `apps/web/scripts/measure-tts.sh`:
 
 ```sh
-apps/web/scripts/measure-tts.sh            # three runs, first-byte and total time
+VOICESTUDIO_API_KEY=… apps/web/scripts/measure-tts.sh   # three runs, first-byte and total time; or reads apps/web/.env.local
 ```
 
 Select the engine without the UI if you prefer:
 
 ```sh
-curl -X POST -H "Authorization: Bearer $OMNIVOICE_API_KEY" -H "Content-Type: application/json" \
+set -a; . ./.env; set +a
+curl -X POST -H "Authorization: Bearer $VOICESTUDIO_API_KEY" -H "Content-Type: application/json" \
   -d '{"family":"tts","backend_id":"kittentts"}' http://127.0.0.1:3900/engines/select
 ```
 
-### 2. Point ReadAloud at it
+### 2. Develop against it
 
-Create `apps/web/.env.local`:
+To run the app with `npm run dev` against the Compose VoiceStudio, create `apps/web/.env.local` with the same key:
 
 ```sh
 VITE_API_BASE=/api/vs
 VITE_TTS_PROVIDER=openai
 VITE_DEFAULT_ENGINE=kittentts
 VOICESTUDIO_URL=http://127.0.0.1:3900
-VOICESTUDIO_API_KEY=<the key you printed above>
+VOICESTUDIO_API_KEY=<VOICESTUDIO_API_KEY from .env>
 ```
 
-Then `npm run dev` (or `pnpm build && pnpm --filter @readaloud/web preview` for the tailnet build). The Voices page lists KittenTTS's eight presets plus any cloned or designed profiles; Settings → Engine lists what the server reports.
+Then `npm run dev`. The Voices page lists KittenTTS's eight presets plus any cloned or designed profiles; Settings → Engine lists what the server reports.
 
 ### Studio
 
