@@ -190,6 +190,27 @@ test("preview waits for complete audio and picks up repaired clips when reopened
   expect(downloads).toBe(2);
 });
 
+test("a generating preview survives navigating away and back", async ({ page }) => {
+  await mockStudio(page);
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  let downloads = 0;
+  await page.route("**/archetypes/librarian/preview/state", (route) => route.fulfill({ json: { source: "rendering", message: "Rendering" } }));
+  await page.route("**/archetypes/librarian/preview", async (route) => { downloads++; await gate; await route.fulfill({ contentType: "audio/wav", body: previewWav() }); });
+  await page.goto("/studio/gallery");
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Generating preview" })).toBeVisible();
+  await page.getByRole("link", { name: "Voices", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/voices/);
+  await page.getByRole("link", { name: "Studio", exact: true }).first().click();
+  await expect(page.getByRole("status").filter({ hasText: "Generating preview" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "The Librarian" }).getByText("Generating preview…")).toBeVisible();
+  finish();
+  await expect(page.locator("audio")).toHaveAttribute("src", /^blob:/);
+  await expect(page.getByRole("article", { name: "The Librarian" }).getByText("Preview ready", { exact: true })).toBeVisible();
+  expect(downloads).toBe(1);
+});
+
 test("preview displays actual server errors and supports retry", async ({ page }) => {
   await mockStudio(page);
   await page.route("**/archetypes/librarian/preview/state", (route) => route.fulfill({ json: { source: "rendering", message: "Rendering" } }));
@@ -287,6 +308,9 @@ test("Voices identifies each provider", async ({ page }) => {
   await expect(page.locator('[data-voice="alloy"]').getByLabel("Voice source: ChatGPT")).toBeVisible();
   await expect(page.locator('[data-voice="voice-1"]').getByLabel("Voice source: VoiceStudio")).toBeVisible();
   await expect(page.locator('[data-voice="local"]').getByLabel("Voice source: Browser")).toBeVisible();
+  for (const [heading, voice] of [["ChatGPT", "alloy"], ["VoiceStudio", "voice-1"], ["Browser", "local"]]) {
+    await expect(page.getByRole("region", { name: heading }).locator(`[data-voice="${voice}"]`)).toBeVisible();
+  }
 });
 
 test("gallery filters narrow the catalog and favorites", async ({ page }) => {

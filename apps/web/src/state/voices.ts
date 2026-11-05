@@ -66,7 +66,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
       const voices = await fetchFishVoices();
       const fish: Voice[] = voices.map((v) => ({
         id: `fish:${v._id}`, name: v.title, lang: `${langLabel(v.languages?.[0])} · Fish Audio`,
-        tags: ["Fish Audio", ...(v.tags ?? []).filter((t) => typeof t === "string").slice(0, 1)],
+        tags: [...(v.tags ?? []).filter((t) => typeof t === "string").slice(0, 2)],
         hue: hueFor(`fish:${v._id}`), engine: FISH_ENGINE, kind: "preset",
       }));
       const presetIds = new Set(FISH_PRESET_VOICES.map((v) => v.id));

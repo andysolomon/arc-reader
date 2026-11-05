@@ -10,11 +10,13 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
-import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
+import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
 import { ClearFilters, FilterSelect } from "../components/Filters";
 
+// Filter chips follow the same fixed order as the sections below.
+const sourceRank = (source: string) => { const i = Object.keys(SOURCE_INFO).indexOf(source); return i < 0 ? Infinity : i; };
 const TYPE_LABELS: Record<string, string> = { "built-in": "Built-in", cloned: "Cloned", designed: "Designed" };
 
 const PREVIEW_MS = 3000;
@@ -38,7 +40,7 @@ export function VoicesPage() {
   const [filters, setFilters] = useState<VoiceFilters>(NO_VOICE_FILTERS);
   const setFilter = (key: keyof VoiceFilters, value: string) => setFilters((f) => ({ ...f, [key]: value }));
   const shown = useMemo(() => filterVoices(VOICES, filters), [VOICES, filters]);
-  const sources = useMemo(() => facetCounts(VOICES, voiceSource), [VOICES]);
+  const sources = useMemo(() => facetCounts(VOICES, voiceSource).sort(([a], [b]) => sourceRank(a) - sourceRank(b)), [VOICES]);
   const languages = useMemo(() => facetCounts(VOICES, voiceLanguage).sort(([a], [b]) => languageLabel(a).localeCompare(languageLabel(b))), [VOICES]);
   const types = useMemo(() => facetCounts(VOICES, voiceType), [VOICES]);
   const filterCount = activeFilterCount(filters);
@@ -132,6 +134,11 @@ export function VoicesPage() {
   };
 
   const current = forDoc ? (loadedDoc?.id === forDoc ? docVoice : selected) : selected;
+  // Group by the service that renders each voice. Sections keep a fixed order:
+  // the store's order depends on which provider answered first.
+  const bySource = new Map<string, typeof VOICES>(Object.keys(SOURCE_INFO).map((s) => [s, []]));
+  for (const v of shown) bySource.set(voiceSource(v), [...(bySource.get(voiceSource(v)) ?? []), v]);
+  const groups = [...bySource].filter(([, voices]) => voices.length);
 
   return (
     <section data-screen="voices" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
@@ -149,12 +156,11 @@ export function VoicesPage() {
           </div>
         )}
         <div className="flex flex-wrap gap-4 text-sm underline"><Link to="/studio/clone">Clone a voice</Link><Link to="/studio/design">Design a voice</Link><Link to="/studio/gallery">Browse designed voices</Link></div>
-        {VOICES.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
         <div className="flex flex-col gap-3" role="search" aria-label="Filter voices">
           <Input type="search" aria-label="Search voices" placeholder="Search by name, tag or language…" leading={<Search size={16} aria-hidden />} wrapperClassName="h-10" value={filters.query} onChange={(e) => setFilter("query", e.target.value)} />
           <div className="flex flex-wrap gap-2" role="group" aria-label="Voice source">
             <Chip size="sm" selected={!filters.source} onClick={() => setFilter("source", "")}>All sources</Chip>
-            {sources.map(([source, n]) => <Chip key={source} size="sm" selected={filters.source === source} onClick={() => setFilter("source", filters.source === source ? "" : source)}>{source} · {n}</Chip>)}
+            {sources.map(([source, n]) => <Chip key={source} size="sm" selected={filters.source === source} onClick={() => setFilter("source", filters.source === source ? "" : source)}>{SOURCE_INFO[source]?.title ?? source} · {n}</Chip>)}
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,220px)_auto]">
             <FilterSelect label="Language" any="All languages" value={filters.language} options={languages.map(([code, n]) => [code, `${languageLabel(code)} (${n})`])} onChange={(value) => setFilter("language", value)} />
@@ -164,11 +170,20 @@ export function VoicesPage() {
           <p role="status" className="text-sm text-fg2">{filterCount ? `${shown.length} of ${VOICES.length} voices` : `${VOICES.length} voices`}</p>
         </div>
         {!shown.length && <p className="text-fg2">No voices match these filters.</p>}
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
-          {shown.map((v) => (
-            <VoiceCard key={v.id} voice={v} source={voiceSource(v)} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
-          ))}
-        </div>
+        {groups.map(([source, voices]) => (
+          <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3">
+            <div>
+              <h2 id={`voices-${source}`} className="m-0 font-serif text-xl">{SOURCE_INFO[source]?.title ?? source}</h2>
+              {SOURCE_INFO[source] && <p className="mt-1 text-sm text-fg2">{SOURCE_INFO[source].description}</p>}
+              {voices.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="mt-1 text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
+            </div>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
+              {voices.map((v) => (
+                <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     </section>
   );
