@@ -39,6 +39,23 @@ const ratio = (a, b) => {
   return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 };
 
+// oklch(L C h) → sRGB, for the service-coloured voice names (Library, queue).
+const oklch = (L, C, h) => {
+  const a = C * Math.cos((h * Math.PI) / 180), b = C * Math.sin((h * Math.PI) / 180);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const lin = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return lin.map((c) => Math.max(0, Math.min(1, c)) <= 0.0031308 ? 12.92 * Math.max(0, c) * 255 : (1.055 * Math.max(0, Math.min(1, c)) ** (1 / 2.4) - 0.055) * 255).concat([1]);
+};
+const serviceHues = { VoiceStudio: 155, ChatGPT: 305, Fish: 240 };
+const voiceTextL = (t) => parseFloat(t.vars["voice-text-l"] ?? blocks[0].vars["voice-text-l"]);
+
 let failed = false;
 const rows = [];
 for (const t of blocks) {
@@ -46,6 +63,10 @@ for (const t of blocks) {
   const bg = parse(v.bg), bg2 = parse(v.bg2), bg3 = parse(v.bg3);
   const hlOnBg = over(parse(v.hl), bg);
   const checks = [
+    ...Object.entries(serviceHues).flatMap(([name, hue]) => [
+      [`${name} text / bg2`, ratio(oklch(voiceTextL(t), 0.11, hue), bg2), 4.5],
+      [`${name} text / bg3`, ratio(oklch(voiceTextL(t), 0.11, hue), bg3), 4.5],
+    ]),
     ["fg / bg", ratio(parse(v.fg), bg), 4.5],
     ["fg / bg2", ratio(parse(v.fg), bg2), 4.5],
     ["fg / bg3", ratio(parse(v.fg), bg3), 4.5],

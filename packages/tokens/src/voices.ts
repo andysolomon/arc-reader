@@ -20,3 +20,9 @@ export function voiceSourceForEngine(engine: string): VoiceSource {
 export function voiceServiceColor(source: VoiceSource): string {
   return voiceColor(VOICE_SERVICES[source].hue);
 }
+
+/** Service colour as readable text on --bg/--bg2/--bg3; the Browser voice stays neutral. */
+export function voiceServiceTextColor(source: VoiceSource): string {
+  const hue = VOICE_SERVICES[source].hue;
+  return hue === null ? "var(--fg2)" : `oklch(var(--voice-text-l, 0.82) 0.11 ${hue})`;
+}

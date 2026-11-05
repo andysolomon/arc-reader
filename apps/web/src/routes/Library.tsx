@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap } from "lucide-react";
-import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceSourceBadge, fmtTime, cn } from "@readaloud/ui";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList } from "lucide-react";
+import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
 import { useLibrary, type LibraryItem } from "../state/library";
@@ -115,8 +115,7 @@ export function LibraryPage() {
             </Chip>
             {usedVoices.map((id) => (
               <Chip key={id} size="sm" selected={vf === id} onClick={() => setVf(id)}>
-                {voiceName(id)}
-                <VoiceSourceBadge source={voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id))} />
+                <VoiceServiceName source={voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id))} inherit={vf === id}>{voiceName(id)}</VoiceServiceName>
               </Chip>
             ))}
           </div>
@@ -208,17 +207,25 @@ function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: s
   return (
     <div className="flex flex-wrap gap-2.5 text-[12px] text-fg2">
       <span className="inline-flex items-center gap-1.5">
-        <span className="inline-block size-3 rounded-[3px] border border-line bg-bg3" aria-hidden />
+        <SourceIcon rec={it.rec} />
         {it.rec.domain}
       </span>
       <span className="tabular-nums">{fmtTime(it.duration)}</span>
-      <span className="inline-flex items-center gap-1.5">
-        {prepared?.name ?? voice.name}
-        <VoiceSourceBadge source={voiceSource(prepared ?? voice)} />
-      </span>
+      <VoiceServiceName source={voiceSource(prepared ?? voice)}>{prepared?.name ?? voice.name}</VoiceServiceName>
       {withDate && <span>{dateLabel(it.rec.updatedAt)}</span>}
     </div>
   );
+}
+
+/** Site favicon for articles, via the server so the browser never reports library sites elsewhere. */
+function SourceIcon({ rec }: { rec: LibraryItem["rec"] }) {
+  const [failed, setFailed] = useState(false);
+  const site = (rec.source === "url" || rec.source === "share") && rec.domain.includes(".") && !/[\s/]/.test(rec.domain);
+  if (site && !failed) {
+    return <img src={`/api/favicon?host=${encodeURIComponent(rec.domain)}`} alt="" width={14} height={14} loading="lazy" decoding="async" onError={() => setFailed(true)} className="size-3.5 shrink-0 rounded-[3px]" />;
+  }
+  const Icon = site ? Globe : rec.source === "file" ? FileText : ClipboardList;
+  return <Icon size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />;
 }
 
 /** Four 44px actions, their gaps and the panel's padding. */

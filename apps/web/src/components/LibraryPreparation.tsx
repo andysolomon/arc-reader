@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Dialog, Input, ProgressRing, VoiceSourceBadge } from "@readaloud/ui";
+import { Button, Dialog, Input, ProgressRing, VoiceServiceName } from "@readaloud/ui";
 import { Search, Zap } from "lucide-react";
 import { voiceSource } from "../data/voices";
 import { baseFor, isPaidEngine } from "../engine/providers";
@@ -39,8 +39,7 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
         return (
           <button key={voice.voiceId} type="button" onClick={onPrepare} className="inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[12px] text-fg2 hover:text-fg" title={label}>
             <ProgressRing value={fraction} size={24} stroke={2} label={label} />
-            <span>{voice.name} <span className="tabular-nums">· {progress}</span>{stage && <span className="text-accent"> · {stage}</span>}</span>
-            <VoiceSourceBadge source={voiceSource(voice)} />
+            <span><VoiceServiceName source={voiceSource(voice)}>{voice.name}</VoiceServiceName> <span className="tabular-nums">· {progress}</span>{stage && <span className="text-accent"> · {stage}</span>}</span>
           </button>
         );
       })}
@@ -76,8 +75,7 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
           {shown.map((voice) => (
             <label key={voice.id} className="flex shrink-0 cursor-pointer items-center gap-3 rounded-control p-2 hover:bg-bg3">
               <input type="checkbox" className="size-4 shrink-0 accent-[var(--accent)]" checked={selected.includes(voice.id)} onChange={(e) => setSelected((prev) => e.target.checked ? [...prev, voice.id] : prev.filter((id) => id !== voice.id))} />
-              <span className="flex-1 text-sm">{voice.name}</span>
-              <VoiceSourceBadge source={voiceSource(voice)} />
+              <VoiceServiceName source={voiceSource(voice)} className="flex-1 text-sm">{voice.name}</VoiceServiceName>
             </label>
           ))}
           {shown.length === 0 && <p className="p-2 text-sm text-fg2">No voices match.</p>}
@@ -114,12 +112,11 @@ export function PreparationQueue() {
         {jobs.map((job) => (
           <li key={job.id} className="flex items-center gap-3 text-[12px]">
             <div className="min-w-0 flex-1">
-              <div className="truncate text-fg">{job.title} · {job.voice.name}</div>
+              <div className="truncate text-fg">{job.title} · <VoiceServiceName source={voiceSource(job.voice)}>{job.voice.name}</VoiceServiceName></div>
               <div className={job.status === "error" ? "text-danger" : "text-fg2"}>
                 {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? "Queued · waiting for a free machine"}
               </div>
             </div>
-            <VoiceSourceBadge source={voiceSource(job.voice)} />
             {isPreparing(job) && <Button variant="ghost" size="sm" aria-label={`Cancel ${job.title} in ${job.voice.name}`} onClick={() => cancel(job.id)}>Cancel</Button>}
           </li>
         ))}
