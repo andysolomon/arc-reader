@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Dialog, Input, ProgressRing, VoiceServiceName } from "@readaloud/ui";
+import { Button, Dialog, Input, ProgressRing, VoiceServiceName, cn } from "@readaloud/ui";
 import { Search, Zap } from "lucide-react";
 import { voiceSource } from "../data/voices";
 import { baseFor, isPaidEngine } from "../engine/providers";
@@ -24,8 +24,7 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
     prepared.unshift({ voiceId, name: voice.name, engine: voice.engine, fraction: 0 });
   }
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1.5" role="group" aria-label="Prepared audio">
-      {prepared.length > 0 && <span className="text-[11px] text-fg2">Prepared</span>}
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Prepared audio">
       {prepared.length === 0 && <span className="text-[12px] text-fg2">Browser voice · live audio</span>}
       {prepared.map((voice) => {
         const job = jobs.find((j) => j.docId === it.rec.id && j.voice.id === voice.voiceId && j.voice.engine === voice.engine && (voice.engine !== "openai" || j.openaiModel === openaiModel) && isPreparing(j));
@@ -36,10 +35,20 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
         const stage = job && (job.message ?? (job.status === "queued" ? "Queued" : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing"));
         const progress = job && job.total > 0 ? `${percent}% generated · ${job.done}/${job.total} passages` : `${percent}% prepared`;
         const label = `${voice.name}: ${progress}${stage ? ` · ${stage}` : ""}`;
+        // A full ring already says "ready"; only partial audio needs words.
+        const detail = job ? (job.total > 0 ? `${percent}% · ${job.done}/${job.total}` : null) : percent === 0 ? "Not prepared" : percent < 100 ? `${percent}%` : null;
         return (
-          <button key={voice.voiceId} type="button" onClick={onPrepare} className="inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[12px] text-fg2 hover:text-fg" title={label}>
-            <ProgressRing value={fraction} size={24} stroke={2} label={label} />
-            <span><VoiceServiceName source={voiceSource(voice)}>{voice.name}</VoiceServiceName> <span className="tabular-nums">· {progress}</span>{stage && <span className="text-accent"> · {stage}</span>}</span>
+          <button
+            key={voice.voiceId}
+            type="button"
+            onClick={onPrepare}
+            title={label}
+            className={cn("inline-flex h-7 max-w-full items-center gap-1.5 rounded-pill border bg-bg pl-1.5 pr-2.5 text-left text-[12px] text-fg2 transition-colors duration-fast hover:border-fg3 hover:text-fg", job ? "border-[color-mix(in_oklch,var(--accent)_45%,var(--line))]" : "border-line")}
+          >
+            <ProgressRing value={fraction} size={18} stroke={2} label={label} />
+            <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
+            {detail && <span className="whitespace-nowrap tabular-nums">{detail}</span>}
+            {stage && <span className="min-w-0 truncate text-accent">{stage}</span>}
           </button>
         );
       })}
@@ -99,28 +108,35 @@ export function PreparationQueue() {
   const queued = pending.filter((job) => job.status === "queued").length;
   const finished = jobs.length - pending.length;
   return (
-    <div className="rounded-card border border-line bg-bg2 p-4" role="region" aria-label="Audio preparation queue">
-      {sharedError && <p className="m-0 mb-3 text-sm text-fg2" role="status">Server audio status unavailable: {sharedError}</p>}
-      {sharing > 0 && <p className="m-0 mb-3 text-sm text-fg2" role="status">Sharing saved audio · {sharing} clips remaining. Keep this app open to finish.</p>}
-      <div className="flex flex-wrap items-center gap-3">
-        <Zap size={16} className="text-accent" aria-hidden />
-        <span className="flex-1 text-sm" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}${saving ? ` · ${saving} saving` : ""}` : "Audio preparation finished"}</span>
+    <div className="overflow-hidden rounded-card border border-line bg-bg2" role="region" aria-label="Audio preparation queue">
+      {sharedError && <p className="m-0 border-b border-line px-4 py-2.5 text-[13px] text-fg2" role="status">Server audio status unavailable: {sharedError}</p>}
+      {sharing > 0 && <p className="m-0 border-b border-line px-4 py-2.5 text-[13px] text-fg2" role="status">Sharing saved audio · {sharing} clips remaining. Keep this app open to finish.</p>}
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-bg3 text-accent" aria-hidden><Zap size={14} /></span>
+        <span className="flex-1 text-sm font-medium" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}${saving ? ` · ${saving} saving` : ""}` : "Audio preparation finished"}</span>
         {pending.length > 0 && <Button size="sm" onClick={cancelAll}>Cancel all</Button>}
         {finished > 0 && <Button size="sm" variant="ghost" onClick={dismissFinished}>Clear finished</Button>}
       </div>
-      <ul className="mb-0 mt-3 flex max-h-64 list-none flex-col gap-3 overflow-y-auto p-0">
-        {jobs.map((job) => (
-          <li key={job.id} className="flex items-center gap-3 text-[12px]">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-fg">{job.title} · <VoiceServiceName source={voiceSource(job.voice)}>{job.voice.name}</VoiceServiceName></div>
-              <div className={job.status === "error" ? "text-danger" : "text-fg2"}>
-                {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? "Queued · waiting for a free machine"}
+      {jobs.length > 0 && (
+        <ul className="m-0 max-h-64 list-none divide-y divide-line overflow-y-auto border-t border-line p-0">
+          {jobs.map((job) => (
+            <li key={job.id} className="flex min-h-12 items-center gap-3 px-4 py-2 text-[12px]">
+              <span aria-hidden className="shrink-0"><ProgressRing value={job.status === "ready" ? 1 : job.total > 0 ? job.done / job.total : 0} size={18} stroke={2} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] text-fg">{job.title}</div>
+                <div className="flex min-w-0 items-center gap-1.5 text-fg2">
+                  <VoiceServiceName source={voiceSource(job.voice)} className="shrink-0">{job.voice.name}</VoiceServiceName>
+                  <span aria-hidden className="text-fg3">·</span>
+                  <span className={cn("truncate", job.status === "error" && "text-danger", job.status === "preparing" && "text-accent")}>
+                    {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? "Queued · waiting for a free machine"}
+                  </span>
+                </div>
               </div>
-            </div>
-            {isPreparing(job) && <Button variant="ghost" size="sm" aria-label={`Cancel ${job.title} in ${job.voice.name}`} onClick={() => cancel(job.id)}>Cancel</Button>}
-          </li>
-        ))}
-      </ul>
+              {isPreparing(job) && <Button variant="ghost" size="sm" aria-label={`Cancel ${job.title} in ${job.voice.name}`} onClick={() => cancel(job.id)}>Cancel</Button>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

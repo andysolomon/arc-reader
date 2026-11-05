@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList } from "lucide-react";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -102,10 +102,10 @@ export function LibraryPage() {
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-[13px] text-fg2" role="status" aria-label="Library sync">
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-[13px] text-fg2" role="status" aria-label="Library sync">
           <span>{sync.status === "synced" ? "Shared library · Synced" : sync.status === "syncing" ? "Shared library · Syncing…" : sync.pending ? "Saved on this device · Waiting to sync" : "Server unavailable · Showing saved library"}</span>
           {sync.status === "synced" && <span aria-label="Synced document count">· {sync.documents} {sync.documents === 1 ? "document" : "documents"}</span>}
-          <button type="button" disabled={sync.status === "syncing"} className="text-accent hover:text-fg disabled:opacity-50" onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}>{sync.status === "offline" ? "Retry sync" : "Sync now"}</button>
+          <button type="button" disabled={sync.status === "syncing"} className="ml-1.5 text-accent hover:text-fg disabled:opacity-50" onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}>{sync.status === "offline" ? "Retry sync" : "Sync now"}</button>
           {sync.status === "offline" && sync.error && <span className="basis-full">{sync.error}</span>}
         </div>
         {items.length > 0 && (
@@ -205,14 +205,33 @@ function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: s
   const voice = getVoice(voiceId);
   const prepared = it.prepared.find((v) => v.voiceId === voiceId);
   return (
-    <div className="flex flex-wrap gap-2.5 text-[12px] text-fg2">
-      <span className="inline-flex items-center gap-1.5">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-fg2">
+      <span className="inline-flex min-w-0 items-center gap-1.5">
         <SourceIcon rec={it.rec} />
-        {it.rec.domain}
+        <span className="truncate">{it.rec.domain}</span>
       </span>
+      <Dot />
       <span className="tabular-nums">{fmtTime(it.duration)}</span>
+      <Dot />
       <VoiceServiceName source={voiceSource(prepared ?? voice)}>{prepared?.name ?? voice.name}</VoiceServiceName>
-      {withDate && <span>{dateLabel(it.rec.updatedAt)}</span>}
+      {withDate && <><Dot /><span>{dateLabel(it.rec.updatedAt)}</span></>}
+    </div>
+  );
+}
+
+function Dot() {
+  return <span aria-hidden className="text-fg3">·</span>;
+}
+
+/** Listening progress: a ring with the percentage inside, or a check once finished. */
+function ReadProgress({ value, size = 40 }: { value: number; size?: 36 | 40 }) {
+  const percent = Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+  return (
+    <div className="relative grid shrink-0 place-items-center" style={{ width: size, height: size }}>
+      <ProgressRing value={value} size={size} />
+      <span aria-hidden className="absolute inset-0 grid place-items-center text-[10px] font-medium tabular-nums text-fg2">
+        {percent >= 100 ? <Check size={14} strokeWidth={2} className="text-accent" /> : `${percent}%`}
+      </span>
     </div>
   );
 }
@@ -273,19 +292,19 @@ function Row(props: ItemProps & { touch: boolean }) {
         </div>
       )}
       <div
-        className={cn("relative grid grid-cols-[auto_36px_minmax(0,1fr)] items-center gap-3 bg-bg2 px-[18px] py-3.5 transition-[background-color,transform] duration-fast group-hover:bg-bg3 sm:grid-cols-[auto_36px_minmax(0,1fr)_auto]", props.selected && "!bg-bg3")}
+        className={cn("relative grid grid-cols-[auto_40px_minmax(0,1fr)] items-start gap-x-3.5 bg-bg2 px-5 py-4 transition-[background-color,transform] duration-fast group-hover:bg-bg3 sm:grid-cols-[auto_40px_minmax(0,1fr)_auto]", props.selected && "!bg-bg3")}
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
       >
-        <DocumentSelection {...props} />
-        <div className="flex flex-col items-center gap-1"><ProgressRing value={it.progress} /><span className="text-[10px] text-fg2">Read</span></div>
-        <div className="flex min-w-0 flex-col gap-[3px]">
-          <button type="button" onClick={() => props.resume(it)} className="truncate border-0 bg-transparent p-0 text-left font-serif text-[16px] text-fg hover:text-accent">
+        <DocumentSelection {...props} className="mt-3" />
+        <ReadProgress value={it.progress} />
+        <div className="flex min-w-0 flex-col gap-1">
+          <button type="button" onClick={() => props.resume(it)} className="truncate border-0 bg-transparent p-0 text-left font-serif text-[16px] leading-6 text-fg hover:text-accent">
             {it.rec.title}
           </button>
           <Meta it={it} defaultVoice={props.defaultVoice} withDate />
-          <PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} />
+          <div className="mt-1.5"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
         </div>
-        {!touch && <Actions {...props} className="col-start-3 sm:col-start-auto sm:opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100" />}
+        {!touch && <Actions {...props} className="col-start-3 sm:col-start-auto sm:-my-0.5 sm:opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100" />}
       </div>
     </li>
   );
@@ -296,18 +315,22 @@ function CardItem(props: ItemProps) {
   return (
     <li className={cn("group flex min-h-[170px] flex-col gap-3.5 rounded-card border border-line bg-bg2 p-[18px] transition-colors duration-fast hover:border-fg3", props.selected && "!border-accent")}>
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2"><DocumentSelection {...props} /><div className="flex flex-col items-center gap-1"><ProgressRing value={it.progress} /><span className="text-[10px] text-fg2">Read</span></div></div>
+        <div className="flex items-center gap-3"><DocumentSelection {...props} /><ReadProgress value={it.progress} size={36} /></div>
         <Actions {...props} size={32} className="opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100" />
       </div>
-      <button type="button" onClick={() => props.resume(it)} className="line-clamp-3 flex-1 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
-        {it.rec.title}
-      </button>
-      <Meta it={it} defaultVoice={props.defaultVoice} />
-      <PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} />
+      <div className="flex-1">
+        <button type="button" onClick={() => props.resume(it)} className="line-clamp-3 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
+          {it.rec.title}
+        </button>
+      </div>
+      <div className="flex flex-col gap-2.5 border-t border-line pt-3">
+        <Meta it={it} defaultVoice={props.defaultVoice} />
+        <PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} />
+      </div>
     </li>
   );
 }
 
-function DocumentSelection({ it, selected, toggleSelected }: ItemProps) {
-  return <input type="checkbox" aria-label={`Select ${it.rec.title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} onPointerDown={(e) => e.stopPropagation()} className="size-4 shrink-0 cursor-pointer accent-[var(--accent)]" />;
+function DocumentSelection({ it, selected, toggleSelected, className }: ItemProps & { className?: string }) {
+  return <input type="checkbox" aria-label={`Select ${it.rec.title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} onPointerDown={(e) => e.stopPropagation()} className={cn("size-4 shrink-0 cursor-pointer accent-[var(--accent)]", className)} />;
 }
