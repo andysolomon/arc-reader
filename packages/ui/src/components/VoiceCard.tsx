@@ -22,10 +22,12 @@ export interface VoiceCardProps {
   onRemove?: () => void;
   /** Accessible name for the remove control; defaults to "Remove <name>". */
   removeLabel?: string;
+  /** Short status under the language, e.g. how much of a document this voice has prepared. */
+  note?: string;
   className?: string;
 }
 
-export function VoiceCard({ voice, selected, previewing, source, onPreview, onSelect, onRemove, removeLabel, className }: VoiceCardProps) {
+export function VoiceCard({ voice, selected, previewing, source, onPreview, onSelect, onRemove, removeLabel, note, className }: VoiceCardProps) {
   return (
     <Card interactive selected={selected} className={cn("flex min-h-[200px] flex-col gap-3.5", className)} data-voice={voice.id}>
       <div className="flex items-center justify-between">
@@ -53,6 +55,7 @@ export function VoiceCard({ voice, selected, previewing, source, onPreview, onSe
       <div className="flex flex-col gap-0.5">
         <div className="text-[16px] font-semibold">{voice.name}</div>
         <div className="font-mono text-[12px] text-fg2">{voice.lang}</div>
+        {note && <div className="text-[12px] text-fg2">{note}</div>}
       </div>
       <div className="flex flex-wrap gap-1.5">
         {source && <span aria-label={`Voice source: ${source}`}><VoiceSourceBadge source={source} /></span>}

@@ -105,7 +105,9 @@ export function PlayerHost() {
     onDownload,
     onShare,
     onAddToLibrary,
-    onChangeVoice: () => navigate(`/voices?for=${p.doc!.id}`),
+    // Mid-reading, only voices with audio already saved for this document are offered: switching
+    // to an unprepared voice would stall playback on live generation.
+    onChangeVoice: () => navigate(`/voices?for=${p.doc!.id}&prepared=1`),
     menuOpen: p.menuOpen,
     onMenuOpenChange: p.setMenuOpen,
     // A passage still being generated: say so, so a wait mid-reading doesn't read as a stop.

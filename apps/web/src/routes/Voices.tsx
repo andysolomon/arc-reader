@@ -22,10 +22,19 @@ const TYPE_LABELS: Record<string, string> = { "built-in": "Built-in", cloned: "C
 
 const PREVIEW_MS = 3000;
 
+/** How much of the document a voice has saved audio for; silent when complete. */
+function preparedNote(fraction: number | undefined) {
+  if (fraction === undefined) return "Not prepared";
+  const percent = Math.floor(fraction * 100);
+  return percent < 100 ? `${percent}% prepared` : undefined;
+}
+
 export function VoicesPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const forDoc = params.get("for");
+  // From the player menu: only voices with audio saved for this document.
+  const preparedOnly = !!forDoc && params.has("prepared");
   const selected = useSettings((s) => s.voice);
   const set = useSettings((s) => s.set);
   const engineId = useSettings((s) => s.engine);
@@ -36,14 +45,20 @@ export function VoicesPage() {
   const loadedDoc = usePlayer((s) => s.doc);
   const docVoice = usePlayer((s) => s.voiceId);
   const hasDoc = !!loadedDoc;
+  const libraryItems = useLibrary((s) => s.items);
+  const refreshLibrary = useLibrary((s) => s.refresh);
   const [docTitle, setDocTitle] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [filters, setFilters] = useState<VoiceFilters>(NO_VOICE_FILTERS);
   const setFilter = (key: keyof VoiceFilters, value: string) => setFilters((f) => ({ ...f, [key]: value }));
-  const shown = useMemo(() => filterVoices(VOICES, filters), [VOICES, filters]);
-  const sources = useMemo(() => facetCounts(VOICES, voiceSource).sort(([a], [b]) => sourceRank(a) - sourceRank(b)), [VOICES]);
-  const languages = useMemo(() => facetCounts(VOICES, voiceLanguage).sort(([a], [b]) => languageLabel(a).localeCompare(languageLabel(b))), [VOICES]);
-  const types = useMemo(() => facetCounts(VOICES, voiceType), [VOICES]);
+  const current = forDoc ? (loadedDoc?.id === forDoc ? docVoice : selected) : selected;
+  const prepared = useMemo(() => (forDoc && libraryItems.find((it) => it.rec.id === forDoc)?.prepared) || [], [forDoc, libraryItems]);
+  // The voice reading now stays listed so the selection is visible, even if its audio was never saved.
+  const pool = useMemo(() => preparedOnly ? VOICES.filter((v) => v.id === current || prepared.some((p) => p.voiceId === v.id)) : VOICES, [VOICES, preparedOnly, current, prepared]);
+  const shown = useMemo(() => filterVoices(pool, filters), [pool, filters]);
+  const sources = useMemo(() => facetCounts(pool, voiceSource).sort(([a], [b]) => sourceRank(a) - sourceRank(b)), [pool]);
+  const languages = useMemo(() => facetCounts(pool, voiceLanguage).sort(([a], [b]) => languageLabel(a).localeCompare(languageLabel(b))), [pool]);
+  const types = useMemo(() => facetCounts(pool, voiceType), [pool]);
   const filterCount = activeFilterCount(filters);
   const audio = useRef<HTMLAudioElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,6 +69,10 @@ export function VoicesPage() {
     if (loadedDoc?.id === forDoc) setDocTitle(loadedDoc.title);
     else void docs.get(forDoc).then((r) => setDocTitle(r?.title ?? null));
   }, [forDoc, loadedDoc]);
+  // Prepared coverage is read from the audio cache; refresh it so a reading prepared moments ago counts.
+  useEffect(() => {
+    if (preparedOnly) void refreshLibrary();
+  }, [preparedOnly, refreshLibrary]);
 
   const stopPreview = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -154,7 +173,6 @@ export function VoicesPage() {
     toast(`${v.name} sent back to the Studio gallery`);
   };
 
-  const current = forDoc ? (loadedDoc?.id === forDoc ? docVoice : selected) : selected;
   // Group by the service that renders each voice. Sections keep a fixed order:
   // the store's order depends on which provider answered first.
   const bySource = new Map<VoiceSource, typeof VOICES>((Object.keys(SOURCE_INFO) as VoiceSource[]).map((s) => [s, []]));
@@ -167,7 +185,7 @@ export function VoicesPage() {
         <div className="flex flex-wrap items-baseline gap-4">
           <h1 className="m-0 font-serif text-[26px] font-medium">Voices</h1>
           <span className="text-fg2">
-            {forDoc ? `Choosing a voice for “${docTitle ?? "this document"}”.` : "Selected voice is remembered. Override per document from the player menu."}
+            {preparedOnly ? `Choosing a prepared voice for “${docTitle ?? "this document"}”. Only voices with audio saved for it are listed.` : forDoc ? `Choosing a voice for “${docTitle ?? "this document"}”.` : "Selected voice is remembered. Override per document from the player menu."}
           </span>
         </div>
         {fishError && (
@@ -188,9 +206,14 @@ export function VoicesPage() {
             {types.length > 1 && <FilterSelect label="Type" any="All types" value={filters.type} options={types.map(([type, n]) => [type, `${TYPE_LABELS[type]} (${n})`])} onChange={(value) => setFilter("type", value)} />}
             <div className="flex items-end"><ClearFilters count={filterCount} onClear={() => setFilters(NO_VOICE_FILTERS)} /></div>
           </div>
-          <p role="status" className="text-sm text-fg2">{filterCount ? `${shown.length} of ${VOICES.length} voices` : `${VOICES.length} voices`}</p>
+          <p role="status" className="text-sm text-fg2">{filterCount ? `${shown.length} of ${pool.length} voices` : `${pool.length} voices`}</p>
         </div>
-        {!shown.length && <p className="text-fg2">No voices match these filters.</p>}
+        {preparedOnly && !pool.some((v) => v.id !== current) && (
+          <p role="status" className="rounded-panel border border-line bg-bg2 p-4 text-[13px] text-fg2">
+            No other voice has prepared audio for this document yet. Use “Prepare audio” in the player menu, or prepare more voices from the <Link to="/library" className="text-accent underline">Library</Link>.
+          </p>
+        )}
+        {!shown.length && pool.length > 0 && <p className="text-fg2">No voices match these filters.</p>}
         {groups.map(([source, voices]) => (
           <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3">
             <div>
@@ -204,6 +227,7 @@ export function VoicesPage() {
             <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
               {voices.map((v) => (
                 <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)}
+                  note={preparedOnly ? preparedNote(prepared.find((p) => p.voiceId === v.id)?.fraction) : undefined}
                   onRemove={v.archetype ? () => void demote(v.id) : undefined} removeLabel={`Send ${v.name} back to Studio`} />
               ))}
             </div>
