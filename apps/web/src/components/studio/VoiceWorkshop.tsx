@@ -29,19 +29,20 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
   return <div className={`${panelClass} flex flex-col gap-5`}>
     <div><h2 className="font-serif text-xl">{mode === "clone" ? "Clone a voice" : "Design a voice"}</h2>
       <p className="mt-2 text-sm text-fg2">{mode === "clone" ? "Upload or record a clear, single-speaker sample. Around 10–20 seconds works well." : "Describe a voice, review the attributes VoiceStudio recognizes, then save it for reading and dubbing."}</p></div>
-    <Field label="Voice name"><input className={fieldClass} value={name} onChange={(e) => setName(e.target.value)} maxLength={100} placeholder="My narrator" /></Field>
+    <Field label="Voice name"><input className={fieldClass} value={name} onChange={(e) => { setName(e.target.value); setSaved(null); }} maxLength={100} placeholder="My narrator" /></Field>
     {mode === "clone" ? <>
       <Field label="Reference audio or video"><input className={fieldClass} type="file" accept="audio/*,video/*" disabled={op.busy} onChange={(e) => { setFile(e.target.files?.[0] ?? null); setSaved(null); }} /></Field>
-      <Recorder disabled={op.busy} onRecorded={setFile} />
+      <Recorder disabled={op.busy} onRecorded={(audio) => { setFile(audio); setSaved(null); }} />
       {file && <p className="text-sm text-fg2">{file.name}</p>}
       <LocalAudio file={file} />
       <Field label="Words spoken in the sample (optional)"><textarea className={fieldClass} rows={3} value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Leave blank to transcribe automatically." /></Field>
     </> : <>
       <Field label="Describe your voice"><textarea className={fieldClass} rows={4} maxLength={2000} value={description} onChange={(e) => { setDescription(e.target.value); setDesign(null); setSaved(null); }} placeholder="A middle-aged British woman with a low pitch, speaking softly." /></Field>
-      <Button className="self-start" disabled={!description.trim()} loading={op.busy} onClick={() => void op.run(async (signal) => { setDesign(await studioJson<Design>("/design/describe", { ...jsonBody({ description }), signal })); })}>Interpret description</Button>
+      <Button className="self-start" disabled={!description.trim()} loading={op.busy} onClick={() => void op.run(async (signal) => { setDesign(await studioJson<Design>("/design/describe", { ...jsonBody({ description }), signal })); setSaved(null); })}>Interpret description</Button>
       {design && <div className="rounded-control bg-bg3 p-4 text-sm"><p>{design.instruct || "Neutral voice (automatic attributes)"}</p>{design.unmatched.length > 0 && <p className="mt-2 text-fg2">Not supported by this model: {design.unmatched.join(", ")}</p>}</div>}
     </>}
-    <div className="flex flex-wrap items-center gap-3"><Button variant="primary" disabled={!name.trim() || (mode === "clone" ? !file : !design)} loading={op.busy} onClick={() => void save()}>Save voice</Button>{saved && <Link className="text-sm underline" to="/voices">Choose {saved.name} in Voices</Link>}</div>
+    {/* Saving is final until something changes: a second press would create a duplicate voice on the server. */}
+    <div className="flex flex-wrap items-center gap-3"><Button variant="primary" disabled={!!saved || !name.trim() || (mode === "clone" ? !file : !design)} loading={op.busy} onClick={() => void save()}>{saved ? "Saved" : "Save voice"}</Button>{saved && <Link className="text-sm underline" to="/voices">Choose {saved.name} in Voices</Link>}</div>
     <p role="status" className="text-sm text-fg2">{op.status}</p><ErrorNotice error={op.error} />
   </div>;
 }

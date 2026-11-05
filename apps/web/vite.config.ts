@@ -7,18 +7,21 @@ import { pageFetch } from "./vite.fetch";
 import { siteFavicons } from "./vite.favicon";
 import { audioPreparation } from "./vite.prepare";
 import { sharedLibrary } from "./vite.library";
+import { SpeechActivity } from "./vite.speech-activity";
 
 export default defineConfig(({ mode }) => {
   // Server-side only (no VITE_ prefix): never reaches the bundle.
   const env = { ...loadEnv(mode, process.cwd(), ""), ...process.env } as Record<string, string>;
-  const proxy = voiceStudioProxy(env);
+  // Live speech through the proxy pauses background preparation on the same VoiceStudio.
+  const activity = new SpeechActivity(Number(env.PREPARATION_YIELD_MS) || undefined);
+  const proxy = voiceStudioProxy(env, activity);
   return {
   plugins: [
     react(),
     tailnetUrl(),
     pageFetch(),
     siteFavicons(),
-    audioPreparation(env),
+    audioPreparation(env, activity),
     sharedLibrary(env),
     VitePWA({
       registerType: "autoUpdate",

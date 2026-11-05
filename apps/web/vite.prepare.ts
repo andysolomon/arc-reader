@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
 import type { PreparationRequest, PreparationStatus, SharedPreparation } from "./src/engine/preparation";
 import { PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
+import { SpeechActivity } from "./vite.speech-activity";
 
 interface Job extends PreparationStatus {
   requests: PreparationRequest[];
@@ -36,7 +37,7 @@ export class PreparationService {
   private uploaded = new Set<string>();
   private discovery: PreparationWorkers;
   private ready: Promise<void>;
-  constructor(env: Record<string, string>, private directory = resolve(env.PREPARATION_DATA_DIR || ".readaloud-preparations")) {
+  constructor(env: Record<string, string>, private directory = resolve(env.PREPARATION_DATA_DIR || ".readaloud-preparations"), private activity = new SpeechActivity()) {
     this.discovery = new PreparationWorkers(env);
     this.ready = this.restore();
   }
@@ -224,7 +225,14 @@ export class PreparationService {
         if (job.completed.includes(index)) continue;
         for (let attempt = 0; ; attempt++) {
           try {
-            if (!job.requests[index].cached) await this.audioFor(job.requests[index], () => job.state === "running", worker);
+            if (!job.requests[index].cached) {
+              // Someone listening or previewing on this machine comes first: the
+              // speech server refuses a third concurrent request, and switching
+              // engines mid-stream would evict theirs from memory.
+              await this.activity.idle(worker.target);
+              if (job.state !== "running") return;
+              await this.audioFor(job.requests[index], () => job.state === "running", worker);
+            }
             break;
           } catch (error) {
             if (job.state !== "running") return;
@@ -384,7 +392,7 @@ async function body(req: IncomingMessage) {
   catch { throw new HttpError(400, "Invalid JSON."); }
 }
 
-export function audioPreparation(env: Record<string, string>): Plugin {
+export function audioPreparation(env: Record<string, string>, activity?: SpeechActivity): Plugin {
   let service: PreparationService;
   const middleware: Connect.NextHandleFunction = (req, res) => {
     void (async () => {
@@ -427,7 +435,7 @@ export function audioPreparation(env: Record<string, string>): Plugin {
     })();
   };
   const mount = (server: { middlewares: Connect.Server }) => {
-    service ??= new PreparationService(env);
+    service ??= new PreparationService(env, undefined, activity);
     server.middlewares.use("/api/preparations", middleware);
   };
   return { name: "readaloud:audio-preparation", configureServer: mount, configurePreviewServer: mount };

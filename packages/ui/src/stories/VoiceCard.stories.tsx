@@ -10,6 +10,7 @@ export const Idle: S = { render: (a) => <div className="w-[240px]"><VoiceCard {.
 export const Selected: S = { args: { selected: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Previewing: S = { args: { previewing: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Demotable: S = { args: { voice: { ...VOICES[0], tags: ["designed"] }, onRemove: () => {}, removeLabel: "Send Ava back to Studio" }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
+export const Generating: S = { args: { previewing: true, generating: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Local: S = { args: { voice: VOICES[2] }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Grid: S = {
   render: () => {

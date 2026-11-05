@@ -61,6 +61,15 @@ describe("voice providers", () => {
     expect(voices.map((v) => v.id)).toEqual(expect.arrayContaining(["fish:narrator", "profile", "nova", "local"]));
     expect(getVoice("fish:narrator")).toMatchObject({ name: "Narrator", engine: "fish", kind: "preset" });
   });
+  it("labels a cloned voice's automatic language as Auto, not as a country code", async () => {
+    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [
+      { id: "auto-clone", name: "Me", type: "profile", language: "Auto" },
+      { id: "en-clone", name: "Narrator", type: "profile", language: "en-GB" },
+    ], engines: [] });
+    await useVoices.getState().loadServer();
+    expect(getVoice("auto-clone").lang).toBe("Auto");
+    expect(getVoice("en-clone").lang).toBe("EN-GB");
+  });
   it("records the server's active engine and which engines can clone", async () => {
     vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [], engines: [
       { id: "omnivoice", available: true, supports_cloning: true },

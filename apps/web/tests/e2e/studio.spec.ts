@@ -47,6 +47,9 @@ test("clones an uploaded reference and reloads saved voices", async ({ page }) =
   await page.getByLabel("Words spoken").fill("The reference text");
   await page.getByRole("button", { name: "Save voice" }).click();
   await expect(page.getByRole("link", { name: "Choose New voice in Voices" })).toBeVisible();
+  // One saved voice per recording: the button stays disabled until the clip or name changes.
+  await expect(page.getByRole("button", { name: "Saved" })).toBeDisabled();
+  expect(calls.filter((c) => c.path === "/profiles" && c.body)).toHaveLength(1);
   const call = calls.find((c) => c.path === "/profiles" && c.body);
   expect(call?.body).toContain('name="ref_audio"');
   expect(call?.body).toContain("The reference text");

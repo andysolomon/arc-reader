@@ -135,6 +135,24 @@ describe("apiSynthesize queue", () => {
     expect(maxInFlight).toBe(1);
   });
 
+  it("does not wait out a long Retry-After: live listening retries within seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const { apiSynthesize, BUSY_RETRY_CAP_MS } = await import("./providers");
+      fetchMock
+        .mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "30" } }))
+        .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+      const pending = apiSynthesize({ text: "x", voice: "v", engine: "kittentts" });
+      await vi.advanceTimersByTimeAsync(BUSY_RETRY_CAP_MS - 1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect((await pending).source).toBe("api");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries a 429 with backoff instead of failing", async () => {
     const { apiSynthesize } = await import("./providers");
     fetchMock

@@ -1,4 +1,5 @@
 import type { ProxyOptions } from "vite";
+import { isSpeechRequest, type SpeechActivity } from "./vite.speech-activity";
 
 /**
  * Forwards /api/vs/* to a VoiceStudio server and injects its API key.
@@ -7,7 +8,7 @@ import type { ProxyOptions } from "vite";
  * dropped: VoiceStudio's CSRF guard would reject an unknown origin, and a request
  * without one is treated as a non-browser client, which is what the proxy is.
  */
-function route(prefix: string, target: string, key: string, extra: Partial<ProxyOptions> = {}): ProxyOptions {
+function route(prefix: string, target: string, key: string, extra: Partial<ProxyOptions> = {}, activity?: SpeechActivity): ProxyOptions {
   return {
       target,
       changeOrigin: true,
@@ -15,11 +16,13 @@ function route(prefix: string, target: string, key: string, extra: Partial<Proxy
       timeout: 1_800_000,
       proxyTimeout: 1_800_000,
       configure(proxy) {
-        proxy.on("proxyReq", (req) => {
-          req.removeHeader("origin");
-          req.removeHeader("referer");
-          req.removeHeader("cookie");
-          if (key) req.setHeader("authorization", `Bearer ${key}`);
+        proxy.on("proxyReq", (proxyReq, req, res) => {
+          proxyReq.removeHeader("origin");
+          proxyReq.removeHeader("referer");
+          proxyReq.removeHeader("cookie");
+          if (key) proxyReq.setHeader("authorization", `Bearer ${key}`);
+          // Background preparation pauses while this live request is in flight.
+          if (activity && isSpeechRequest(req?.method, req?.url)) res?.once("close", activity.begin(target));
         });
         proxy.on("error", (err, _req, res) => {
           if ("writeHead" in res && !res.headersSent) {
@@ -32,10 +35,13 @@ function route(prefix: string, target: string, key: string, extra: Partial<Proxy
   };
 }
 
-/** /api/vs → VoiceStudio (loopback), /api/oa → OpenAI. Keys come from server-side env only. */
-export function voiceStudioProxy(env: Record<string, string>): Record<string, ProxyOptions> {
+/**
+ * /api/vs → VoiceStudio (loopback), /api/oa → OpenAI. Keys come from server-side env only.
+ * `activity` is shared with audio preparation so it yields to live speech on the same server.
+ */
+export function voiceStudioProxy(env: Record<string, string>, activity?: SpeechActivity): Record<string, ProxyOptions> {
   const routes: Record<string, ProxyOptions> = {
-    "/api/vs": route("/api/vs", (env.VOICESTUDIO_URL || "http://127.0.0.1:3900").replace(/\/$/, ""), env.VOICESTUDIO_API_KEY || ""),
+    "/api/vs": route("/api/vs", (env.VOICESTUDIO_URL || "http://127.0.0.1:3900").replace(/\/$/, ""), env.VOICESTUDIO_API_KEY || "", {}, activity),
   };
   if (env.OPENAI_API_KEY) {
     routes["/api/oa"] = route("/api/oa", (env.OPENAI_URL || "https://api.openai.com").replace(/\/$/, ""), env.OPENAI_API_KEY, { secure: true });

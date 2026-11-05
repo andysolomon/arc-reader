@@ -57,6 +57,8 @@ export default defineConfig({
         VITE_API_BASE: "/api/vs",
         VITE_TTS_PROVIDER: "openai",
         VITE_DEFAULT_ENGINE: "kittentts",
+        // The stub answers instantly, so preparation need not wait long after a live request.
+        PREPARATION_YIELD_MS: "500",
         VOICESTUDIO_URL: LIVE ? process.env.VOICESTUDIO_URL || localEnv.VOICESTUDIO_URL || "http://127.0.0.1:3900" : `http://127.0.0.1:${voicePort}`,
         VOICESTUDIO_API_KEY: LIVE ? process.env.VOICESTUDIO_API_KEY || localEnv.VOICESTUDIO_API_KEY || "" : "test-key",
         VOICESTUDIO_NAME: "Mac",
