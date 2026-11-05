@@ -8,11 +8,17 @@ vi.stubGlobal("requestAnimationFrame", () => 0);
 vi.stubGlobal("cancelAnimationFrame", () => {});
 
 const synth = vi.mocked(synthesize);
+/** `n` one-word sentences, each its own paragraph, so every sentence is its own passage. */
 const doc = (n: number): EngineDoc => ({
   id: "d", title: "t", voice: "v", lang: "en",
-  sentences: Array.from({ length: n }, (_, i) => ({ text: `s${i}`, words: [`s${i}`], start: i, end: i + 1 })),
-  words: n,
+  sentences: Array.from({ length: n }, (_, i) => ({ index: i, para: i, text: `s${i}`, words: [`s${i}`] })),
+  paragraphs: [],
 } as unknown as EngineDoc);
+/** Sentences grouped into paragraphs by the given sizes: [2, 1] → "s0 s1" then "s2". */
+const paraDoc = (sizes: number[]): EngineDoc => {
+  const sentences = sizes.flatMap((size, para) => Array.from({ length: size }, (_, k) => ({ para, text: `p${para}s${k}.`, words: [`p${para}s${k}.`] })));
+  return { id: "d", title: "t", voice: "v", lang: "en", sentences: sentences.map((x, index) => ({ ...x, index })), paragraphs: [] } as unknown as EngineDoc;
+};
 const chunk = (extra: Partial<Chunk> = {}): Chunk => ({ source: "api", audio: new Blob([new Uint8Array(4)]), duration: 2, ...extra });
 
 function make(onSlow = vi.fn(), onUnavailable = vi.fn()) {
@@ -59,6 +65,55 @@ describe("prepare", () => {
     e.load(doc(3));
     const swap = e.prepare((done) => { if (done === 1) e.load(doc(2)); });
     await swap;
+    expect(synth).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("passages", () => {
+  it("requests one clip per paragraph, with the words of every sentence for alignment", async () => {
+    synth.mockImplementation(async () => chunk());
+    const { e } = make();
+    e.load(paraDoc([3, 2]));
+    expect(e.passages.map((p) => [p.start, p.end])).toEqual([[0, 3], [3, 5]]);
+    await e.prepare();
+    expect(synth).toHaveBeenCalledTimes(2);
+    expect(synth.mock.calls[0][0]).toMatchObject({ text: "p0s0. p0s1. p0s2.", words: ["p0s0.", "p0s1.", "p0s2."], parts: [["p0s0."], ["p0s1."], ["p0s2."]] });
+    expect(synth.mock.calls[1][0]).toMatchObject({ text: "p1s0. p1s1." });
+  });
+
+  it("prepares from the passage holding the current sentence and reports passage counts", async () => {
+    synth.mockImplementation(async () => chunk());
+    const { e } = make();
+    e.load(paraDoc([2, 2, 1]), 3);
+    const progress: [number, number][] = [];
+    await e.prepare((done, total) => progress.push([done, total]));
+    expect(synth.mock.calls.map((c) => c[0].text)).toEqual(["p1s0. p1s1.", "p2s0.", "p0s0. p0s1."]);
+    expect(progress).toEqual([[1, 3], [2, 3], [3, 3]]);
+  });
+
+  it("splits sentence durations by the clip's sentence starts, so the progress bar and seeking follow the audio", async () => {
+    synth.mockResolvedValueOnce(chunk({ duration: 10, starts: [0, 4, 7] })).mockResolvedValue(chunk({ duration: 3 }));
+    const { e } = make();
+    e.load(paraDoc([3, 1]));
+    await e.prepare();
+    const snap = e.getSnapshot();
+    expect(snap.total).toBeCloseTo(13);
+    expect(snap.ticks.map((t) => +(t * 13).toFixed(3))).toEqual([4, 7, 10]);
+    e.seekFraction(5 / 13, false);
+    expect(e.getSnapshot()).toMatchObject({ index: 1, offset: 1 });
+  });
+
+  it("waits for the whole passage before reporting playing, even mid-paragraph", async () => {
+    const first = deferred<Chunk>();
+    synth.mockReturnValueOnce(first.promise).mockResolvedValue(chunk({ source: "estimate", audio: undefined, duration: 1 }));
+    const { e } = make();
+    e.load(paraDoc([3]), 1);
+    const play = e.play();
+    await tick();
+    expect(e.getSnapshot()).toMatchObject({ playing: false, loading: true, index: 1 });
+    first.resolve(chunk({ source: "estimate", audio: undefined, duration: 3, starts: [0, 1, 2] }));
+    await play;
+    expect(e.getSnapshot()).toMatchObject({ playing: true, loading: false, index: 1 });
     expect(synth).toHaveBeenCalledTimes(1);
   });
 });

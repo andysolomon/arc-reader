@@ -25,13 +25,14 @@ test.describe("OpenAI voices (stub server)", () => {
     await page.goto("/voices");
     await page.locator('[data-voice="sage"]').getByRole("button", { name: "Use" }).click();
     await page.goto("/");
-    await page.getByLabel("Text to read").fill(TEXT);
+    // Three paragraphs → three passages: the current one, then two prefetches
+    await page.getByLabel("Text to read").fill(`${TEXT}\n\nA third paragraph makes a third passage.`);
     const starts: number[] = [];
     page.on("request", (q) => { if (q.url().includes("/api/oa/v1/audio/speech")) starts.push(Date.now()); });
     await page.getByTestId("listen").click();
     await expect.poll(() => starts.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
-    // Current + two prefetches are issued together (within 300 ms), not one after another
-    expect(starts[2] - starts[0]).toBeLessThan(300);
+    // The two prefetches are issued together (within 300 ms), not one after another
+    expect(starts[2] - starts[1]).toBeLessThan(300);
   });
 
   test("usage counts OpenAI characters separately", async ({ page }) => {

@@ -25,11 +25,11 @@ test.describe("VoiceStudio provider (stub server)", () => {
     expect(html).not.toContain("test-key");
   });
 
-  test("cached sentences replay with the server offline", async ({ page, context }) => {
+  test("cached passages replay with the server offline", async ({ page, context }) => {
     let synthesized = 0;
     page.on("response", (r) => { if (r.url().includes("/v1/audio/speech") && r.status() === 200) synthesized++; });
     await composeAndListen(page);
-    await expect.poll(() => synthesized, { timeout: 10_000 }).toBeGreaterThanOrEqual(3); // current + two prefetched
+    await expect.poll(() => synthesized, { timeout: 10_000 }).toBeGreaterThanOrEqual(2); // both paragraphs: current + prefetched
     await page.waitForTimeout(300); // let the cache writes land
     await page.keyboard.press("Space"); // pause → position persisted
     await context.route("**/api/vs/**", (route) => route.abort("connectionrefused"));
@@ -37,7 +37,7 @@ test.describe("VoiceStudio provider (stub server)", () => {
     await page.getByRole("region", { name: "Player" }).waitFor();
     await page.getByRole("button", { name: /^Play/ }).click();
     await expect(page.getByRole("button", { name: /^Pause/ })).toBeVisible();
-    // No banner: the current sentence came from cache, not the local fallback.
+    // No banner: the current passage came from cache, not the local fallback.
     await expect(page.getByTestId("offline-banner")).toHaveCount(0);
   });
 
@@ -70,7 +70,7 @@ test.describe("VoiceStudio provider (stub server)", () => {
     expect(body).toMatchObject({ model: "tts-1", voice: "prof-narrator-1" });
   });
 
-  test("word timings flag adds a transcription request per sentence and drives the underline", async ({ page }) => {
+  test("word timings flag adds a transcription request per passage and drives the underline", async ({ page }) => {
     await page.goto("/settings");
     await page.getByRole("switch", { name: "Word timings from the server" }).click();
     let transcriptions = 0;

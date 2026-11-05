@@ -2,7 +2,7 @@
 
 # ReadAloud
 
-Paste anything. Hear it read. A React + Vite PWA that streams text-to-speech per sentence, highlights what is being read, remembers your place, and works offline with a local voice.
+Paste anything. Hear it read. A React + Vite PWA that streams text-to-speech passage by passage, highlights the sentence being read, remembers your place, and works offline with a local voice.
 
 ## Layout
 
@@ -31,7 +31,7 @@ Copy `apps/web/.env.example` to `.env` to point the app at a TTS backend.
 
 ## Playback engine (`apps/web/src/engine`)
 
-- One audio chunk per sentence; the next two are prefetched.
+- One audio clip per passage (a paragraph, or up to about 60 words of one); the next two are prefetched. The reader still moves sentence by sentence: each clip's sentence starts are located from its pauses (or from word timings when enabled), clips are level-matched and their edge silences trimmed at the joins. One request per sentence made generative voices shift tone at every sentence; see `planPassages` in `src/lib/segment.ts`.
 - Advances with `requestAnimationFrame` on real elapsed time. With audio, `audio.currentTime` is the clock. Without provider timestamps, word timing is estimated at 2.83 words/s × speed.
 - Chunks are cached in IndexedDB (`audio` store, keyed by engine + voice + text) so documents replay offline. Positions persist per document (`positions` store) and drive the Library progress rings.
 - Provider chain: cache → speech server → browser voice. When the server is unreachable, a banner appears and the browser speech engine reads instead.
@@ -64,7 +64,7 @@ Measured on this laptop (Intel i7, 12 threads, CPU only, KittenTTS warm; the fir
 | "I went to the woods because I wished to live deliberately." | 11 | 1.2 s | 240 KB (WAV) |
 | "The quick brown fox … begin to call." | 22 | 2.3 s | 156 KB |
 
-Generation runs at roughly 3–4× real time, so the two-sentence prefetch keeps up once playback starts. MP3 is the cheapest format; WAV and PCM save nothing on latency. Saved profiles require an active cloning engine; ReadAloud checks this before requesting speech and reports an explicit browser fallback if it is unavailable. KittenTTS cannot clone. Re-measure with `apps/web/scripts/measure-tts.sh`:
+Generation runs at roughly 3–4× real time, so the two-passage prefetch keeps up once playback starts (the numbers above are per sentence; a passage request is a few sentences long). MP3 is the cheapest format; WAV and PCM save nothing on latency. Saved profiles require an active cloning engine; ReadAloud checks this before requesting speech and reports an explicit browser fallback if it is unavailable. KittenTTS cannot clone. Re-measure with `apps/web/scripts/measure-tts.sh`:
 
 ```sh
 VOICESTUDIO_API_KEY=… apps/web/scripts/measure-tts.sh   # three runs, first-byte and total time; or reads apps/web/.env.local
@@ -106,7 +106,7 @@ VITE_OPENAI_TTS_MODEL=gpt-4o-mini-tts   # or tts-1 / tts-1-hd
 OPENAI_API_KEY=sk-...                     # read by the proxy only
 ```
 
-The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; Settings → Engine selects VoiceStudio’s active engine for saved profiles or enables the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → API usage & spending shows monthly requests, reported input/audio output tokens, and list-price cost estimates. GPT-4o mini TTS requests use speech events to retain reported usage; binary-only compatible servers remain playable, with tokens and cost marked unavailable. Every sentence sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
+The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; Settings → Engine selects VoiceStudio’s active engine for saved profiles or enables the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → API usage & spending shows monthly requests, reported input/audio output tokens, and list-price cost estimates. GPT-4o mini TTS requests use speech events to retain reported usage; binary-only compatible servers remain playable, with tokens and cost marked unavailable. Every gpt-4o-mini-tts request also carries a fixed `instructions` line asking for one steady delivery, so passages match each other. Every passage sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
 
 ### Fish Audio voices
 
@@ -126,7 +126,7 @@ Jamaican English uses Fish's [Jamaican Accent Male](https://fish.audio/m/d7988a7
 
 Patois rewriting requires `VITE_OPENAI_BASE=/api/oa` and the server-side `OPENAI_API_KEY` above. It uses `gpt-4.1-mini` by default (`VITE_PATOIS_MODEL` overrides it) through the existing OpenAI proxy. Source text is sent to OpenAI in bounded chunks; adapted text goes to Fish. Text-model token charges are separate from the speech-character estimates in Settings. The reader displays and highlights the adapted text. The original and completed adaptation are stored together on this device, so repeat listening reuses the rewrite; switching to another voice restores the original. Positions reset when changing between original and adapted text. Failed, cancelled, refused, or truncated rewrites do not start speech or replace the original. The preparation banner offers cancel and retry. Adaptation quality still benefits from a fluent speaker's review.
 
-Fish uses [`POST /v1/tts`](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech) with the voice's `reference_id` and returns MP3 audio. Sentence prefetch, playback speed, cache, and character usage work as before. Fish caches include the selected model, and cloud requests run independently of the local worker queue. Changing voices retries the connection after an offline fallback. Word highlighting uses estimated timing unless the existing optional VoiceStudio alignment is enabled.
+Fish uses [`POST /v1/tts`](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech) with the voice's `reference_id` and returns MP3 audio. Passage prefetch, playback speed, cache, and character usage work as before. Fish caches include the selected model, and cloud requests run independently of the local worker queue. Changing voices retries the connection after an offline fallback. Word highlighting uses estimated timing unless the existing optional VoiceStudio alignment is enabled.
 
 `s2.1-pro` requires API credit; an insufficient-credit response is shown without marking all providers offline. Other models can be selected using `VITE_FISH_TTS_MODEL`; consult Fish's current model documentation before changing it. Text read with a Fish voice is sent to Fish Audio. Leave `VITE_FISH_BASE` empty to hide this provider.
 
@@ -138,7 +138,7 @@ Daily aggregates live in `readaloud:usage` in this browser's local storage. They
 
 ### Slow engines (cloned voices on CPU)
 
-Cloning engines such as OmniVoice are built for a GPU. On a CPU they can take ten times longer to generate a sentence than to play it, so the reader pauses between sentences while the next one renders (the player's spinner shows the wait). The app detects this and points to **Prepare audio** in the player menu: it renders the whole document into the cache from the current sentence onward, with progress beside the time, and can run while paused or in the background. Playback from the cache is gapless, also on later visits. For live reading choose a KittenTTS voice (CPU-native, faster than real time) or an OpenAI voice.
+Cloning engines such as OmniVoice are built for a GPU. On a CPU they can take ten times longer to generate a passage than to play it, so the reader pauses between passages while the next one renders (the player's spinner shows the wait). The app detects this and points to **Prepare audio** in the player menu: it renders the whole document into the cache from the current passage onward, with progress beside the time, and can run while paused or in the background. Playback from the cache is gapless, also on later visits. For live reading choose a KittenTTS voice (CPU-native, faster than real time) or an OpenAI voice.
 
 ### Without VoiceStudio
 
@@ -151,7 +151,7 @@ VOICESTUDIO_URL=http://127.0.0.1:3999 VOICESTUDIO_API_KEY=test-key VITE_API_BASE
 
 ### Word timings (optional)
 
-The speech endpoint returns audio only, so the word underline is estimated. Settings → Playback → **Word timings from the server** sends each synthesized sentence to `/v1/audio/transcriptions` (`verbose_json`, word granularity) and uses the result when every word aligns. It costs one extra request per sentence and is off by default.
+The speech endpoint returns audio only, so the word underline is estimated. Settings → Playback → **Word timings from the server** sends each synthesized passage to `/v1/audio/transcriptions` (`verbose_json`, word granularity) and uses the result when every word aligns; the timings then also fix the sentence starts inside the clip. It costs one extra request per passage and is off by default.
 
 ### Legacy contract
 

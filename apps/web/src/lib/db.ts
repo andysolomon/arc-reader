@@ -42,6 +42,11 @@ export interface AudioRecord {
   mime: string;
   duration: number;
   words?: WordTiming[];
+  /** Sentence starts inside a passage clip (see Chunk.starts); recorded with the words the clip was planned from. */
+  starts?: number[];
+  lead?: number;
+  tail?: number;
+  loudness?: number;
   createdAt: number;
 }
 

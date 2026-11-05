@@ -67,3 +67,57 @@ export function titleFrom(text: string, max = 64): string {
   const t = first.replace(/\s+/g, " ").trim();
   return t.length > max ? t.slice(0, max).trimEnd() + "…" : t || "Untitled";
 }
+
+/**
+ * A run of consecutive sentences synthesized as one request. Generative voices
+ * re-decide pitch, pace and energy on every call, so sending single sentences
+ * made the voice shift at every boundary; a passage keeps that drift to
+ * paragraph (or long-paragraph) joins.
+ */
+export interface Passage {
+  index: number;
+  /** First sentence index (inclusive). */
+  start: number;
+  /** Last sentence index (exclusive). */
+  end: number;
+  text: string;
+  /** Words per sentence, for alignment inside the clip. */
+  parts: string[][];
+}
+
+/** Upper bound per passage (≈ 20 s of speech), so the first clip is not long in coming. */
+export const PASSAGE_MAX_WORDS = 60;
+
+/**
+ * Plan passages: never across a paragraph; a paragraph over the limit is cut
+ * into roughly equal shares rather than a long run plus a stub. A pure function
+ * of the text, so cache keys are stable across sessions.
+ */
+export function planPassages(sentences: Pick<Sentence, "text" | "words" | "para">[], maxWords = PASSAGE_MAX_WORDS): Passage[] {
+  const out: Passage[] = [];
+  const push = (start: number, end: number) => {
+    const run = sentences.slice(start, end);
+    out.push({ index: out.length, start, end, text: run.map((s) => s.text).join(" "), parts: run.map((s) => s.words) });
+  };
+  let i = 0;
+  while (i < sentences.length) {
+    let j = i;
+    let total = 0;
+    while (j < sentences.length && sentences[j].para === sentences[i].para) total += sentences[j++].words.length;
+    const target = total / Math.max(1, Math.ceil(total / maxWords));
+    let start = i;
+    let acc = 0;
+    for (let k = i; k < j; k++) {
+      const n = sentences[k].words.length;
+      if (acc > 0 && (acc >= target || acc + n > maxWords)) {
+        push(start, k);
+        start = k;
+        acc = 0;
+      }
+      acc += n;
+    }
+    push(start, j);
+    i = j;
+  }
+  return out;
+}
