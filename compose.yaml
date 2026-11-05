@@ -34,7 +34,10 @@ services:
       - "127.0.0.1:${WEB_PORT:-4179}:4173"
     # Read by the preview server's proxy only; never bundled.
     environment:
-      VOICESTUDIO_URL: http://voicestudio:3900
+      # VOICESTUDIO_REMOTE_URL points the app at a VoiceStudio on another machine (e.g. a GPU Mac
+      # on the tailnet). It is separate from VOICESTUDIO_URL, which `npm run dev` reads from the
+      # same .env and which is usually a loopback address that means nothing inside this container.
+      VOICESTUDIO_URL: ${VOICESTUDIO_REMOTE_URL:-http://voicestudio:3900}
       VOICESTUDIO_API_KEY: ${VOICESTUDIO_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       FISH_API_KEY: ${FISH_API_KEY:-}

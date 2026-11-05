@@ -7,8 +7,11 @@ import { createServer } from "node:http";
 const PORT = Number(process.argv[2] || process.env.STUB_PORT || 3999);
 const KEY = process.argv[3] || process.env.STUB_KEY || "test-key";
 const ENGINES = [
-  { id: "kittentts", name: "KittenTTS", available: true },
-  { id: "supertonic3", name: "Supertonic-3", available: false },
+  { id: "kittentts", name: "KittenTTS", available: true, supports_cloning: false },
+  { id: "supertonic3", name: "Supertonic-3", available: false, supports_cloning: false },
+  { id: "omnivoice", name: "OmniVoice", available: true, supports_cloning: true },
+  { id: "omnivoice-subprocess", available: true, supports_cloning: true },
+  { id: "cosyvoice", name: "CosyVoice 3", available: false, supports_cloning: true },
 ];
 const PROFILES = [
   { id: "prof-narrator-1", name: "Studio Narrator", type: "profile", language: "en-GB" },

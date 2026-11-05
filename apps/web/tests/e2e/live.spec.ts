@@ -51,8 +51,9 @@ test.describe("@live VoiceStudio", () => {
     await expect(page.getByText("Bella")).toBeVisible();
     await expect(page.getByText("Demo Voice")).toBeVisible();
     await page.goto("/settings");
-    const group = page.getByRole("group", { name: "TTS engine" });
-    await expect(group.getByRole("button", { name: "KittenTTS" })).toBeEnabled();
-    await expect(group.getByRole("button", { name: "Browser voice" })).toBeEnabled();
+    const group = page.getByRole("group", { name: "Saved-voice engine" });
+    await expect(group.getByRole("button", { pressed: true })).toHaveCount(1);
+    await expect(group.getByRole("button", { name: "KittenTTS" })).toHaveCount(0);
+    await expect(page.getByRole("switch", { name: "Browser voice only" })).toBeVisible();
   });
 });
