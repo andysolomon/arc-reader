@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { Button, cn } from "@readaloud/ui";
-import { VoiceWorkshop, VoiceGallery } from "../components/studio/VoiceWorkshop";
+import { VoiceWorkshop } from "../components/studio/VoiceWorkshop";
+import { VoiceGallery } from "../components/studio/VoiceGallery";
 import { Transcription } from "../components/studio/Transcription";
 import { Dubbing } from "../components/studio/Dubbing";
 import { ModelTerms } from "../components/studio/ModelTerms";

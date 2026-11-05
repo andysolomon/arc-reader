@@ -21,6 +21,7 @@ async function mockStudio(page: Page) {
     else if (path === "/profiles") { body = { id: "voice-2", name: "New voice", kind: req.postData()?.includes('name="vd_states"') ? "design" : "clone", language: "English" }; profiles.push(body as typeof profiles[0]); }
     else if (path === "/design/describe") body = { attrs: { Gender: "female", Pitch: "low pitch" }, instruct: "female, low pitch", unmatched: ["raspy"] };
     else if (path === "/archetypes") body = { total: 1, items: [{ id: "librarian", name: "The Librarian", language: "English", use_case: "narration", instruct: "female, low pitch, british accent" }] };
+    else if (path.endsWith("/preview/state")) body = { source: "rendering", message: "Rendering" };
     else if (path === "/archetypes/librarian/use") body = { profile_id: "voice-1", name: "The Librarian" };
     else if (path === "/transcribe") body = { text: "Hello from the recording.", segments: [{ start: 0, end: 2.5, text: "Hello from the recording." }] };
     else if (path === "/dub/upload") body = { job_id: "dub-1", task_id: "prep-1" };
@@ -157,22 +158,22 @@ test("license acceptance requires reviewing and checking each model", async ({ p
   expect(calls.some((c) => c.path === "/models/licenses/accept")).toBe(false);
 });
 
-function previewWav() {
-  const wav = Buffer.alloc(44 + 16000 * 2);
+function previewWav(seconds = 1) {
+  const wav = Buffer.alloc(44 + 16000 * 2 * seconds);
   wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVE", 8);
   wav.write("fmt ", 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
   wav.writeUInt32LE(16000, 24); wav.writeUInt32LE(32000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
-  wav.write("data", 36); wav.writeUInt32LE(32000, 40);
+  wav.write("data", 36); wav.writeUInt32LE(32000 * seconds, 40);
   return wav;
 }
 
-test("preview explains generation, waits for complete audio, and reuses it", async ({ page }) => {
+test("preview waits for complete audio and picks up repaired clips when reopened", async ({ page }) => {
   await mockStudio(page);
   let finish!: () => void;
   const gate = new Promise<void>((resolve) => { finish = resolve; });
   let downloads = 0;
   await page.route("**/archetypes/librarian/preview/state", (route) => route.fulfill({ json: { source: "rendering", message: "Rendering" } }));
-  await page.route("**/archetypes/librarian/preview", async (route) => { downloads++; await gate; await route.fulfill({ contentType: "audio/wav", body: previewWav() }); });
+  await page.route("**/archetypes/librarian/preview", async (route) => { downloads++; await gate; await route.fulfill({ contentType: "audio/wav", body: previewWav(downloads) }); });
   await page.goto("/studio/gallery");
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Generating preview" })).toContainText("first preview can take a minute");
@@ -180,10 +181,13 @@ test("preview explains generation, waits for complete audio, and reuses it", asy
   finish();
   await expect(page.locator("audio")).toHaveAttribute("src", /^blob:/);
   await expect(page.getByRole("status").filter({ hasText: "Preview ready" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "The Librarian" }).getByText("Preview ready", { exact: true })).toBeVisible();
+  await expect.poll(() => page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.duration)).toBe(1);
   await page.getByRole("button", { name: "Close preview" }).click();
-  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await page.getByRole("button", { name: "Play preview", exact: true }).click();
   await expect(page.locator("audio")).toHaveAttribute("src", /^blob:/);
-  expect(downloads).toBe(1);
+  await expect.poll(() => page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.duration)).toBe(2);
+  expect(downloads).toBe(2);
 });
 
 test("preview displays actual server errors and supports retry", async ({ page }) => {
@@ -196,6 +200,7 @@ test("preview displays actual server errors and supports retry", async ({ page }
   await page.goto("/studio/gallery");
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText("Licence not accepted for OmniVoice");
+  await expect(page.getByRole("article", { name: "The Librarian" }).getByText("Preview ready", { exact: true })).toHaveCount(0);
   await expect(page.locator("audio")).toHaveCount(0);
   await page.getByRole("button", { name: "Retry preview" }).click();
   await expect(page.locator("audio")).toHaveAttribute("src", /^blob:/);
@@ -219,4 +224,77 @@ test("a stalled preview stops waiting and offers retry", async ({ page }) => {
   await page.getByRole("button", { name: "Close preview" }).click();
   finish();
   await expect(page.locator("audio")).toHaveCount(0);
+});
+
+test("gallery marks cached and gallery previews without generating audio, including after reload", async ({ page }) => {
+  const calls = await mockStudio(page);
+  let source = "cached";
+  await page.route("**/archetypes/librarian/preview/state", (route) => route.fulfill({ json: { source, message: "Ready" } }));
+  await page.goto("/studio/gallery");
+  const card = page.getByRole("article", { name: "The Librarian" });
+  await expect(card.getByText("Preview ready", { exact: true })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Play preview" })).toBeVisible();
+  await expect(card.getByLabel("Voice source: VoiceStudio")).toBeVisible();
+  source = "gallery";
+  await page.reload();
+  await expect(card.getByText("Preview ready", { exact: true })).toBeVisible();
+  source = "rendering";
+  await page.reload();
+  await expect(card.getByText("Not generated", { exact: true })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Preview", exact: true })).toBeVisible();
+  expect(calls.some((c) => c.path.endsWith("/preview"))).toBe(false);
+});
+
+test("preview status errors do not mark a voice ready or prevent previewing", async ({ page }) => {
+  await mockStudio(page);
+  await page.route("**/archetypes/librarian/preview/state", (route) => route.fulfill({ status: 503 }));
+  await page.goto("/studio/gallery");
+  const card = page.getByRole("article", { name: "The Librarian" });
+  await expect(card.getByText("Preview status unavailable")).toBeVisible();
+  await expect(card.getByRole("button", { name: "Preview", exact: true })).toBeEnabled();
+  await expect(card.getByText("Preview ready", { exact: true })).toHaveCount(0);
+});
+
+test("Studio favorites persist, include other catalog pages, and can be searched and removed", async ({ page }) => {
+  const calls = await mockStudio(page);
+  await page.route("**/api/vs/archetypes?**", (route) => {
+    const secondPage = new URL(route.request().url()).searchParams.get("offset") === "24";
+    return route.fulfill({ json: { total: 25, items: [{ id: secondPage ? "neighbor" : "librarian", name: secondPage ? "The Neighbor" : "The Librarian", language: "English", use_case: "narration", instruct: secondPage ? "American accent" : "British accent" }] } });
+  });
+  await page.goto("/studio/gallery");
+  await page.getByRole("button", { name: "Favorite The Librarian", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Unfavorite The Librarian", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Favorite The Neighbor", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "Favorites (2)", exact: true }).click();
+  await expect(page.getByRole("article")).toHaveCount(2);
+  await page.getByLabel("Search designed voices").fill("American");
+  await expect(page.getByRole("article")).toHaveCount(1);
+  await expect(page.getByRole("article", { name: "The Neighbor" })).toBeVisible();
+  await page.getByLabel("Search designed voices").fill("");
+  await page.getByRole("button", { name: "Unfavorite The Librarian", exact: true }).click();
+  await page.getByRole("button", { name: "Unfavorite The Neighbor", exact: true }).click();
+  await expect(page.getByText("No favorites yet. Star a voice in All voices to keep it here.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Favorites (0)", exact: true })).toBeVisible();
+  expect(calls.some((c) => c.path.endsWith("/use") || c.path.endsWith("/preview"))).toBe(false);
+});
+
+test("Voices identifies each provider", async ({ page }) => {
+  await mockStudio(page);
+  await page.goto("/voices");
+  await expect(page.locator('[data-voice="alloy"]').getByLabel("Voice source: ChatGPT")).toBeVisible();
+  await expect(page.locator('[data-voice="voice-1"]').getByLabel("Voice source: VoiceStudio")).toBeVisible();
+  await expect(page.locator('[data-voice="local"]').getByLabel("Voice source: Browser")).toBeVisible();
+});
+
+test("gallery favorites and preview indicators are accessible on a phone", async ({ page }) => {
+  await mockStudio(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio/gallery");
+  await page.getByRole("button", { name: "Favorite The Librarian", exact: true }).click();
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  expect(results.violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
