@@ -28,12 +28,15 @@ test.describe("OpenAI voices (stub server)", () => {
     // Three paragraphs → three passages: the current one, then a single prefetch
     await page.getByLabel("Text to read").fill(`${TEXT}\n\nA third paragraph makes a third passage.`);
     let requests = 0;
+    let preparations = 0;
     page.on("request", (q) => { if (q.url().includes("/api/oa/v1/audio/speech")) requests++; });
+    page.on("request", (q) => { if (q.url().endsWith("/api/preparations") && q.method() === "POST") preparations++; });
     await page.getByTestId("listen").click();
     await expect(page.getByRole("button", { name: /^(Play|Pause)/ })).toHaveAttribute("data-playing", "true");
     await expect.poll(() => requests, { timeout: 10_000 }).toBe(2);
     await page.waitForTimeout(1000);
     expect(requests).toBe(2);
+    expect(preparations).toBe(0);
     await page.getByRole("button", { name: "More" }).first().click();
     await expect(page.getByRole("menuitem", { name: "Change voice for this document" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Prepare audio" })).toHaveCount(0);

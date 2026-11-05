@@ -46,7 +46,7 @@ export function useClipboardImportController(enabled: boolean): ClipboardImport 
       } else {
         rec = await create({ text, source: "paste" });
       }
-      await openDocument(rec, navigate, { autoplay: true, resume: false });
+      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
     } catch {
       toast(failure);
     } finally {

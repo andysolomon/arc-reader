@@ -26,11 +26,8 @@ test.describe("VoiceStudio provider (stub server)", () => {
   });
 
   test("cached passages replay with the server offline", async ({ page, context }) => {
-    let synthesized = 0;
-    page.on("response", (r) => { if (r.url().includes("/v1/audio/speech") && r.status() === 200) synthesized++; });
     await composeAndListen(page);
-    await expect.poll(() => synthesized, { timeout: 10_000 }).toBeGreaterThanOrEqual(2); // both paragraphs: current + prefetched
-    await page.waitForTimeout(300); // let the cache writes land
+    await expect(page.getByText("Audio prepared — playback no longer waits on the server", { exact: true })).toBeVisible();
     await page.keyboard.press("Space"); // pause → position persisted
     await context.route("**/api/vs/**", (route) => route.abort("connectionrefused"));
     await page.reload();
@@ -43,6 +40,7 @@ test.describe("VoiceStudio provider (stub server)", () => {
 
   test("server down → playback waits and offers the browser voice instead of switching silently", async ({ page, context }) => {
     await context.route("**/api/vs/**", (route) => route.abort("connectionrefused"));
+    await context.route(/\/api\/preparations(?:\/|$)/, (route) => route.abort("connectionrefused"));
     await composeAndListen(page);
     const alert = page.getByTestId("speech-error");
     await expect(alert).toContainText("Speech server unreachable");
@@ -122,6 +120,7 @@ test.describe("VoiceStudio provider (stub server)", () => {
     await page.getByLabel("Text to read").fill(TEXT);
     let calls = 0;
     page.on("request", (q) => { if (q.url().includes("/v1/audio/speech")) calls++; });
+    page.on("request", (q) => { if (q.url().endsWith("/api/preparations") && q.method() === "POST") calls++; });
     await page.getByTestId("listen").click();
     await page.waitForURL(/\/read\//);
     await expect(page.getByRole("button", { name: /^Pause/ })).toBeVisible();
