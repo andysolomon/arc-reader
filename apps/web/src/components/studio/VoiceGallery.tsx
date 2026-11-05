@@ -7,6 +7,8 @@ import { galleryFavoriteKey, useGallery } from "../../state/gallery";
 import { usePreviews } from "../../state/previews";
 import { hueFor } from "../../data/voices";
 import { studioJson, studioUrl, idPath, type Archetype, type PreviewSource } from "../../lib/studio";
+import { GALLERY_FACETS, NO_GALLERY_FILTERS, activeFilterCount, galleryParams, matchesGallery, type GalleryFilters } from "../../lib/filters";
+import { ClearFilters, FilterSelect } from "../Filters";
 import { GalleryPreview } from "./GalleryPreview";
 import { Field, ErrorNotice, fieldClass, panelClass, useOperation } from "./shared";
 
@@ -16,6 +18,7 @@ export function VoiceGallery() {
   const [query, setQuery] = useState("");
   const [featured, setFeatured] = useState(true);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [filters, setFilters] = useState<GalleryFilters>(NO_GALLERY_FILTERS);
   const [page, setPage] = useState(0);
   const [items, setItems] = useState<Archetype[]>([]);
   const [total, setTotal] = useState(0);
@@ -35,8 +38,10 @@ export function VoiceGallery() {
     .map(([, voice]) => voice), [favorites]);
   const matchingFavorites = useMemo(() => {
     const search = query.trim().toLowerCase();
-    return favoriteVoices.filter((voice) => [voice.name, voice.instruct, voice.language, voice.use_case].join(" ").toLowerCase().includes(search));
-  }, [favoriteVoices, query]);
+    return favoriteVoices.filter((voice) => matchesGallery(voice, filters) && [voice.name, voice.instruct, voice.language, voice.use_case].join(" ").toLowerCase().includes(search));
+  }, [favoriteVoices, query, filters]);
+  const filterCount = activeFilterCount(filters);
+  const setFilter = (key: keyof GalleryFilters, value: string) => { setFilters((f) => ({ ...f, [key]: value })); setPage(0); };
   const count = favoritesOnly ? matchingFavorites.length : total;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(count / PAGE_SIZE) - 1));
   const visibleItems = useMemo(() => favoritesOnly
@@ -48,7 +53,7 @@ export function VoiceGallery() {
     const ac = new AbortController();
     setLoading(true); setLoadError("");
     const timer = setTimeout(() => {
-      const params = new URLSearchParams({ q: query, limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) });
+      const params = new URLSearchParams([["q", query], ["limit", String(PAGE_SIZE)], ["offset", String(page * PAGE_SIZE)], ...galleryParams(filters)]);
       if (featured) params.set("featured", "true");
       void studioJson<{ items: Archetype[]; total: number }>(`/archetypes?${params}`, { signal: ac.signal })
         .then((data) => { if (!ac.signal.aborted) { setItems(data.items); setTotal(data.total); } })
@@ -56,7 +61,7 @@ export function VoiceGallery() {
         .finally(() => { if (!ac.signal.aborted) setLoading(false); });
     }, 200);
     return () => { clearTimeout(timer); ac.abort(); };
-  }, [query, featured, page, favoritesOnly]);
+  }, [query, featured, page, favoritesOnly, filters]);
 
   // Read only cache metadata, with bounded concurrency. Browsing never renders audio.
   useEffect(() => {
@@ -84,6 +89,11 @@ export function VoiceGallery() {
       <Button variant={favoritesOnly ? "primary" : "secondary"} aria-pressed={favoritesOnly} onClick={() => { setFavoritesOnly(true); setPage(0); }}><Star size={14} aria-hidden />Favorites ({favoriteVoices.length})</Button>
     </div>
     <div className="flex flex-wrap items-end gap-4"><div className="min-w-0 flex-1"><Field label="Search designed voices"><input className={fieldClass} value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} placeholder="Narrator, British, whisper…" /></Field></div>{!favoritesOnly && <label className="flex items-center gap-2 py-3 text-sm"><input type="checkbox" checked={featured} onChange={(e) => { setFeatured(e.target.checked); setPage(0); }} />Featured only</label>}</div>
+    <fieldset className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <legend className="sr-only">Filter designed voices</legend>
+      {GALLERY_FACETS.map((facet) => <FilterSelect key={facet.key} label={facet.label} any={facet.any} value={filters[facet.key]} options={facet.options} onChange={(value) => setFilter(facet.key, value)} />)}
+      <div className="flex items-end"><ClearFilters count={filterCount} onClear={() => { setFilters(NO_GALLERY_FILTERS); setPage(0); }} /></div>
+    </fieldset>
     {preview && <GalleryPreview id={preview.id} name={preview.name} />}
     <p role="status" className="text-sm text-fg2">{loading ? "Loading gallery…" : `${count} ${favoritesOnly ? "favorite voices" : "voices"}`}{op.status && ` · ${op.status}`}</p>
     <ErrorNotice error={loadError || op.error} />
@@ -107,7 +117,7 @@ export function VoiceGallery() {
               {ready ? "Preview ready" : generating ? "Generating preview…" : source === "rendering" ? "Not generated" : source === "no_model" ? "Model required" : source ? "Preview status unavailable" : "Checking preview…"}
             </span>
           </div>
-          <p className="text-xs uppercase tracking-wide text-fg3">{voice.use_case} · {voice.language}</p><p className="flex-1 text-sm text-fg2">{voice.instruct}</p>
+          <p className="text-xs uppercase tracking-wide text-fg2">{voice.use_case} · {voice.language}</p><p className="flex-1 text-sm text-fg2">{voice.instruct}</p>
           <div className="flex flex-wrap gap-2"><Button onClick={() => { op.setError(""); openPreview(voice.id, voice.name); }}>{ready && <Play size={14} aria-hidden />}{ready ? "Play preview" : "Preview"}</Button><Button disabled={op.busy || saved.has(voice.id)} onClick={() => void op.run(async (signal) => {
             const result = await studioJson<{ profile_id: string; name: string }>(`/archetypes/${idPath(voice.id)}/use`, { method: "POST", signal });
             setSaved((before) => new Set([...before, voice.id])); await useVoices.getState().load(); op.setStatus(`${result.name} added to Voices.`);
@@ -115,7 +125,7 @@ export function VoiceGallery() {
         </article>;
       })}
     </div>
-    {!loading && count === 0 && !loadError && <p className="text-fg2">{favoritesOnly && !query.trim() ? "No favorites yet. Star a voice in All voices to keep it here." : "No voices match that search."}</p>}
+    {!loading && count === 0 && !loadError && <p className="text-fg2">{favoritesOnly && !favoriteVoices.length ? "No favorites yet. Star a voice in All voices to keep it here." : filterCount ? "No voices match these filters." : "No voices match that search."}</p>}
     <div className="flex items-center gap-3"><Button disabled={currentPage === 0 || loading} onClick={() => setPage(currentPage - 1)}>Previous</Button><span className="text-sm text-fg2">Page {currentPage + 1}</span><Button disabled={(currentPage + 1) * PAGE_SIZE >= count || loading} onClick={() => setPage(currentPage + 1)}>Next</Button></div>
   </div>;
 }

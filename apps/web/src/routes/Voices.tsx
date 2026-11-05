@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { VoiceCard } from "@readaloud/ui";
+import { Chip, Input, VoiceCard } from "@readaloud/ui";
+import { Search } from "lucide-react";
 import { useVoices, getVoice, voiceLang, isLocalVoice } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
@@ -11,6 +12,12 @@ import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
 import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource } from "../data/voices";
 import { preparePatois } from "../lib/patois";
+import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
+import { ClearFilters, FilterSelect } from "../components/Filters";
+
+// Filter chips follow the same fixed order as the sections below.
+const sourceRank = (source: string) => { const i = Object.keys(SOURCE_INFO).indexOf(source); return i < 0 ? Infinity : i; };
+const TYPE_LABELS: Record<string, string> = { "built-in": "Built-in", cloned: "Cloned", designed: "Designed" };
 
 const PREVIEW_MS = 3000;
 
@@ -30,6 +37,13 @@ export function VoicesPage() {
   const hasDoc = !!loadedDoc;
   const [docTitle, setDocTitle] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
+  const [filters, setFilters] = useState<VoiceFilters>(NO_VOICE_FILTERS);
+  const setFilter = (key: keyof VoiceFilters, value: string) => setFilters((f) => ({ ...f, [key]: value }));
+  const shown = useMemo(() => filterVoices(VOICES, filters), [VOICES, filters]);
+  const sources = useMemo(() => facetCounts(VOICES, voiceSource).sort(([a], [b]) => sourceRank(a) - sourceRank(b)), [VOICES]);
+  const languages = useMemo(() => facetCounts(VOICES, voiceLanguage).sort(([a], [b]) => languageLabel(a).localeCompare(languageLabel(b))), [VOICES]);
+  const types = useMemo(() => facetCounts(VOICES, voiceType), [VOICES]);
+  const filterCount = activeFilterCount(filters);
   const audio = useRef<HTMLAudioElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -123,7 +137,7 @@ export function VoicesPage() {
   // Group by the service that renders each voice. Sections keep a fixed order:
   // the store's order depends on which provider answered first.
   const bySource = new Map<string, typeof VOICES>(Object.keys(SOURCE_INFO).map((s) => [s, []]));
-  for (const v of VOICES) bySource.set(voiceSource(v), [...(bySource.get(voiceSource(v)) ?? []), v]);
+  for (const v of shown) bySource.set(voiceSource(v), [...(bySource.get(voiceSource(v)) ?? []), v]);
   const groups = [...bySource].filter(([, voices]) => voices.length);
 
   return (
@@ -142,6 +156,20 @@ export function VoicesPage() {
           </div>
         )}
         <div className="flex flex-wrap gap-4 text-sm underline"><Link to="/studio/clone">Clone a voice</Link><Link to="/studio/design">Design a voice</Link><Link to="/studio/gallery">Browse designed voices</Link></div>
+        <div className="flex flex-col gap-3" role="search" aria-label="Filter voices">
+          <Input type="search" aria-label="Search voices" placeholder="Search by name, tag or language…" leading={<Search size={16} aria-hidden />} wrapperClassName="h-10" value={filters.query} onChange={(e) => setFilter("query", e.target.value)} />
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Voice source">
+            <Chip size="sm" selected={!filters.source} onClick={() => setFilter("source", "")}>All sources</Chip>
+            {sources.map(([source, n]) => <Chip key={source} size="sm" selected={filters.source === source} onClick={() => setFilter("source", filters.source === source ? "" : source)}>{SOURCE_INFO[source]?.title ?? source} · {n}</Chip>)}
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,220px)_auto]">
+            <FilterSelect label="Language" any="All languages" value={filters.language} options={languages.map(([code, n]) => [code, `${languageLabel(code)} (${n})`])} onChange={(value) => setFilter("language", value)} />
+            {types.length > 1 && <FilterSelect label="Type" any="All types" value={filters.type} options={types.map(([type, n]) => [type, `${TYPE_LABELS[type]} (${n})`])} onChange={(value) => setFilter("type", value)} />}
+            <div className="flex items-end"><ClearFilters count={filterCount} onClear={() => setFilters(NO_VOICE_FILTERS)} /></div>
+          </div>
+          <p role="status" className="text-sm text-fg2">{filterCount ? `${shown.length} of ${VOICES.length} voices` : `${VOICES.length} voices`}</p>
+        </div>
+        {!shown.length && <p className="text-fg2">No voices match these filters.</p>}
         {groups.map(([source, voices]) => (
           <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3">
             <div>
