@@ -9,7 +9,7 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
-import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
+import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 
 const PREVIEW_MS = 3000;
@@ -120,6 +120,11 @@ export function VoicesPage() {
   };
 
   const current = forDoc ? (loadedDoc?.id === forDoc ? docVoice : selected) : selected;
+  // Group by the service that renders each voice. Sections keep a fixed order:
+  // the store's order depends on which provider answered first.
+  const bySource = new Map<string, typeof VOICES>(Object.keys(SOURCE_INFO).map((s) => [s, []]));
+  for (const v of VOICES) bySource.set(voiceSource(v), [...(bySource.get(voiceSource(v)) ?? []), v]);
+  const groups = [...bySource].filter(([, voices]) => voices.length);
 
   return (
     <section data-screen="voices" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
@@ -137,12 +142,20 @@ export function VoicesPage() {
           </div>
         )}
         <div className="flex flex-wrap gap-4 text-sm underline"><Link to="/studio/clone">Clone a voice</Link><Link to="/studio/design">Design a voice</Link><Link to="/studio/gallery">Browse designed voices</Link></div>
-        {VOICES.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
-          {VOICES.map((v) => (
-            <VoiceCard key={v.id} voice={v} source={voiceSource(v)} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
-          ))}
-        </div>
+        {groups.map(([source, voices]) => (
+          <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3">
+            <div>
+              <h2 id={`voices-${source}`} className="m-0 font-serif text-xl">{SOURCE_INFO[source]?.title ?? source}</h2>
+              {SOURCE_INFO[source] && <p className="mt-1 text-sm text-fg2">{SOURCE_INFO[source].description}</p>}
+              {voices.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="mt-1 text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
+            </div>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
+              {voices.map((v) => (
+                <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)} />
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     </section>
   );

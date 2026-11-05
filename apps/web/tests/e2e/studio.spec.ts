@@ -287,6 +287,9 @@ test("Voices identifies each provider", async ({ page }) => {
   await expect(page.locator('[data-voice="alloy"]').getByLabel("Voice source: ChatGPT")).toBeVisible();
   await expect(page.locator('[data-voice="voice-1"]').getByLabel("Voice source: VoiceStudio")).toBeVisible();
   await expect(page.locator('[data-voice="local"]').getByLabel("Voice source: Browser")).toBeVisible();
+  for (const [heading, voice] of [["ChatGPT", "alloy"], ["VoiceStudio", "voice-1"], ["Browser", "local"]]) {
+    await expect(page.getByRole("region", { name: heading }).locator(`[data-voice="${voice}"]`)).toBeVisible();
+  }
 });
 
 test("gallery favorites and preview indicators are accessible on a phone", async ({ page }) => {
