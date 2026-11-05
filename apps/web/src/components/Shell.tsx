@@ -18,6 +18,7 @@ export function Shell() {
   const hasDoc = usePlayer((s) => !!s.doc);
   const preparing = usePlayer((s) => s.preparing);
   const preparationError = usePlayer((s) => s.preparationError);
+  const speechError = usePlayer((s) => s.speechError);
   const toastMsg = useToast((s) => s.message);
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -37,6 +38,12 @@ export function Shell() {
             <span className="flex-1">{preparing || preparationError}</span>
             {preparationError && <button className="text-accent underline" onClick={() => { void usePlayer.getState().retryPreparation().then((opened) => { if (opened) navigate(`/read/${usePlayer.getState().doc!.id}`); }); }}>Retry</button>}
             <button className="text-accent underline" onClick={() => usePlayer.getState().cancelPreparation()}>{preparing ? "Cancel" : "Dismiss"}</button>
+          </div>}
+          {speechError && <div role="alert" data-testid="speech-error" className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line bg-bg2 px-5 py-3 text-sm">
+            <span className="flex-1">{speechError} Playback is paused.</span>
+            <button className="text-accent underline" onClick={() => usePlayer.getState().retrySpeech()}>Retry</button>
+            <button className="text-accent underline" onClick={() => usePlayer.getState().useBrowserVoice()}>Use browser voice</button>
+            <button className="text-accent underline" onClick={() => usePlayer.getState().dismissSpeechError()}>Dismiss</button>
           </div>}
           <Outlet />
           <PlayerHost />

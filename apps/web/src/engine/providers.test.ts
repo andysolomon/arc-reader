@@ -73,6 +73,13 @@ describe("openaiSpeechSynthesize", () => {
     expect(onRejected).toHaveBeenCalledWith("The speech server rejected the API key");
   });
 
+  it("synthesize rethrows when the caller refuses the browser-voice fallback", async () => {
+    const onOffline = vi.fn();
+    fetchMock.mockRejectedValueOnce(new TypeError("down"));
+    await expect(synthesize({ text: "a b c", voice: "v", engine: "kittentts", fallbackLocal: false, onOffline })).rejects.toBeInstanceOf(ApiUnreachable);
+    expect(onOffline).not.toHaveBeenCalled();
+  });
+
   it("cache keys include the engine", async () => {
     expect(cacheKey({ text: "t", voice: "v", engine: "kittentts" })).not.toBe(cacheKey({ text: "t", voice: "v", engine: "supertonic3" }));
   });

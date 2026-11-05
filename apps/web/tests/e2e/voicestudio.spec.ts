@@ -41,9 +41,16 @@ test.describe("VoiceStudio provider (stub server)", () => {
     await expect(page.getByTestId("offline-banner")).toHaveCount(0);
   });
 
-  test("server down → banner and browser-voice fallback, playback continues", async ({ page, context }) => {
+  test("server down → playback waits and offers the browser voice instead of switching silently", async ({ page, context }) => {
     await context.route("**/api/vs/**", (route) => route.abort("connectionrefused"));
     await composeAndListen(page);
+    const alert = page.getByTestId("speech-error");
+    await expect(alert).toContainText("Speech server unreachable");
+    // Nothing is playing and no other voice was substituted.
+    await expect(page.getByRole("button", { name: /^Play/ })).toHaveAttribute("data-playing", "false");
+    await expect(page.getByTestId("offline-banner")).toHaveCount(0);
+    await alert.getByRole("button", { name: "Use browser voice" }).click();
+    await expect(alert).toHaveCount(0);
     await expect(page.getByTestId("offline-banner")).toContainText("Speech server unreachable");
     await expect(page.getByRole("button", { name: /^Pause/ })).toBeVisible();
     await page.getByRole("button", { name: "Dismiss" }).click();

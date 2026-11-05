@@ -1,7 +1,7 @@
 import type { WordTiming } from "../lib/db";
 import { estimateDuration, type Segmented, type Sentence } from "../lib/segment";
 import { synthesize } from "./providers";
-import { LOCAL_ENGINE, type Chunk, type EngineId } from "./types";
+import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type EngineId } from "./types";
 
 export interface EngineDoc extends Segmented {
   id: string;
@@ -16,8 +16,9 @@ export interface EngineSnapshot {
   wordIndex: number;
   /** seconds into the current sentence at 1× */
   offset: number;
+  /** Audio is actually running. Never true while a sentence is still being generated. */
   playing: boolean;
-  /** waiting on the first chunk */
+  /** Waiting on the current sentence's audio (initial start, or a gap between sentences). */
   loading: boolean;
   speed: number;
   /** 1× seconds */
@@ -42,9 +43,22 @@ export interface EngineOptions {
   onOnline: () => void;
   onPersist: (snap: EngineSnapshot) => void;
   onError: (message: string) => void;
+  /**
+   * The chosen voice could not be generated (server down, busy, or rejecting).
+   * Playback stops; the host decides whether to retry or switch to the browser voice.
+   */
+  onUnavailable: (message: string) => void;
 }
 
 type Listener = (s: EngineSnapshot) => void;
+
+/** Human message for a failed generation. */
+export function unavailableMessage(e: unknown): string {
+  if (e instanceof ApiUnreachable) return "Speech server unreachable.";
+  if (e instanceof ApiBusy) return "The speech server is busy.";
+  if (e instanceof ApiRejected) return e.message;
+  return (e as Error)?.message || "Could not prepare audio.";
+}
 
 const PREFETCH = 2;
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -160,12 +174,15 @@ export class PlaybackEngine {
       this.offset = 0;
       this.ended = false;
     }
-    this.playing = true;
     const token = ++this.token;
     this.stopMedia();
     const pending = !this.chunks.has(this.index);
     if (pending) {
+      // Nothing plays until this sentence's audio exists: `playing` stays as it was
+      // (false from a cold start, true between sentences) and the clock is frozen so
+      // the wait is not counted as listening time.
       this.loading = true;
+      cancelAnimationFrame(this.raf);
       this.emit();
     }
     let chunk: Chunk;
@@ -175,12 +192,14 @@ export class PlaybackEngine {
       if (token !== this.token) return;
       this.loading = false;
       this.playing = false;
-      this.opts.onError((e as Error).message || "Could not prepare audio");
       this.emit();
+      this.persistSoon(0);
+      this.opts.onUnavailable(unavailableMessage(e));
       return;
     }
     if (token !== this.token) return;
     this.loading = false;
+    this.playing = true;
     this.current = chunk;
     if (chunk.duration > 0) this.durations[this.index] = chunk.duration;
     this.prefetch();
@@ -192,14 +211,17 @@ export class PlaybackEngine {
   }
 
   pause() {
+    // Bumping the token discards a sentence that is still being generated.
+    this.token++;
     this.playing = false;
+    this.loading = false;
     this.stopMedia();
     this.emit();
     this.persistSoon(0);
   }
 
   toggle() {
-    if (this.playing) this.pause();
+    if (this.playing || this.loading) this.pause();
     else void this.play();
   }
 
@@ -291,6 +313,7 @@ export class PlaybackEngine {
         wordTimings: this.opts.wordTimings(),
         words: s.words,
         forceLocal: this.opts.offline() || doc.voice === "local" || this.opts.engine(doc.voice) === LOCAL_ENGINE,
+        fallbackLocal: false,
         onOffline: this.opts.onOffline,
         onOnline: this.opts.onOnline,
         onRejected: this.opts.onRejected,

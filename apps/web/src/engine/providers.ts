@@ -250,6 +250,11 @@ export interface SynthOptions extends TtsRequest {
   words?: string[];
   /** Cloned profile voice (sent with the active-engine alias) */
   profile?: boolean;
+  /**
+   * When false, a failed generation throws instead of quietly reading with the browser voice.
+   * Falls back anyway when no server is configured for the engine (there is nothing to retry).
+   */
+  fallbackLocal?: boolean;
   /** When true the API is skipped (local engine chosen, local voice, or we are known to be offline) */
   forceLocal?: boolean;
   onOffline?: () => void;
@@ -277,6 +282,7 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
     return chunk;
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
+    if (opts.fallbackLocal === false && baseFor(opts.engine)) throw e;
     if (e instanceof ApiUnreachable) opts.onOffline?.();
     else if (e instanceof ApiRejected) opts.onRejected?.(e.message);
     else if (e instanceof ApiBusy) opts.onRejected?.("The speech server is busy; this sentence uses the browser voice");
