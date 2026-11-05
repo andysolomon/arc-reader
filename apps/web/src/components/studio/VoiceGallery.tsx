@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2, Play, Star } from "lucide-react";
 import { Button, VoiceAvatar, cn } from "@readaloud/ui";
@@ -6,7 +6,7 @@ import { useVoices } from "../../state/voices";
 import { galleryFavoriteKey, useGallery } from "../../state/gallery";
 import { hueFor } from "../../data/voices";
 import { studioJson, studioUrl, idPath, type Archetype, type PreviewSource } from "../../lib/studio";
-import { GalleryPreview, hasGalleryPreview } from "./GalleryPreview";
+import { GalleryPreview } from "./GalleryPreview";
 import { Field, ErrorNotice, fieldClass, panelClass, useOperation } from "./shared";
 
 const PAGE_SIZE = 24;
@@ -22,6 +22,7 @@ export function VoiceGallery() {
   const [loadError, setLoadError] = useState("");
   const [preview, setPreview] = useState<{ id: string; name: string } | null>(null);
   const [sources, setSources] = useState<Record<string, PreviewSource["source"] | "unknown">>({});
+  const readyRevisions = useRef<Record<string, number>>({});
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const favorites = useGallery((s) => s.favorites);
   const toggleFavorite = useGallery((s) => s.toggleFavorite);
@@ -61,19 +62,24 @@ export function VoiceGallery() {
     const check = async () => {
       while (queue.length && !ac.signal.aborted) {
         const voice = queue.shift()!;
+        const revision = readyRevisions.current[voice.id];
         let source: PreviewSource["source"] | "unknown" = "unknown";
         try {
-          const state = await studioJson<PreviewSource>(`/archetypes/${idPath(voice.id)}/preview/state`, { signal: AbortSignal.any([ac.signal, AbortSignal.timeout(10_000)]) });
+          const state = await studioJson<PreviewSource>(`/archetypes/${idPath(voice.id)}/preview/state`, { signal: AbortSignal.any([ac.signal, AbortSignal.timeout(10_000)]), cache: "no-cache" });
           source = state.source;
         } catch { /* Status failure must not block browsing or trying a preview. */ }
-        if (!ac.signal.aborted) setSources((before) => ({ ...before, [voice.id]: hasGalleryPreview(voice.id) ? "cached" : source }));
+        // A status check started before generation finished must not undo readiness.
+        if (!ac.signal.aborted && revision === readyRevisions.current[voice.id]) setSources((before) => ({ ...before, [voice.id]: source }));
       }
     };
     for (let i = 0; i < Math.min(4, visibleItems.length); i++) void check();
     return () => ac.abort();
   }, [visibleItems]);
 
-  const markReady = useCallback((id: string) => setSources((before) => ({ ...before, [id]: "cached" })), []);
+  const markReady = useCallback((id: string) => {
+    readyRevisions.current[id] = (readyRevisions.current[id] ?? 0) + 1;
+    setSources((before) => ({ ...before, [id]: "cached" }));
+  }, []);
 
   return <div className="flex flex-col gap-5">
     <div><h2 className="font-serif text-xl">Designed voice gallery</h2><p className="mt-2 text-sm text-fg2">VoiceStudio’s original catalog. Preview a character, favorite it, or add its recipe to your saved voices. <Link to="/voices" className="underline">Find Fish and ChatGPT voices in Voices.</Link></p></div>
@@ -89,7 +95,7 @@ export function VoiceGallery() {
       {visibleItems.map((voice) => {
         const favorite = !!favorites[galleryFavoriteKey(voice.id)];
         const source = sources[voice.id];
-        const ready = hasGalleryPreview(voice.id) || source === "cached" || source === "gallery";
+        const ready = source === "cached" || source === "gallery";
         return <article key={voice.id} aria-label={voice.name} className={`${panelClass} flex flex-col gap-3`}>
           <div className="flex items-center justify-between gap-3">
             <VoiceAvatar voice={{ name: voice.name, hue: hueFor(voice.id) }} size={40} />

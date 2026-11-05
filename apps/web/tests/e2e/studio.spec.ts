@@ -158,22 +158,22 @@ test("license acceptance requires reviewing and checking each model", async ({ p
   expect(calls.some((c) => c.path === "/models/licenses/accept")).toBe(false);
 });
 
-function previewWav() {
-  const wav = Buffer.alloc(44 + 16000 * 2);
+function previewWav(seconds = 1) {
+  const wav = Buffer.alloc(44 + 16000 * 2 * seconds);
   wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVE", 8);
   wav.write("fmt ", 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
   wav.writeUInt32LE(16000, 24); wav.writeUInt32LE(32000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
-  wav.write("data", 36); wav.writeUInt32LE(32000, 40);
+  wav.write("data", 36); wav.writeUInt32LE(32000 * seconds, 40);
   return wav;
 }
 
-test("preview explains generation, waits for complete audio, and reuses it", async ({ page }) => {
+test("preview waits for complete audio and picks up repaired clips when reopened", async ({ page }) => {
   await mockStudio(page);
   let finish!: () => void;
   const gate = new Promise<void>((resolve) => { finish = resolve; });
   let downloads = 0;
   await page.route("**/archetypes/librarian/preview/state", (route) => route.fulfill({ json: { source: "rendering", message: "Rendering" } }));
-  await page.route("**/archetypes/librarian/preview", async (route) => { downloads++; await gate; await route.fulfill({ contentType: "audio/wav", body: previewWav() }); });
+  await page.route("**/archetypes/librarian/preview", async (route) => { downloads++; await gate; await route.fulfill({ contentType: "audio/wav", body: previewWav(downloads) }); });
   await page.goto("/studio/gallery");
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Generating preview" })).toContainText("first preview can take a minute");
@@ -182,10 +182,12 @@ test("preview explains generation, waits for complete audio, and reuses it", asy
   await expect(page.locator("audio")).toHaveAttribute("src", /^blob:/);
   await expect(page.getByRole("status").filter({ hasText: "Preview ready" })).toBeVisible();
   await expect(page.getByRole("article", { name: "The Librarian" }).getByText("Preview ready", { exact: true })).toBeVisible();
+  await expect.poll(() => page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.duration)).toBe(1);
   await page.getByRole("button", { name: "Close preview" }).click();
   await page.getByRole("button", { name: "Play preview", exact: true }).click();
   await expect(page.locator("audio")).toHaveAttribute("src", /^blob:/);
-  expect(downloads).toBe(1);
+  await expect.poll(() => page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.duration)).toBe(2);
+  expect(downloads).toBe(2);
 });
 
 test("preview displays actual server errors and supports retry", async ({ page }) => {
