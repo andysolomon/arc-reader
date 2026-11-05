@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2 } from "lucide-react";
 import { Chip, EmptyState, IconButton, Input, ProgressRing, fmtTime, cn } from "@readaloud/ui";
-import { getVoice, VOICES } from "../data/voices";
+import { getVoice } from "../state/voices";
 import { useLibrary, type LibraryItem } from "../state/library";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
@@ -233,4 +233,3 @@ function CardItem(props: ItemProps) {
   );
 }
 
-export { VOICES };

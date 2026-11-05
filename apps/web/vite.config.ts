@@ -1,10 +1,17 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { tailnetUrl } from "./vite.tailnet";
+import { voiceStudioProxy } from "./vite.proxy";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Server-side only (no VITE_ prefix): never reaches the bundle.
+  const env = { ...loadEnv(mode, process.cwd(), ""), ...process.env } as Record<string, string>;
+  const proxy = voiceStudioProxy(env);
+  return {
   plugins: [
     react(),
+    tailnetUrl(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icons/*.svg", "icons/*.png", "splash.svg"],
@@ -48,7 +55,8 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
-  server: { host: "127.0.0.1", port: 5173, allowedHosts: [".ts.net"] },
-  preview: { host: "127.0.0.1", port: 4173, allowedHosts: [".ts.net"] },
+  server: { host: "127.0.0.1", port: 5181, strictPort: true, allowedHosts: [".ts.net"], proxy },
+  preview: { host: "127.0.0.1", port: 4173, allowedHosts: [".ts.net"], proxy },
   build: { target: "es2022", sourcemap: false },
+  };
 });

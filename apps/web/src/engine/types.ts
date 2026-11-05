@@ -1,6 +1,11 @@
 import type { WordTiming } from "../lib/db";
 
+/** Legacy custom-contract provider hint (only used when VITE_TTS_PROVIDER=readaloud). */
 export type ProviderId = "auto" | "openai" | "elevenlabs" | "piper";
+/** TTS engine id as listed by the speech server, or "local" for the browser voice. */
+export type EngineId = string;
+export const LOCAL_ENGINE: EngineId = "local";
+
 export type ChunkSource = "api" | "cache" | "local" | "estimate";
 
 export interface Chunk {
@@ -17,7 +22,7 @@ export interface Chunk {
 export interface TtsRequest {
   text: string;
   voice: string;
-  provider: ProviderId;
+  engine: EngineId;
   signal?: AbortSignal;
 }
 
@@ -25,5 +30,12 @@ export class ApiUnreachable extends Error {
   constructor(msg = "API unreachable") {
     super(msg);
     this.name = "ApiUnreachable";
+  }
+}
+
+export class ApiRejected extends Error {
+  constructor(public status: number, msg: string) {
+    super(msg);
+    this.name = "ApiRejected";
   }
 }

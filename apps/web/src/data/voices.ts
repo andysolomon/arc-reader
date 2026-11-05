@@ -1,24 +1,56 @@
-import type { Voice } from "@readaloud/ui";
+import type { Voice as UiVoice } from "@readaloud/ui";
+import { hash } from "../lib/hash";
+import { LOCAL_ENGINE } from "../engine/types";
 
-export const VOICES: Voice[] = [
-  { id: "ava", name: "Ava", lang: "EN-US", tags: ["warm", "narrator"], hue: 30 },
-  { id: "noah", name: "Noah", lang: "EN-GB", tags: ["crisp", "documentary"], hue: 215 },
-  { id: "mara", name: "Mara", lang: "DE-DE", tags: ["calm", "soft"], hue: 150 },
-  { id: "leo", name: "Leo", lang: "ES-ES", tags: ["bright", "energetic"], hue: 55 },
-  { id: "ines", name: "Inès", lang: "FR-FR", tags: ["warm", "clear"], hue: 330 },
-  { id: "kenji", name: "Kenji", lang: "JA-JP", tags: ["measured", "narrator"], hue: 265 },
-  { id: "sol", name: "Sol", lang: "PT-BR", tags: ["smooth", "podcast"], hue: 100 },
-  { id: "piper", name: "Piper", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null },
-];
-
-export const LOCAL_VOICE_ID = "piper";
-
-export function getVoice(id: string | null | undefined): Voice {
-  return VOICES.find((v) => v.id === id) ?? VOICES[0];
+export interface Voice extends UiVoice {
+  /** Engine that renders this voice; "local" for the browser voice */
+  engine: string;
+  /** preset: engine built-in · profile: cloned/designed on the server · local: browser speech */
+  kind: "preset" | "profile" | "local";
 }
 
+export const LOCAL_VOICE_ID = "local";
+
+/** Stable avatar hue from the id, so a voice keeps its colour across reloads and devices. */
+export function hueFor(id: string): number {
+  return parseInt(hash(id).slice(0, 4), 16) % 360;
+}
+
+const kitten = (id: string, name: string, tags: string[]): Voice => ({ id, name, lang: "EN-US", tags, hue: hueFor(id), engine: "kittentts", kind: "preset" });
+const supertonic = (id: string, name: string, tags: string[]): Voice => ({ id, name, lang: "MULTI · 31", tags, hue: hueFor(id), engine: "supertonic3", kind: "preset" });
+
+/**
+ * Engine preset voices. Ids are what the engines accept as `voice`; names are ours.
+ * KittenTTS: four male/female pairs (expr-voice-2-f is the engine default).
+ * Supertonic-3: the seven presets its guide surfaces.
+ */
+export const PRESET_VOICES: Voice[] = [
+  kitten("expr-voice-2-f", "Bella", ["warm", "narrator"]),
+  kitten("expr-voice-2-m", "Jasper", ["calm", "narrator"]),
+  kitten("expr-voice-3-f", "Luna", ["bright", "clear"]),
+  kitten("expr-voice-3-m", "Felix", ["crisp", "documentary"]),
+  kitten("expr-voice-4-f", "Mira", ["soft", "measured"]),
+  kitten("expr-voice-4-m", "Oscar", ["deep", "steady"]),
+  kitten("expr-voice-5-f", "Nova", ["energetic", "podcast"]),
+  kitten("expr-voice-5-m", "Theo", ["smooth", "podcast"]),
+  supertonic("M1", "Marco", ["multilingual", "default"]),
+  supertonic("F3", "Elena", ["multilingual", "warm"]),
+  supertonic("M3", "Diego", ["multilingual", "crisp"]),
+  supertonic("F4", "Sofia", ["multilingual", "bright"]),
+  supertonic("M4", "Hugo", ["multilingual", "measured"]),
+  supertonic("F5", "Yuki", ["multilingual", "soft"]),
+  supertonic("M5", "Kai", ["multilingual", "energetic"]),
+];
+
+export const LOCAL_VOICE: Voice = { id: LOCAL_VOICE_ID, name: "Browser voice", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null, engine: LOCAL_ENGINE, kind: "local" };
+
+/** The list shown before (or without) a speech server. */
+export const DEFAULT_VOICES: Voice[] = [...PRESET_VOICES, LOCAL_VOICE];
+
+export const DEFAULT_VOICE_ID = "expr-voice-2-f";
+
 /** BCP-47 tag for the Web Speech fallback. */
-export function voiceLang(v: Voice): string {
+export function voiceLang(v: Pick<Voice, "lang">): string {
   const m = v.lang.match(/^([A-Z]{2})-([A-Z]{2})/);
   return m ? `${m[1].toLowerCase()}-${m[2]}` : "en-US";
 }

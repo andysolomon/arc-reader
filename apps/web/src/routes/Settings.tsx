@@ -3,20 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { ChevronRight, Copy, Check } from "lucide-react";
 import { THEMES } from "@readaloud/tokens";
 import { Chip, SectionLabel, Segmented, Switch, ThemeSwatch, UsageMeter, VoiceAvatar, Button } from "@readaloud/ui";
-import { getVoice } from "../data/voices";
+import { getVoice, useVoices } from "../state/voices";
 import { useSettings, useThemeId } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
 import { getUsage, PLAN_LIMIT } from "../lib/usage";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
-import type { ProviderId } from "../engine/types";
-
-const PROVIDERS: { id: ProviderId; label: string }[] = [
-  { id: "auto", label: "Auto" },
-  { id: "openai", label: "OpenAI" },
-  { id: "elevenlabs", label: "ElevenLabs" },
-  { id: "piper", label: "Piper (local)" },
-];
+import { hasApi } from "../engine/providers";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -45,6 +38,7 @@ export function SettingsPage() {
   const theme = useThemeId();
   const voice = getVoice(s.voice);
   const hasDoc = usePlayer((st) => !!st.doc);
+  const engines = useVoices((v) => v.engines);
   const [copied, setCopied] = useState(false);
   const [usage, setUsage] = useState(getUsage());
   useEffect(() => {
@@ -110,19 +104,27 @@ export function SettingsPage() {
                 options={[0.75, 1, 1.25, 1.5, 2].map((v) => ({ value: v, label: `${v}×` }))}
               />
             </RowItem>
-            <RowItem label="Auto-play on share" hint="When text arrives from the share sheet, open the Reader already playing." last>
+            <RowItem label="Auto-play on share" hint="When text arrives from the share sheet, open the Reader already playing.">
               <Switch checked={s.autoplayShare} onChange={(v) => s.set("autoplayShare", v)} label="Auto-play on share" />
+            </RowItem>
+            <RowItem label="Word timings from the server" hint="Asks the speech server to time each word after a sentence is synthesized. One extra request per sentence; off keeps the estimate." last>
+              <Switch checked={s.wordTimings} onChange={(v) => s.set("wordTimings", v)} label="Word timings from the server" disabled={!hasApi()} />
             </RowItem>
           </div>
         </Section>
 
-        <Section title="Provider">
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="TTS provider">
-            {PROVIDERS.map((p) => (
-              <Chip key={p.id} size="sm" selected={s.provider === p.id} onClick={() => s.set("provider", p.id)}>
-                {p.label}
+        <Section title="Engine">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="TTS engine">
+            {engines.map((e) => (
+              <Chip key={e.id} size="sm" selected={s.engine === e.id} disabled={!e.available} onClick={() => s.set("engine", e.id)} title={e.available ? undefined : "Not installed on the speech server"}>
+                {e.label}
               </Chip>
             ))}
+          </div>
+          <div className="text-[13px] text-fg2">
+            {hasApi()
+              ? "Engines come from the speech server. Preset voices name their own engine; cloned voices use this one."
+              : "No speech server configured, so only the browser voice is available. Set VITE_API_BASE to use VoiceStudio."}
           </div>
         </Section>
 

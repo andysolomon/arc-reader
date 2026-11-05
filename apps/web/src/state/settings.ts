@@ -2,7 +2,9 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { type ThemeId, isThemeId, systemTheme } from "@readaloud/tokens";
 import type { HighlightMode } from "@readaloud/ui";
-import type { ProviderId } from "../engine/types";
+import { LOCAL_ENGINE, type EngineId } from "../engine/types";
+import { DEFAULT_ENGINE } from "../engine/providers";
+import { DEFAULT_VOICE_ID } from "../data/voices";
 
 export type PlayerStyle = "capsule" | "bar";
 export type ComposeLayout = "centered" | "editorial";
@@ -16,7 +18,10 @@ export interface Settings {
   voice: string;
   defaultSpeed: number;
   autoplayShare: boolean;
-  provider: ProviderId;
+  /** TTS engine id from the speech server, or "local" for the browser voice */
+  engine: EngineId;
+  /** Phase 4: derive word timings from the server's transcription endpoint (extra request per sentence) */
+  wordTimings: boolean;
   fontSize: number;
   wide: boolean;
   railOpen: boolean;
@@ -46,10 +51,11 @@ export const useSettings = create<Settings & Actions>()(
       playerStyle: "capsule",
       highlightStyle: "block",
       composeLayout: "centered",
-      voice: "ava",
+      voice: DEFAULT_VOICE_ID,
       defaultSpeed: 1,
       autoplayShare: true,
-      provider: "auto",
+      engine: DEFAULT_ENGINE,
+      wordTimings: false,
       fontSize: 19,
       wide: false,
       railOpen: typeof window === "undefined" ? true : window.innerWidth > 1024,
@@ -61,7 +67,16 @@ export const useSettings = create<Settings & Actions>()(
     }),
     {
       name: "readaloud:settings",
-      version: 1,
+      version: 2,
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as Partial<Settings> & { provider?: string };
+        if (version < 2) {
+          p.engine = p.provider === "piper" ? LOCAL_ENGINE : DEFAULT_ENGINE;
+          delete p.provider;
+          if (p.voice && !/^(expr-voice-|[MF][1-5]$|local$)/.test(p.voice)) p.voice = DEFAULT_VOICE_ID;
+        }
+        return p as Settings;
+      },
       partialize: (s) => {
         const { set: _s, patch: _p, ...rest } = s;
         return rest;

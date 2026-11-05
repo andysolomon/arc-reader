@@ -3,7 +3,8 @@ import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/e
 import { hasApi } from "../engine/providers";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { segment } from "../lib/segment";
-import { getVoice, voiceLang } from "../data/voices";
+import { getVoice, voiceLang, isLocalVoice } from "./voices";
+import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "./settings";
 import { toast } from "./toast";
 
@@ -40,12 +41,15 @@ interface Actions {
 }
 
 export const engine = new PlaybackEngine({
-  provider: () => useSettings.getState().provider,
-  offline: () => usePlayer.getState().offline,
+  engine: () => useSettings.getState().engine,
+  wordTimings: () => useSettings.getState().wordTimings,
+  isProfileVoice: (id) => getVoice(id).kind === "profile",
+  offline: () => usePlayer.getState().offline || useSettings.getState().engine === LOCAL_ENGINE,
+  onRejected: (m) => toast(m),
   onOffline: () => {
     if (!usePlayer.getState().offline) {
       usePlayer.setState({ offline: true });
-      if (hasApi()) toast("API unreachable — using the local voice");
+      if (hasApi() && useSettings.getState().engine !== LOCAL_ENGINE) toast("Speech server unreachable — using the browser voice");
     }
   },
   onOnline: () => {
@@ -90,7 +94,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       }
       engine.load(doc, index, offset);
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
-      set({ doc, record: rec, voiceId: voice.id, menuOpen: false, focus: false });
+      set({ doc, record: rec, voiceId: voice.id, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
       if (opts.autoplay) void engine.play();
     },
     close() {

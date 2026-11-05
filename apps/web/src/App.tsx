@@ -13,6 +13,7 @@ import { LinuxPage } from "./routes/Linux";
 import { AuthPage } from "./routes/Auth";
 import { useThemeId } from "./state/settings";
 import { useLibrary } from "./state/library";
+import { useVoices } from "./state/voices";
 
 function ThemeSync() {
   const id = useThemeId();
@@ -26,6 +27,7 @@ function ThemeSync() {
 export default function App() {
   useEffect(() => {
     void useLibrary.getState().refresh();
+    void useVoices.getState().load();
   }, []);
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}>

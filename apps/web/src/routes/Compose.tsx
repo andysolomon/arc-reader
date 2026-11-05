@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { Clipboard, Link2, Upload } from "lucide-react";
 import { Button, Chip, TextArea, VoiceAvatar, formatSpeed, cn, Input } from "@readaloud/ui";
 import { PLACEHOLDERS, SAMPLE, SAMPLE_TITLE } from "../data/sample";
-import { getVoice } from "../data/voices";
+import { getVoice } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { useLibrary } from "../state/library";

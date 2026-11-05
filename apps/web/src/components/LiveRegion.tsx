@@ -1,5 +1,5 @@
 import { usePlayer } from "../state/player";
-import { getVoice } from "../data/voices";
+import { getVoice } from "../state/voices";
 
 /** One polite live region: "Playing/Paused — {voice}, {speed}×". */
 export function LiveRegion() {

@@ -3,6 +3,8 @@ import { Kbd, PlayPauseIcon, SectionLabel, fmtTime, formatSpeed, cn } from "@rea
 import { HYPR_BINDS } from "../data/shortcuts";
 import { usePlayer } from "../state/player";
 import { useSettings } from "../state/settings";
+import { isLocalVoice } from "../state/voices";
+import { LOCAL_ENGINE } from "../engine/types";
 
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
 
@@ -15,7 +17,8 @@ export function LinuxPage() {
   const speaking = p.playing;
   const elapsed = fmtTime(p.elapsed / p.speed);
   const pct = p.fraction * 100;
-  const localVoice = p.offline || p.voiceId === "piper";
+  const engineId = useSettings((s) => s.engine);
+  const localVoice = p.offline || isLocalVoice(p.voiceId) || engineId === LOCAL_ENGINE;
 
   return (
     <section data-screen="linux" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: doc ? 160 : 64 }}>

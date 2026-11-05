@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { PlayerPill, PlayerBar, type PlayerProps } from "@readaloud/ui";
-import { getVoice } from "../data/voices";
+import { getVoice } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { usePlayer, engine } from "../state/player";
 import { useLibrary } from "../state/library";

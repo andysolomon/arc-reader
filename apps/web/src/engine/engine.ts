@@ -1,7 +1,7 @@
 import type { WordTiming } from "../lib/db";
 import { estimateDuration, type Segmented, type Sentence } from "../lib/segment";
 import { synthesize } from "./providers";
-import type { Chunk, ProviderId } from "./types";
+import { LOCAL_ENGINE, type Chunk, type EngineId } from "./types";
 
 export interface EngineDoc extends Segmented {
   id: string;
@@ -32,8 +32,11 @@ export interface EngineSnapshot {
 }
 
 export interface EngineOptions {
-  provider: () => ProviderId;
+  engine: () => EngineId;
+  wordTimings: () => boolean;
+  isProfileVoice: (voiceId: string) => boolean;
   offline: () => boolean;
+  onRejected: (message: string) => void;
   onOffline: () => void;
   onOnline: () => void;
   onPersist: (snap: EngineSnapshot) => void;
@@ -282,10 +285,14 @@ export class PlaybackEngine {
       p = synthesize({
         text: s.text,
         voice: doc.voice,
-        provider: this.opts.provider(),
-        forceLocal: this.opts.offline() || doc.voice === "piper",
+        engine: this.opts.engine(),
+        profile: this.opts.isProfileVoice(doc.voice),
+        wordTimings: this.opts.wordTimings(),
+        words: s.words,
+        forceLocal: this.opts.offline() || doc.voice === "local" || this.opts.engine() === LOCAL_ENGINE,
         onOffline: this.opts.onOffline,
         onOnline: this.opts.onOnline,
+        onRejected: this.opts.onRejected,
       }).then((c) => {
         if (c.duration > 0 && this.doc === doc) this.durations[i] = c.duration;
         return c;

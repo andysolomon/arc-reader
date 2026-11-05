@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { VoiceCard } from "@readaloud/ui";
-import { VOICES, getVoice, voiceLang } from "../data/voices";
+import { useVoices, getVoice, voiceLang, isLocalVoice } from "../state/voices";
+import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { useLibrary } from "../state/library";
@@ -17,7 +18,9 @@ export function VoicesPage() {
   const forDoc = params.get("for");
   const selected = useSettings((s) => s.voice);
   const set = useSettings((s) => s.set);
-  const provider = useSettings((s) => s.provider);
+  const engineId = useSettings((s) => s.engine);
+  const VOICES = useVoices((s) => s.voices);
+  const reload = useVoices((s) => s.load);
   const speed = usePlayer((s) => s.speed);
   const loadedDoc = usePlayer((s) => s.doc);
   const docVoice = usePlayer((s) => s.voiceId);
@@ -43,6 +46,9 @@ export function VoicesPage() {
     setPreviewing(null);
   };
   useEffect(() => stopPreview, []);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   const preview = async (id: string) => {
     stopPreview();
@@ -51,7 +57,16 @@ export function VoicesPage() {
     const text = `Hi, I'm ${v.name}. This is how I sound at your current speed.`;
     const ac = new AbortController();
     abort.current = ac;
-    const chunk = await synthesize({ text, voice: v.id, provider, signal: ac.signal, forceLocal: v.id === "piper" || usePlayer.getState().offline, onOffline: () => usePlayer.setState({ offline: true }) }).catch(() => null);
+    const chunk = await synthesize({
+      text,
+      voice: v.id,
+      engine: v.kind === "preset" ? v.engine : engineId,
+      profile: v.kind === "profile",
+      signal: ac.signal,
+      forceLocal: isLocalVoice(v.id) || engineId === LOCAL_ENGINE || usePlayer.getState().offline,
+      onOffline: () => usePlayer.setState({ offline: true }),
+      onRejected: (m) => toast(m),
+    }).catch(() => null);
     if (ac.signal.aborted) return;
     if (chunk?.audio) {
       const a = new Audio(URL.createObjectURL(chunk.audio));

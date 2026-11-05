@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReadAloud × VoiceStudio — integration plan</title>
+<style>
+  body{background:var(--background,#161412);margin:0;padding:8px}
+  .plan{
+    --bg: var(--background, #161412); --fg: var(--foreground, #ece6dc);
+    --muted: var(--muted-foreground, #a39a8e); --faint: #6f675d;
+    --card: var(--card, #1d1a17); --card2: var(--secondary, #272320);
+    --line: var(--border, #342e29); --accent: var(--primary, #d9955a); --accent-fg: var(--primary-foreground, #1c120a);
+    --r: var(--radius, 12px);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --gray:#6f675d;
+    --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --critical:#d03b3b;
+    --sans: var(--font-sans, system-ui, -apple-system, "Segoe UI", sans-serif);
+    --mono: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+    --serif: Literata, Georgia, serif;
+    font-family: var(--sans); color: var(--fg); font-size: 14px; line-height: 1.5; max-width: 100%;
+  }
+  .plan *{box-sizing:border-box}
+  .plan h1{font-family:var(--serif);font-weight:500;font-size:26px;letter-spacing:-.01em;margin:0 0 4px}
+  .plan h2{font-family:var(--serif);font-weight:500;font-size:19px;margin:0 0 10px}
+  .plan h3{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;font-weight:600}
+  .plan p{margin:0 0 10px}
+  .plan .sub{color:var(--muted)}
+  .plan .meta{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--muted);font-size:12px;margin-bottom:14px}
+  .plan .meta b{color:var(--fg);font-weight:500}
+  .plan nav{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 16px;border-bottom:1px solid var(--line);padding-bottom:10px}
+  .plan nav button{font:inherit;color:var(--muted);background:transparent;border:1px solid transparent;border-radius:999px;padding:5px 11px;cursor:pointer;font-size:13px}
+  .plan nav button:hover{color:var(--fg);background:var(--card2)}
+  .plan nav button[aria-selected="true"]{color:var(--fg);background:var(--card2);border-color:var(--line)}
+  .plan section[hidden]{display:none}
+  .plan .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+  .plan .grid{display:grid;gap:10px}
+  .plan .kpis{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+  .plan .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+  .plan .kpi .v{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+  .plan .kpi .l{color:var(--muted);font-size:12px;margin-top:4px}
+  .plan ul{margin:0;padding-left:18px}
+  .plan li{margin:3px 0}
+  .plan code,.plan kbd{font-family:var(--mono);font-size:12px;background:var(--card2);padding:1px 5px;border-radius:4px}
+  .plan pre{font-family:var(--mono);font-size:12px;background:var(--card2);padding:12px;border-radius:8px;overflow:auto;margin:8px 0;line-height:1.5}
+  .plan .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:600px){.plan .two{grid-template-columns:1fr}}
+  .plan svg{display:block;max-width:100%;height:auto;font-family:var(--sans)}
+  .plan svg text{fill:var(--fg)}
+  .plan .node rect{fill:var(--card2);stroke:var(--line);stroke-width:1;rx:8;transition:stroke .15s,fill .15s}
+  .plan .node:hover rect,.plan .node.on rect{stroke:var(--accent);stroke-width:1.5}
+  .plan .node{cursor:pointer}
+  .plan .node .t{font-size:13px;font-weight:600}
+  .plan .node .d{font-size:11px;fill:var(--muted)}
+  .plan .edge{stroke:var(--faint);stroke-width:1.5;fill:none}
+  .plan .edge.on{stroke:var(--accent);stroke-width:2}
+  .plan .el{font-size:11px;fill:var(--muted)}
+  .plan .panel{min-height:88px;border-top:1px solid var(--line);padding-top:10px;margin-top:8px;font-size:13px}
+  .plan .panel b{display:block;margin-bottom:3px}
+  .plan .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .plan .seg button{font:inherit;font-size:12px;background:transparent;color:var(--muted);border:0;padding:5px 10px;cursor:pointer}
+  .plan .seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+  .plan .tip{position:fixed;z-index:50;pointer-events:none;background:var(--fg);color:var(--bg);font-size:12px;padding:6px 9px;border-radius:8px;max-width:260px;box-shadow:0 12px 32px -12px rgba(0,0,0,.5);display:none;line-height:1.4}
+  .plan .tip b{display:block}
+  .plan .bar{fill:var(--s1)}
+  .plan .bar.em{fill:var(--accent)}
+  .plan .bar.dim{fill:var(--gray)}
+  .plan .bar:hover{filter:brightness(1.12)}
+  .plan .axis{stroke:var(--line)}
+  .plan .lbl{font-size:12px}
+  .plan .val{font-size:12px;font-variant-numeric:tabular-nums;fill:var(--fg)}
+  .plan table{width:100%;border-collapse:collapse;font-size:13px}
+  .plan th{text-align:left;color:var(--muted);font-weight:500;font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .plan td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .plan tr:last-child td{border-bottom:0}
+  .plan .st{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .plan .st i{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+  .plan .phase{border-top:1px solid var(--line);padding:10px 0}
+  .plan .phase:first-of-type{border-top:0}
+  .plan .phase summary{cursor:pointer;display:flex;gap:10px;align-items:baseline;list-style:none}
+  .plan .phase summary::-webkit-details-marker{display:none}
+  .plan .phase summary .n{font-family:var(--mono);font-size:11px;color:var(--accent);min-width:26px}
+  .plan .phase summary .days{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .plan .phase ul{margin-top:8px}
+  .plan .check{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line)}
+  .plan .check:last-child{border-bottom:0}
+  .plan .check input{margin-top:3px;accent-color:var(--accent)}
+  .plan .check label{cursor:pointer}
+  .plan .check small{display:block;color:var(--muted)}
+  .plan .meter{height:6px;background:var(--card2);border-radius:999px;overflow:hidden;margin:8px 0 14px}
+  .plan .meter div{height:100%;background:var(--accent);border-radius:999px;transition:width .2s}
+  .plan .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin:6px 0}
+  .plan .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .plan .tbl-toggle{float:right}
+  .plan .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .plan .q{display:grid;gap:8px}
+  .plan .q label{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+  .plan .q input{margin-top:3px;accent-color:var(--accent)}
+  .plan .note{font-size:12px;color:var(--muted);margin-top:8px}
+  @media (prefers-reduced-motion:reduce){.plan *{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="plan" id="plan">
+  <h1>ReadAloud × VoiceStudio</h1>
+  <p class="sub">Integration plan: replace the browser speech engine with local, high-quality voices served by VoiceStudio.</p>
+  <div class="meta"><span>Drafted <b>4 Nov 2026</b></span><span>Target <b>9 working days</b></span><span>Host <b>Intel i7 laptop · 12 threads · 15 GB · no NVIDIA driver</b></span><span>Status <b>phases 1–5 built · phase 0 waits on Docker access</b></span></div>
+
+  <nav role="tablist" aria-label="Plan sections">
+    <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+    <button role="tab" aria-selected="false" data-tab="arch">Architecture</button>
+    <button role="tab" aria-selected="false" data-tab="flow">Request flow</button>
+    <button role="tab" aria-selected="false" data-tab="timeline">Timeline</button>
+    <button role="tab" aria-selected="false" data-tab="engines">Engines</button>
+    <button role="tab" aria-selected="false" data-tab="risks">Risks</button>
+    <button role="tab" aria-selected="false" data-tab="checklist">Acceptance</button>
+    <button role="tab" aria-selected="false" data-tab="decisions">Decisions</button>
+  </nav>
+
+  <!-- OVERVIEW -->
+  <section id="tab-overview" role="tabpanel">
+    <div class="grid kpis" style="margin-bottom:14px">
+      <div class="kpi"><div class="v">5</div><div class="l">phases, one shippable each</div></div>
+      <div class="kpi"><div class="v">9</div><div class="l">working days, phase 4 optional</div></div>
+      <div class="kpi"><div class="v">4</div><div class="l">CPU engines that fit this laptop</div></div>
+      <div class="kpi"><div class="v">0</div><div class="l">new browser dependencies</div></div>
+    </div>
+    <div class="two">
+      <div class="card">
+        <h3>Goal</h3>
+        <p>ReadAloud keeps its current playback engine, cache and fallback chain. VoiceStudio becomes the cloud provider behind the existing <code>/api/tts</code> contract, so the browser never talks to it directly and never holds its key.</p>
+        <h3 style="margin-top:14px">In scope</h3>
+        <ul>
+          <li>Run VoiceStudio locally in Docker on the CPU, with KittenTTS as the first engine.</li>
+          <li>A proxy that adds the API key and satisfies VoiceStudio's origin and host checks.</li>
+          <li>A provider adapter for its OpenAI-style speech endpoint.</li>
+          <li>Voices listed from the server instead of the hard-coded eight.</li>
+          <li>Tests that run without VoiceStudio, plus a tagged live suite.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Not in scope</h3>
+        <ul>
+          <li>Voice cloning UI. The server's own app covers it; ReadAloud only lists resulting profiles.</li>
+          <li>Dubbing, transcription, dictation and the mobile apps.</li>
+          <li>GPU engines. OmniVoice wants about 6 GB of graphics memory and its weights are non-commercial.</li>
+          <li>Forking VoiceStudio. Calling it over HTTP keeps ReadAloud's licence independent of its AGPL terms.</li>
+        </ul>
+        <h3 style="margin-top:14px">Why this shape</h3>
+        <p>The adapter is small because ReadAloud already synthesizes one sentence per request, prefetches two ahead and caches audio in IndexedDB. The only missing piece on the server side is word timings, which stay estimated unless phase 4 ships.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section id="tab-arch" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Where each piece runs</h2>
+      <p class="sub">Hover or tap a box. Everything stays on the laptop; the tailnet URL is the only remote entry point.</p>
+      <svg id="arch" viewBox="0 0 700 300" role="img" aria-label="Architecture: browser app talks to a Vite or Caddy proxy, which forwards to the VoiceStudio container, which runs a TTS engine. The browser also keeps an IndexedDB cache."></svg>
+      <div class="panel" id="arch-panel"><b>Pick a component</b><span class="sub">Details appear here.</span></div>
+    </div>
+  </section>
+
+  <!-- FLOW -->
+  <section id="tab-flow" role="tabpanel" hidden>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <h2 style="margin:0">One sentence, end to end</h2>
+        <div class="seg" role="group" aria-label="Scenario">
+          <button aria-pressed="true" data-flow="happy">Happy path</button>
+          <button aria-pressed="false" data-flow="cached">Cache hit</button>
+          <button aria-pressed="false" data-flow="down">VoiceStudio down</button>
+        </div>
+      </div>
+      <svg id="seq" viewBox="0 0 700 360" role="img" aria-label="Sequence diagram of a sentence request across the playback engine, cache, proxy and VoiceStudio"></svg>
+      <div class="panel" id="seq-panel"></div>
+    </div>
+  </section>
+
+  <!-- TIMELINE -->
+  <section id="tab-timeline" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Nine days, five phases</h2>
+      <p class="sub">Hover a bar for its tasks. Phase 4 is optional and can be dropped without affecting the rest.</p>
+      <svg id="gantt" viewBox="0 0 700 250" role="img" aria-label="Gantt chart of five phases across nine working days"></svg>
+      <div class="legend"><span><i style="background:var(--s1)"></i>required</span><span><i style="background:var(--gray)"></i>optional</span></div>
+    </div>
+    <div class="card" id="phases"></div>
+  </section>
+
+  <!-- ENGINES -->
+  <section id="tab-engines" role="tabpanel" hidden>
+    <div class="card">
+      <button class="tbl-toggle seg-like" id="tbl-toggle" aria-pressed="false" style="font:inherit;font-size:12px;background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer">Show table</button>
+      <h2>Language coverage by engine</h2>
+      <p class="sub">All four run on the CPU. KittenTTS is the recommended first engine: English only, but the smallest install and real-time on any CPU according to its guide.</p>
+      <svg id="langs" viewBox="0 0 700 190" role="img" aria-label="Bar chart: Supertonic-3 covers 31 languages, MOSS-TTS-Nano 20, PocketTTS 6, KittenTTS 1"></svg>
+      <table id="langs-table" hidden>
+        <thead><tr><th>Engine</th><th>Languages</th><th>Voices</th><th>Cloning</th><th>Weights licence</th><th>Fit for ReadAloud</th></tr></thead>
+        <tbody>
+          <tr><td>KittenTTS</td><td>1</td><td>8 presets</td><td>No</td><td>Apache 2.0</td><td>Start here. Four male and four female presets map cleanly onto the voice cards.</td></tr>
+          <tr><td>Supertonic-3</td><td>31</td><td>7 presets</td><td>No</td><td>OpenRAIL</td><td>Covers the DE, ES, FR, JA and PT voices ReadAloud lists. Runs as its own sidecar.</td></tr>
+          <tr><td>PocketTTS</td><td>6</td><td>cloned</td><td>Yes</td><td>CC-BY 4.0</td><td>Fastest CPU render in the docs; one model per language.</td></tr>
+          <tr><td>MOSS-TTS-Nano</td><td>20</td><td>cloned</td><td>Yes</td><td>Apache 2.0</td><td>Real-time on a 4-core CPU; package is not on PyPI, so install is manual.</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Source: engine guides and <code>backend/config/model_licenses.json</code> in the VoiceStudio repo as of 4 Nov 2026. Speed claims are the project's own and are untested on this laptop; phase 0 measures them.</p>
+    </div>
+    <div class="card">
+      <h2>What VoiceStudio gives us, and what it doesn't</h2>
+      <table>
+        <thead><tr><th>Need</th><th>VoiceStudio</th><th>Plan</th></tr></thead>
+        <tbody>
+          <tr><td>Per-sentence MP3</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td><code>POST /v1/audio/speech</code>, up to 4096 characters, formats mp3, opus, wav, pcm.</td></tr>
+          <tr><td>Voice list</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td><code>GET /profiles</code> for cloned voices plus engine preset names.</td></tr>
+          <tr><td>Word timings</td><td><span class="st"><i style="background:var(--serious)"></i>No</span></td><td>Speech endpoint is audio only. Phase 4 derives timings from the transcription endpoint.</td></tr>
+          <tr><td>Browser calls</td><td><span class="st"><i style="background:var(--warn)"></i>Gated</span></td><td>Needs bearer key, listed origin and known host. Proxy handles all three.</td></tr>
+          <tr><td>Streaming</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td>Chunked audio or a WebSocket. Not needed: sentences are short and prefetched.</td></tr>
+          <tr><td>Speed control</td><td><span class="st"><i style="background:var(--warn)"></i>Server-side</span></td><td>Always request 1×. The audio element's playback rate handles speed, so cached clips work at any speed.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- RISKS -->
+  <section id="tab-risks" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Risks and mitigations</h2>
+      <table>
+        <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+        <tbody id="risks"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- CHECKLIST -->
+  <section id="tab-checklist" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Acceptance criteria</h2>
+      <p class="sub">Ticks are saved in this browser. <span id="check-count"></span></p>
+      <div class="meter" role="meter" aria-label="Acceptance progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="check-meter" style="width:0%"></div></div>
+      <div id="checks"></div>
+    </div>
+  </section>
+
+  <!-- DECISIONS -->
+  <section id="tab-decisions" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Decisions needed before phase 1</h2>
+      <p class="sub">Choices are saved in this browser so the plan can be revisited.</p>
+      <div id="decisions"></div>
+    </div>
+  </section>
+
+  <div class="tip" id="tip" role="tooltip"></div>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, text) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
+  const store = (k, v) => { try { v === undefined ? localStorage.getItem(k) : localStorage.setItem(k, v); } catch {} return v === undefined ? (()=>{ try { return localStorage.getItem(k); } catch { return null; } })() : v; };
+
+  // ---- tabs
+  const tabs = $$('[role="tab"]');
+  const show = (id) => { tabs.forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === id))); $$('[role="tabpanel"]').forEach(p => p.hidden = p.id !== "tab-" + id); store("plan:tab", id); };
+  tabs.forEach(t => t.addEventListener("click", () => show(t.dataset.tab)));
+  show(store("plan:tab") || "overview");
+
+  // ---- tooltip
+  const tip = $("#tip");
+  const tipOn = (html, e) => { tip.innerHTML = html; tip.style.display = "block"; tipMove(e); };
+  const tipMove = (e) => { const x = Math.min(e.clientX + 14, innerWidth - 270); tip.style.left = x + "px"; tip.style.top = (e.clientY + 14) + "px"; };
+  const tipOff = () => tip.style.display = "none";
+  const hover = (node, html) => { node.addEventListener("pointerenter", (e) => tipOn(html, e)); node.addEventListener("pointermove", tipMove); node.addEventListener("pointerleave", tipOff); };
+
+  // ---- architecture
+  const nodes = [
+    { id: "app", x: 20, y: 48, w: 170, h: 70, t: "ReadAloud (browser)", d: "PWA · playback engine", info: "<b>ReadAloud app</b>Unchanged playback engine: one sentence per request, two prefetched, rAF clock. Provider chain becomes cache → VoiceStudio → local voice. Reads <code>VITE_API_BASE=/api</code>." },
+    { id: "idb", x: 20, y: 208, w: 170, h: 70, t: "IndexedDB cache", d: "audio · positions · docs", info: "<b>IndexedDB</b>Already exists. Cache key gains the engine id so switching engines never replays the wrong voice. Clips are stored at 1× so any playback speed works offline." },
+    { id: "proxy", x: 265, y: 48, w: 170, h: 70, t: "Proxy", d: "Vite dev · Caddy in prod", info: "<b>Proxy</b>Dev: Vite <code>server.proxy</code> rewrites <code>/api/tts</code> → <code>127.0.0.1:3900/v1/audio/speech</code> and injects <code>Authorization: Bearer</code>. Prod: the same two lines in Caddy behind Tailscale. The key never reaches the browser, and VoiceStudio sees a loopback origin it already trusts." },
+    { id: "vs", x: 510, y: 48, w: 170, h: 70, t: "VoiceStudio", d: "Docker · :3900 · FastAPI", info: "<b>VoiceStudio container</b>CPU image, <code>OMNIVOICE_API_KEY</code> set, <code>OMNIVOICE_ALLOWED_ORIGINS</code> listing the proxy origin. Exposes the OpenAI-style audio API, profiles, and its own web UI for cloning voices. Pin the image tag; the project moves fast." },
+    { id: "eng", x: 510, y: 208, w: 170, h: 70, t: "TTS engine", d: "KittenTTS first · swappable", info: "<b>Engine</b>Selected in VoiceStudio's Model Manager or via <code>OMNIVOICE_TTS_BACKEND</code>. KittenTTS to start (8 English presets, tiny), then Supertonic-3 for other languages. ReadAloud passes the engine id as the <code>model</code> field." },
+    { id: "ts", x: 265, y: 208, w: 170, h: 70, t: "Tailnet", d: "ts.net:8464 → proxy", info: "<b>Tailscale serve</b>Already publishes the dev server. Nothing new to expose: VoiceStudio stays bound to loopback and is reached only through the proxy." },
+  ];
+  const edges = [
+    ["app", "proxy", "POST /api/tts", 0], ["proxy", "vs", "bearer · /v1/audio/speech", 0], ["vs", "eng", "generate(text)", 1], ["app", "idb", "get / put mp3", 1], ["ts", "proxy", "https", 2],
+  ];
+  const arch = $("#arch");
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const mid = (n) => ({ cx: n.x + n.w / 2, cy: n.y + n.h / 2 });
+  edges.forEach(([a, b, label, kind]) => {
+    const A = byId[a], B = byId[b];
+    let d, lx, ly;
+    if (kind === 0) { d = `M${A.x + A.w},${A.y + A.h / 2} L${B.x},${B.y + B.h / 2}`; lx = (A.x + A.w + B.x) / 2; ly = A.y - 10; }
+    else if (kind === 1) { d = `M${mid(A).cx},${A.y + A.h} L${mid(B).cx},${B.y}`; lx = mid(A).cx + 8; ly = (A.y + A.h + B.y) / 2 + 4; }
+    else { d = `M${mid(A).cx},${A.y} L${mid(B).cx},${B.y + B.h}`; lx = mid(A).cx + 8; ly = (A.y + B.y + B.h) / 2 + 4; }
+    const p = el("path", { d, class: "edge", "data-a": a, "data-b": b, "marker-end": "url(#arr)" });
+    arch.appendChild(p);
+    arch.appendChild(el("text", { x: lx, y: ly, class: "el", "text-anchor": kind === 0 ? "middle" : "start" }, label));
+  });
+  const defs = el("defs"); defs.innerHTML = '<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6f675d"/></marker>'; arch.prepend(defs);
+  const panel = $("#arch-panel");
+  nodes.forEach(n => {
+    const g = el("g", { class: "node", tabindex: "0", role: "button", "aria-label": n.t });
+    g.appendChild(el("rect", { x: n.x, y: n.y, width: n.w, height: n.h, rx: 8 }));
+    g.appendChild(el("text", { x: n.x + 14, y: n.y + 28, class: "t" }, n.t));
+    g.appendChild(el("text", { x: n.x + 14, y: n.y + 48, class: "d" }, n.d));
+    const on = () => { $$(".node", arch).forEach(x => x.classList.remove("on")); g.classList.add("on"); $$(".edge", arch).forEach(e => e.classList.toggle("on", e.dataset.a === n.id || e.dataset.b === n.id)); panel.innerHTML = n.info; };
+    g.addEventListener("pointerenter", on); g.addEventListener("focus", on); g.addEventListener("click", on);
+    arch.appendChild(g);
+  });
+
+  // ---- sequence
+  const lanes = [["Engine", 70], ["Cache", 250], ["Proxy", 430], ["VoiceStudio", 610]];
+  const flows = {
+    happy: { title: "Happy path", note: "Cold sentence. Everything after the first chunk is hidden by the two-sentence prefetch.", steps: [
+      [0, 1, "get(key: engine|voice|hash)"], [1, 0, "miss", true], [0, 2, "POST /api/tts {text, voice, model}"], [2, 3, "POST /v1/audio/speech + Bearer"], [3, 2, "200 audio/mpeg", true], [2, 0, "mp3 bytes", true], [0, 1, "put(mp3, duration)"], [0, 0, "decode → duration · play at speed×"]] },
+    cached: { title: "Cache hit", note: "Replays and offline listening never touch the network. Word underline uses the stored duration.", steps: [
+      [0, 1, "get(key)"], [1, 0, "hit: blob + duration", true], [0, 0, "play immediately"]] },
+    down: { title: "VoiceStudio unreachable", note: "Same path the app takes today when no API is configured: banner plus the browser speech engine. Retries on the next document.", steps: [
+      [0, 1, "get(key)"], [1, 0, "miss", true], [0, 2, "POST /api/tts"], [2, 3, "connect", false, "fail"], [2, 0, "502 / network error", true, "fail"], [0, 0, "offline = true · banner"], [0, 0, "speechSynthesis fallback"]] },
+  };
+  const seq = $("#seq"), seqPanel = $("#seq-panel");
+  const drawSeq = (key) => {
+    const f = flows[key]; seq.innerHTML = "";
+    lanes.forEach(([name, x]) => {
+      seq.appendChild(el("rect", { x: x - 55, y: 10, width: 110, height: 28, rx: 8, fill: "var(--card2)", stroke: "var(--line)" }));
+      seq.appendChild(el("text", { x, y: 29, "text-anchor": "middle", "font-size": 12, "font-weight": 600 }, name));
+      seq.appendChild(el("line", { x1: x, y1: 40, x2: x, y2: 340, stroke: "var(--line)", "stroke-dasharray": "3 4" }));
+    });
+    f.steps.forEach(([a, b, label, ret, fail], i) => {
+      const y = 70 + i * 34, xa = lanes[a][1], xb = lanes[b][1];
+      const color = fail ? "var(--critical)" : "var(--accent)";
+      if (a === b) {
+        seq.appendChild(el("path", { d: `M${xa},${y - 8} h40 v16 h-40`, fill: "none", stroke: color, "stroke-width": 1.5, "marker-end": "url(#arr2)" }));
+        seq.appendChild(el("text", { x: xa + 48, y: y + 4, "font-size": 11, fill: "var(--muted)" }, label));
+      } else {
+        seq.appendChild(el("line", { x1: xa, y1: y, x2: xb, y2: y, stroke: color, "stroke-width": 1.5, "stroke-dasharray": ret ? "4 3" : "", "marker-end": "url(#arr2)" }));
+        seq.appendChild(el("text", { x: (xa + xb) / 2, y: y - 6, "text-anchor": "middle", "font-size": 11, fill: fail ? "var(--critical)" : "var(--fg)" }, label));
+      }
+    });
+    const d = el("defs"); d.innerHTML = '<marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d9955a"/></marker>'; seq.prepend(d);
+    seqPanel.innerHTML = `<b>${f.title}</b>${f.note}`;
+    $$("[data-flow]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.flow === key)));
+  };
+  $$("[data-flow]").forEach(b => b.addEventListener("click", () => drawSeq(b.dataset.flow)));
+  drawSeq("happy");
+
+  // ---- timeline
+  const phases = [
+    { n: "P0", name: "Run VoiceStudio locally", start: 0, len: 1, tasks: ["Pull the CPU image, pin its tag, set OMNIVOICE_API_KEY and OMNIVOICE_SERVER_MODE", "Bind to 127.0.0.1:3900 only", "Select KittenTTS in the Model Manager and download its weights", "Measure time-to-first-byte for a 20-word sentence with curl; record it in the README"] },
+    { n: "P1", name: "Proxy and config", start: 1, len: 1, tasks: ["Vite server.proxy: /api/tts → /v1/audio/speech with bearer header injected from .env", "Caddy snippet for the tailnet build, same rewrite", "Add OMNIVOICE_ALLOWED_ORIGINS for the proxy origin", "VITE_API_BASE=/api in .env.example with comments"] },
+    { n: "P2", name: "Provider adapter", start: 2, len: 2, tasks: ["voicestudioProvider(): body {model, input, voice, response_format: 'mp3', speed: 1}", "Duration from decodeAudioData, not headers", "Cache key includes engine id", "Map 502, timeouts and refused connections to ApiUnreachable; 4xx surface as toasts", "Keep usage counter; unit tests with a fake fetch"] },
+    { n: "P3", name: "Voices from the server", start: 4, len: 2, tasks: ["GET /profiles plus KittenTTS presets → VOICES at startup, hard-coded list as fallback", "Stable hue per voice id; language from profile", "Provider chips in Settings become engine ids reported by /v1/models", "Preview button synthesizes a real sample", "Per-document override keeps working across engines"] },
+    { n: "P4", name: "Word timings (optional)", start: 6, len: 2, optional: true, tasks: ["After a chunk is cached, POST it to /v1/audio/transcriptions with verbose_json and word granularity", "Align returned words to the sentence's words; store in the audio record", "Feature flag; default off until latency is measured", "Fallback to the estimate on any mismatch"] },
+    { n: "P5", name: "Harden and ship", start: 8, len: 1, tasks: ["Playwright suite runs against a stub server by default; @live tag hits VoiceStudio", "Offline banner wording for the proxied case", "README: run VoiceStudio, env vars, engine choice", "Commit, push, update project memory"] },
+  ];
+  const gantt = $("#gantt"); const L = 205, R = 20, W = 700 - L - R, rowH = 34, top = 30, days = 9;
+  for (let d = 0; d <= days; d++) { const x = L + (W / days) * d; gantt.appendChild(el("line", { x1: x, y1: top - 6, x2: x, y2: top + phases.length * rowH, class: "axis" })); if (d < days) gantt.appendChild(el("text", { x: x + (W / days) / 2, y: top - 10, "text-anchor": "middle", class: "lbl", fill: "var(--muted)" }, "D" + (d + 1))); }
+  phases.forEach((p, i) => {
+    const y = top + i * rowH + 6;
+    gantt.appendChild(el("text", { x: L - 10, y: y + 15, "text-anchor": "end", class: "lbl" }, `${p.n} · ${p.name}`));
+    const r = el("rect", { x: L + (W / days) * p.start + 1, y, width: (W / days) * p.len - 2, height: 20, rx: 4, class: "bar" + (p.optional ? " dim" : ""), tabindex: 0, "aria-label": `${p.name}, ${p.len} day${p.len > 1 ? "s" : ""}` });
+    hover(r, `<b>${p.n} · ${p.name}</b>${p.tasks.map(t => "· " + t).join("<br>")}`);
+    r.addEventListener("click", () => { const det = $$("#phases details")[i]; det.open = true; det.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
+    gantt.appendChild(r);
+  });
+  $("#phases").innerHTML = "<h2>Phase detail</h2>" + phases.map(p => `<details class="phase"><summary><span class="n">${p.n}</span><span>${p.name}${p.optional ? ' <span class="sub">(optional)</span>' : ""}</span><span class="days">${p.len} day${p.len > 1 ? "s" : ""}</span></summary><ul>${p.tasks.map(t => `<li>${t}</li>`).join("")}</ul></details>`).join("");
+
+  // ---- languages chart (emphasis: KittenTTS is the recommendation)
+  const engines = [["Supertonic-3", 31], ["MOSS-TTS-Nano", 20], ["PocketTTS", 6], ["KittenTTS", 1]];
+  const lc = $("#langs"); const LL = 130, LW = 700 - LL - 60, max = 31, rh = 36, ty = 20;
+  engines.forEach(([name, v], i) => {
+    const y = ty + i * rh, w = Math.max(4, (LW * v) / max), em = name === "KittenTTS";
+    lc.appendChild(el("text", { x: LL - 10, y: y + 15, "text-anchor": "end", class: "lbl" }, name));
+    const r = el("rect", { x: LL, y, width: w, height: 20, rx: 4, class: "bar " + (em ? "em" : "dim"), tabindex: 0, "aria-label": `${name}: ${v} languages` });
+    hover(r, `<b>${name}</b>${v} language${v > 1 ? "s" : ""}${em ? " · recommended first engine" : ""}`);
+    lc.appendChild(r);
+    lc.appendChild(el("text", { x: LL + w + 8, y: y + 15, class: "val" }, String(v)));
+  });
+  lc.appendChild(el("line", { x1: LL, y1: ty - 4, x2: LL, y2: ty + engines.length * rh - 10, class: "axis" }));
+  lc.appendChild(el("text", { x: LL, y: ty + engines.length * rh + 8, class: "lbl", fill: "var(--muted)" }, "languages supported"));
+  $("#tbl-toggle").addEventListener("click", (e) => { const t = $("#langs-table"); const on = t.hidden; t.hidden = !on; lc.style.display = on ? "none" : ""; e.currentTarget.setAttribute("aria-pressed", String(on)); e.currentTarget.textContent = on ? "Show chart" : "Show table"; });
+
+  // ---- risks
+  const risks = [
+    ["First chunk slower than the 1 s target on CPU", "serious", "Measure in P0. KittenTTS is the lightest engine; keep two sentences prefetched; show the skeleton, never a spinner. If it misses, a shorter first sentence can be sent first."],
+    ["VoiceStudio rejects browser requests (origin, host, bearer)", "warning", "Proxy is the only caller, from loopback, with the key injected server-side. Add the proxy origin to OMNIVOICE_ALLOWED_ORIGINS anyway."],
+    ["No word timings from the speech endpoint", "warning", "Sentence highlight is exact; word underline stays estimated. P4 derives timings from transcription behind a flag."],
+    ["API churn: the project pushed today and ships weekly", "warning", "Pin the Docker image tag. Adapter speaks only the OpenAI-shaped subset, which the project treats as a compatibility contract."],
+    ["Inaudible watermark in generated audio", "good", "Acceptable for personal listening. Note it in the README so downloads aren't a surprise."],
+    ["AGPL licence of VoiceStudio", "good", "Called over HTTP as a separate service; ReadAloud ships no VoiceStudio code. Model weights carry their own terms; all four engines allow personal use."],
+    ["Disk and memory on a 15 GB laptop", "warning", "KittenTTS weights are under 100 MB. Defer Supertonic-3 and cloning engines until the first engine is proven. Cap the IndexedDB audio cache, which already exists."],
+    ["Tailnet exposure", "good", "VoiceStudio binds to 127.0.0.1 only. The tailnet reaches the proxy, which forwards a single route."],
+  ];
+  const sev = { good: ["Low", "var(--good)", "✓"], warning: ["Medium", "var(--warn)", "!"], serious: ["High", "var(--serious)", "!!"], critical: ["Critical", "var(--critical)", "✕"] };
+  $("#risks").innerHTML = risks.map(([r, s, m]) => `<tr><td>${r}</td><td><span class="st"><i style="background:${sev[s][1]}"></i>${sev[s][0]}<span class="sr"> (${sev[s][2]})</span></span></td><td>${m}</td></tr>`).join("");
+
+  // ---- checklist
+  const checks = [
+    ["A 20-word sentence returns MP3 from the proxy in under 1 s on this laptop", "P0–P1 · measured with curl, recorded in README"],
+    ["Compose → Listen plays a VoiceStudio voice with sentence highlighting", "P2"],
+    ["Replaying a document with the network off still plays from cache", "P2 · DevTools offline"],
+    ["Stopping the container shows the offline banner and falls back to the browser voice", "P2"],
+    ["Voices page lists the server's voices; Preview plays a real sample", "P3"],
+    ["Switching engines never replays audio cached from another engine", "P2–P3 · cache key includes engine"],
+    ["Speed chip changes playback without a new request", "P2 · clips cached at 1×"],
+    ["Playwright suite passes with no VoiceStudio running", "P5 · stub server"],
+    ["No API key appears in any bundle, request from the browser, or the public repo", "P1 · grep dist and git"],
+    ["Word underline tracks real timings when the flag is on", "P4 · optional"],
+  ];
+  const checksEl = $("#checks");
+  const renderChecks = () => {
+    const done = checks.filter((_, i) => store("plan:check:" + i) === "1").length;
+    $("#check-count").textContent = `${done} of ${checks.length} done.`;
+    $("#check-meter").style.width = (done / checks.length * 100) + "%";
+    $("#check-meter").parentElement.setAttribute("aria-valuenow", Math.round(done / checks.length * 100));
+  };
+  checksEl.innerHTML = checks.map(([t, s], i) => `<div class="check"><input type="checkbox" id="c${i}" ${store("plan:check:" + i) === "1" ? "checked" : ""}><label for="c${i}">${t}<small>${s}</small></label></div>`).join("");
+  $$("#checks input").forEach((c, i) => c.addEventListener("change", () => { store("plan:check:" + i, c.checked ? "1" : "0"); renderChecks(); }));
+  renderChecks();
+
+  // ---- decisions
+  const decisions = [
+    { q: "First engine", opts: ["KittenTTS (English, 8 presets, smallest install)", "Supertonic-3 (31 languages, 7 presets, sidecar)", "Decide after P0 measurements"], note: "Affects which voice names appear first and how much disk P0 needs." },
+    { q: "Where the proxy lives in production", opts: ["Caddy in front of the Vite preview, behind Tailscale serve", "A tiny Node route inside the app's preview server", "Dev-only for now; production waits"], note: "Caddy is the smallest change given the existing tailnet setup." },
+    { q: "Word timings", opts: ["Skip P4; keep the estimate", "Build P4 behind a flag, default off", "Build P4 and enable it if alignment adds under 300 ms per sentence"], note: "P4 is two days and is the only phase that adds a second request per sentence." },
+    { q: "Keep the browser voice fallback", opts: ["Yes, as today, with the banner", "No; show an error and stop"], note: "Keeping it preserves the Linux client story: unreachable API falls back to a local voice." },
+  ];
+  $("#decisions").innerHTML = decisions.map((d, i) => `<div class="card" style="margin-bottom:10px"><b>${d.q}</b><div class="q" style="margin-top:8px">${d.opts.map((o, j) => `<label><input type="radio" name="d${i}" value="${j}" ${store("plan:dec:" + i) === String(j) ? "checked" : ""}>${o}</label>`).join("")}</div><p class="note">${d.note}</p></div>`).join("");
+  $$("#decisions input").forEach(r => r.addEventListener("change", () => store("plan:dec:" + r.name.slice(1), r.value)));
+})();
+</script>
+</body>
+</html>

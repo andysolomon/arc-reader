@@ -16,7 +16,7 @@ packages/tokens   CSS variables for all 8 themes, a Tailwind preset, and a WCAG 
 
 ```sh
 pnpm install
-pnpm dev              # app on http://127.0.0.1:5173
+npm run dev          # app on http://127.0.0.1:5181 (strict port, .ts.net allowed); also prints the Tailnet URL from `tailscale serve`
 pnpm build            # production build → apps/web/dist
 pnpm --filter @readaloud/web preview   # serve the build on :4173
 pnpm storybook        # Storybook on :6006 (dark / light / all Omarchy themes in the toolbar)
@@ -32,17 +32,70 @@ Copy `apps/web/.env.example` to `.env` to point the app at a TTS backend.
 
 - One audio chunk per sentence; the next two are prefetched.
 - Advances with `requestAnimationFrame` on real elapsed time. With audio, `audio.currentTime` is the clock. Without provider timestamps, word timing is estimated at 2.83 words/s × speed.
-- Chunks are cached in IndexedDB (`audio` store) so documents replay offline. Positions persist per document (`positions` store) and drive the Library progress rings.
-- Provider chain: cache → cloud API → local voice. When the API is unreachable, a banner appears and the browser speech engine reads instead (shown as the local voice).
+- Chunks are cached in IndexedDB (`audio` store, keyed by engine + voice + text) so documents replay offline. Positions persist per document (`positions` store) and drive the Library progress rings.
+- Provider chain: cache → speech server → browser voice. When the server is unreachable, a banner appears and the browser speech engine reads instead.
 
-### API contract
+## Voices: VoiceStudio
 
-`POST {VITE_API_BASE}/tts` with `{ text, voice, provider, format: "mp3" }` returning either
+ReadAloud talks to [VoiceStudio](https://github.com/debpalash/VoiceStudio) through its OpenAI-compatible audio API. The browser never contacts VoiceStudio directly: the Vite dev and preview servers proxy `/api/vs/*` to it and inject the API key, so the key stays out of the bundle and VoiceStudio only hears from loopback.
 
-- `audio/mpeg` body, optional headers `X-Duration` (seconds) and `X-Word-Timings` (JSON `[[start, end], …]` in seconds), or
-- `application/json` `{ audio: <base64>, mime, duration, words: [{ start, end }] }`.
+### 1. Run VoiceStudio (CPU, Docker)
 
-`POST {VITE_API_BASE}/auth/magic-link` and `GET {VITE_API_BASE}/auth/google` back the Auth screen. With no `VITE_API_BASE`, the app runs fully local.
+Your user needs access to the Docker socket (`sudo usermod -aG docker $USER`, then log in again).
+
+```sh
+export OMNIVOICE_API_KEY="$(openssl rand -hex 32)"
+docker run -d --name voicestudio \
+  -p 127.0.0.1:3900:3900 \
+  -e OMNIVOICE_API_KEY \
+  -e OMNIVOICE_SERVER_MODE=1 \
+  -e OMNIVOICE_ANALYTICS_DISABLED=1 \
+  -e OMNIVOICE_DATA_DIR=/app/omnivoice_data \
+  -v voicestudio-data:/app/omnivoice_data \
+  ghcr.io/debpalash/voicestudio:stable
+echo "$OMNIVOICE_API_KEY"
+```
+
+Open http://127.0.0.1:3900, pick **KittenTTS** in the Model Manager (about 80 MB, runs on any CPU), and let it download. Pin the image to a `:sha-…` tag once it works; the project ships often.
+
+Measure the first byte before judging quality:
+
+```sh
+curl -s -o /dev/null -w "%{time_starttransfer}s\n" -H "Authorization: Bearer $OMNIVOICE_API_KEY" \
+  -H "Content-Type: application/json" -d '{"model":"kittentts","input":"The quick brown fox jumps over the lazy dog near the quiet river bank at dusk.","voice":"expr-voice-2-f","response_format":"mp3"}' \
+  http://127.0.0.1:3900/v1/audio/speech
+```
+
+### 2. Point ReadAloud at it
+
+Create `apps/web/.env.local`:
+
+```sh
+VITE_API_BASE=/api/vs
+VITE_TTS_PROVIDER=openai
+VITE_DEFAULT_ENGINE=kittentts
+VOICESTUDIO_URL=http://127.0.0.1:3900
+VOICESTUDIO_API_KEY=<the key you printed above>
+```
+
+Then `npm run dev` (or `pnpm build && pnpm --filter @readaloud/web preview` for the tailnet build). The Voices page lists KittenTTS's eight presets plus any profiles you clone in VoiceStudio; Settings → Engine lists what the server reports.
+
+### Without VoiceStudio
+
+`tests/stub-voicestudio.mjs` imitates the API (bearer check, two cloned profiles, sine-tone audio, word timings). Playwright starts it automatically. To develop against it:
+
+```sh
+node apps/web/tests/stub-voicestudio.mjs 3999 test-key &
+VOICESTUDIO_URL=http://127.0.0.1:3999 VOICESTUDIO_API_KEY=test-key VITE_API_BASE=/api/vs npm run dev
+```
+
+### Word timings (optional)
+
+The speech endpoint returns audio only, so the word underline is estimated. Settings → Playback → **Word timings from the server** sends each synthesized sentence to `/v1/audio/transcriptions` (`verbose_json`, word granularity) and uses the result when every word aligns. It costs one extra request per sentence and is off by default.
+
+### Legacy contract
+
+With `VITE_TTS_PROVIDER=readaloud` the app instead calls `POST {VITE_API_BASE}/tts` with `{ text, voice, provider, format: "mp3" }` and accepts `audio/mpeg` (optional `X-Duration`, `X-Word-Timings` headers) or JSON `{ audio: <base64>, mime, duration, words }`. `POST /auth/magic-link` and `GET /auth/google` back the Auth screen in either mode.
 
 ## Themes
 
