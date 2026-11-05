@@ -23,6 +23,13 @@ interface SavedPreparation {
   keys: string[];
   active: boolean;
 }
+interface PreparationObserver { signal?: AbortSignal }
+interface PreparationSession {
+  entry: Promise<SavedPreparation>;
+  observers: Set<PreparationObserver>;
+  cancelled: boolean;
+}
+const sessions = new Map<string, PreparationSession>();
 class PreparationHttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -35,8 +42,10 @@ function saved(): SavedPreparation[] {
   return memory;
 }
 function save(entries: SavedPreparation[]) {
-  memory = entries;
-  try { localStorage.setItem(STORAGE, JSON.stringify(entries)); } catch { /* private mode */ }
+  // A long-running reading must retain its audio mapping even when many shorter
+  // concurrent readings finish before it does.
+  memory = entries.filter((entry, index) => entry.active || index >= entries.length - 20);
+  try { localStorage.setItem(STORAGE, JSON.stringify(memory)); } catch { /* private mode */ }
 }
 const signature = (requests: PreparationRequest[]) => hash(JSON.stringify(requests.map(({ cached: _, ...request }) => request)));
 
@@ -63,10 +72,7 @@ function delay(signal?: AbortSignal): Promise<void> {
   });
 }
 
-/** One submission owns the entire render; polling only observes it. */
-export async function prepareAudio(requests: PreparationRequest[], start: number, progress?: (done: number, total: number) => void, signal?: AbortSignal) {
-  signal?.throwIfAborted();
-  const fingerprint = signature(requests);
+async function submit(requests: PreparationRequest[], start: number, fingerprint: string): Promise<SavedPreparation> {
   let entry = saved().find((job) => job.signature === fingerprint && job.active);
   if (!entry) {
     // Do not abort the submission: if Cancel races the response, obtain the job id
@@ -75,15 +81,34 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requests, start }),
     });
     entry = { id: status.id, signature: fingerprint, keys: requests.map((r) => r.key), active: true };
-    save([...saved().filter((job) => job.signature !== fingerprint), entry].slice(-20));
+    save([...saved().filter((job) => job.signature !== fingerprint), entry]);
   }
-  const id = entry.id;
+  return entry;
+}
+
+/** Identical readings share a submission; polling only observes it. A reader
+ * cancels server work only when no other reader still needs that job. */
+export async function prepareAudio(requests: PreparationRequest[], start: number, progress?: (done: number, total: number) => void, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const fingerprint = signature(requests);
+  let session = sessions.get(fingerprint);
+  if (!session) {
+    session = { entry: submit(requests, start, fingerprint), observers: new Set(), cancelled: false };
+    sessions.set(fingerprint, session);
+  }
+  const observer = { signal };
+  session.observers.add(observer);
+  let id: string | undefined;
   const cancel = () => {
+    if (!id || session.cancelled || [...session.observers].some((other) => !other.signal?.aborted)) return;
+    session.cancelled = true;
+    if (sessions.get(fingerprint) === session) sessions.delete(fingerprint);
     save(saved().map((job) => job.id === id ? { ...job, active: false } : job));
     void fetch(`${BASE}/${id}`, { method: "DELETE", keepalive: true }).catch(() => {});
   };
-  signal?.addEventListener("abort", cancel, { once: true });
   try {
+    id = (await session.entry).id;
+    signal?.addEventListener("abort", cancel, { once: true });
     if (signal?.aborted) { cancel(); signal.throwIfAborted(); }
     for (;;) {
       let status: PreparationStatus;
@@ -113,6 +138,8 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
     }
   } finally {
     signal?.removeEventListener("abort", cancel);
+    session.observers.delete(observer);
+    if (!session.observers.size && sessions.get(fingerprint) === session) sessions.delete(fingerprint);
   }
 }
 

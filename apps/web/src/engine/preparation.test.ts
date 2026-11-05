@@ -71,6 +71,49 @@ describe("background preparation client", () => {
     expect(hasActivePreparation(requests)).toBe(false);
   });
 
+  it("shares identical concurrent submissions and cancels only after the last observer aborts", async () => {
+    vi.useFakeTimers();
+    let submitted!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { submitted = resolve; }))
+      .mockImplementation(async () => response(status("running", 0)));
+    const first = new AbortController(), second = new AbortController();
+    const firstRun = prepareAudio(requests, 0, undefined, first.signal);
+    const secondRun = prepareAudio(requests, 0, undefined, second.signal);
+    const firstRejection = expect(firstRun).rejects.toMatchObject({ name: "AbortError" });
+    first.abort();
+    submitted(response(status("running", 0)));
+    await firstRejection;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(0);
+    expect(hasActivePreparation(requests)).toBe(true);
+    const secondRejection = expect(secondRun).rejects.toMatchObject({ name: "AbortError" });
+    second.abort();
+    await secondRejection;
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
+    expect(hasActivePreparation(requests)).toBe(false);
+  });
+
+  it("finishes a shared reading when another observer cancels during polling", async () => {
+    vi.useFakeTimers();
+    let done = false;
+    fetchMock.mockImplementation(async () => response(status(done ? "done" : "running", done ? 2 : 0)));
+    const controller = new AbortController();
+    const firstRun = prepareAudio(requests, 0, undefined, controller.signal);
+    const progress = vi.fn();
+    const secondRun = prepareAudio(requests, 0, progress);
+    await vi.advanceTimersByTimeAsync(0);
+    const rejection = expect(firstRun).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await rejection;
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    done = true;
+    await vi.advanceTimersByTimeAsync(1500);
+    await secondRun;
+    expect(progress).toHaveBeenLastCalledWith(2, 2);
+    expect(hasActivePreparation(requests)).toBe(false);
+  });
+
   it("surfaces job errors and permits regeneration after stored audio expires", async () => {
     fetchMock.mockResolvedValueOnce(response(status("running", 0)))
       .mockResolvedValueOnce(response({ ...status("error", 0), error: "Model terms need acceptance" }));

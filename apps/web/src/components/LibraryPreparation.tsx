@@ -4,7 +4,7 @@ import { Search, Zap } from "lucide-react";
 import { voiceSource } from "../data/voices";
 import { baseFor, isPaidEngine } from "../engine/providers";
 import { LOCAL_ENGINE } from "../engine/types";
-import { isPreparing, usePreparation } from "../state/preparation";
+import { isPreparing, PREPARATION_CONCURRENCY, usePreparation } from "../state/preparation";
 import { useVoices } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
@@ -57,6 +57,7 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
   return (
     <Dialog open onClose={onClose} title="Prepare audio" className="max-h-[calc(100dvh-48px)]">
       <p className="m-0 text-sm text-fg2">Choose voices for {documents.length === 1 ? `“${documents[0].rec.title}”` : `${documents.length} documents`}. Saved audio is reused. Preparation continues as you browse; keep this tab open.</p>
+      <p className="m-0 text-[12px] text-fg2">Up to {PREPARATION_CONCURRENCY} readings per provider prepare together. VoiceStudio shares its worker between readings; cloud providers run independently.</p>
       {available.length > 0 ? <>
         <Input leading={<Search size={16} aria-hidden />} aria-label="Search preparation voices" placeholder="Find a voice or provider" value={query} onChange={(e) => setQuery(e.target.value)} />
         <div role="group" aria-label="Preparation voices" className="flex min-h-0 max-h-[42dvh] flex-col gap-1 overflow-y-auto rounded-control border border-line p-2">
@@ -84,12 +85,14 @@ export function PreparationQueue() {
   const { jobs, cancel, cancelAll, dismissFinished } = usePreparation();
   if (!jobs.length) return null;
   const pending = jobs.filter(isPreparing);
+  const preparing = pending.filter((job) => job.status === "preparing").length;
+  const queued = pending.length - preparing;
   const finished = jobs.length - pending.length;
   return (
     <div className="rounded-card border border-line bg-bg2 p-4" role="region" aria-label="Audio preparation queue">
       <div className="flex flex-wrap items-center gap-3">
         <Zap size={16} className="text-accent" aria-hidden />
-        <span className="flex-1 text-sm" role="status">{pending.length ? `Preparing audio · ${pending.length} ${pending.length === 1 ? "reading" : "readings"} remaining` : "Audio preparation finished"}</span>
+        <span className="flex-1 text-sm" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}` : "Audio preparation finished"}</span>
         {pending.length > 0 && <Button size="sm" onClick={cancelAll}>Cancel all</Button>}
         {finished > 0 && <Button size="sm" variant="ghost" onClick={dismissFinished}>Clear finished</Button>}
       </div>

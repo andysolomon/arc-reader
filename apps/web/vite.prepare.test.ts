@@ -19,13 +19,19 @@ describe("server-owned audio preparation", () => {
   let calls: { path: string; body: Record<string, unknown>; authorization?: string; origin?: string }[];
   let gate: ReturnType<typeof deferred> | undefined;
   let rejectSpeech: boolean;
+  let activeSpeech: number, peakSpeech: number;
   beforeEach(async () => {
     calls = []; gate = undefined; rejectSpeech = false;
+    activeSpeech = 0; peakSpeech = 0;
     directory = await mkdtemp(join(tmpdir(), "readaloud-preparation-"));
     upstream = createServer(async (req, res) => {
       const buffers: Buffer[] = [];
       for await (const chunk of req) buffers.push(Buffer.from(chunk));
       calls.push({ path: req.url!, body: JSON.parse(Buffer.concat(buffers).toString() || "{}"), authorization: req.headers.authorization, origin: req.headers.origin });
+      if (req.url !== "/engines") {
+        peakSpeech = Math.max(peakSpeech, ++activeSpeech);
+        res.once("finish", () => { activeSpeech--; });
+      }
       await gate?.promise;
       if (req.url === "/engines") {
         res.setHeader("content-type", "application/json");
@@ -82,6 +88,53 @@ describe("server-owned audio preparation", () => {
     expect(await service.get(job.id)).toMatchObject({ state: "cancelled", done: 1 });
     await expect(service.audio(job.id, 1)).rejects.toThrow("cancelled");
     expect(calls).toHaveLength(1);
+  });
+
+  it("shares the worker between concurrent voices without overlapping synthesis", async () => {
+    const service = new PreparationService(env, directory);
+    gate = deferred();
+    const first = await service.submit({ requests: [item("a1"), item("a2"), item("a3")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const second = await service.submit({ requests: [item("b1"), item("b2")].map((r) => ({ ...r, voice: "other" })), start: 0 });
+    gate.resolve();
+    await expect.poll(async () => (await service.get(first.id)).state).toBe("done");
+    await expect.poll(async () => (await service.get(second.id)).state).toBe("done");
+    const order = calls.map((call) => call.body.input);
+    expect(order.indexOf("b1")).toBeLessThan(order.indexOf("a3"));
+    expect(order.filter((text) => String(text).startsWith("a"))).toEqual(["a1", "a2", "a3"]);
+    expect(order.filter((text) => String(text).startsWith("b"))).toEqual(["b1", "b2"]);
+    expect(peakSpeech).toBe(1);
+  });
+
+  it("serves cached audio immediately while another voice is rendering", async () => {
+    const service = new PreparationService(env, directory);
+    const cached = await service.submit({ requests: [item("cached")], start: 0 });
+    await expect.poll(async () => (await service.get(cached.id)).state).toBe("done");
+    gate = deferred();
+    const rendering = await service.submit({ requests: [item("slow")], start: 0 });
+    await expect.poll(() => calls.length).toBe(2);
+    let downloaded = false;
+    const audio = service.audio(cached.id, 0).then((result) => { downloaded = true; return result; });
+    await expect.poll(() => downloaded).toBe(true);
+    expect((await audio).body.toString()).toBe("audio:cached");
+    expect((await service.get(rendering.id)).done).toBe(0);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(rendering.id)).state).toBe("done");
+  });
+
+  it("keeps shared queued work when one of its documents is cancelled", async () => {
+    const service = new PreparationService(env, directory);
+    gate = deferred();
+    const blocker = await service.submit({ requests: [item("blocker")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const first = await service.submit({ requests: [item("shared"), item("unused")], start: 0 });
+    const second = await service.submit({ requests: [item("shared"), item("second")], start: 0 });
+    await service.cancel(first.id);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(second.id)).state).toBe("done");
+    await expect.poll(async () => (await service.get(blocker.id)).state).toBe("done");
+    expect((await service.get(first.id)).state).toBe("cancelled");
+    expect(calls.map((call) => call.body.input)).toEqual(["blocker", "shared", "second"]);
   });
 
   it("resumes a persisted running job from its remaining passages", async () => {
