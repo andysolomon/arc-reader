@@ -10,7 +10,8 @@ import { toast } from "../state/toast";
 import { ApiUsage } from "../components/ApiUsage";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
 import { studioJson, jsonBody } from "../lib/studio";
-import { hasApi } from "../engine/providers";
+import { DEFAULT_ENGINE, hasApi } from "../engine/providers";
+import { LOCAL_ENGINE } from "../engine/types";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -40,8 +41,11 @@ export function SettingsPage() {
   const voice = getVoice(s.voice);
   const hasDoc = usePlayer((st) => !!st.doc);
   const allEngines = useVoices((v) => v.engines);
-  const engines = allEngines.filter((e) => e.available || e.id === s.engine);
-  const notInstalled = allEngines.length - engines.length;
+  const activeEngine = useVoices((v) => v.activeEngine);
+  // Only the active engine's choice matters for profile voices, so offer cloning engines alone.
+  const cloners = allEngines.filter((e) => e.cloning && e.available);
+  const notInstalled = allEngines.filter((e) => e.cloning && !e.available).length;
+  const browserOnly = s.engine === LOCAL_ENGINE;
   const [engineBusy, setEngineBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -112,25 +116,43 @@ export function SettingsPage() {
         </Section>
 
         <Section title="Engine">
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="TTS engine">
-            {engines.map((e) => (
-              <Chip key={e.id} size="sm" selected={s.engine === e.id} disabled={!e.available || engineBusy} onClick={() => {
-                if (e.id === "local" || !hasApi()) { s.set("engine", e.id); return; }
-                setEngineBusy(true);
-                void studioJson("/engines/select", jsonBody({ family: "tts", backend_id: e.id }))
-                  .then(async () => { s.set("engine", e.id); await useVoices.getState().load(); })
-                  .catch((error: Error) => toast(error.message))
-                  .finally(() => setEngineBusy(false));
-              }} title={e.available ? undefined : "Not installed on the speech server"}>
-                {e.label}
-              </Chip>
-            ))}
+          <div className="flex flex-col rounded-panel border border-line bg-bg2">
+            <RowItem label="Browser voice only" hint="Read everything with this device’s built-in voice, without any speech server." last>
+              <Switch checked={browserOnly} onChange={(v) => s.set("engine", v ? LOCAL_ENGINE : DEFAULT_ENGINE)} label="Browser voice only" />
+            </RowItem>
           </div>
-          <div className="text-[13px] text-fg2">
-            {hasApi()
-              ? `Installed engines reported by the speech server${notInstalled > 0 ? `; ${notInstalled} more can be installed from VoiceStudio's Model Catalogue` : ""}. Preset voices name their own engine. This selects VoiceStudio’s active engine for saved voices; choose a cloning engine for clones and designs.`
-              : "No local speech server configured. Cloud voices use their own engine; choose one from Voices."}
-          </div>
+          {hasApi() ? (
+            <>
+              <div className="flex flex-col gap-1">
+                <div>Saved-voice engine</div>
+                <div className="text-[13px] text-fg2">
+                  {cloners.length
+                    ? `The VoiceStudio engine that speaks your cloned and designed voices${notInstalled > 0 ? `; ${notInstalled} more can be installed from VoiceStudio's Model Catalogue` : ""}. Preset voices always use their own engine.`
+                    : allEngines.length
+                      ? "The speech server has no voice-cloning engine installed, so cloned and designed voices can’t play. Install one from VoiceStudio’s Model Catalogue."
+                      : "Engines appear here once the speech server responds."}
+                </div>
+              </div>
+              {cloners.length > 0 && (
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Saved-voice engine">
+                  {cloners.map((e) => (
+                    <Chip key={e.id} size="sm" selected={activeEngine === e.id} disabled={engineBusy} onClick={() => {
+                      if (activeEngine === e.id) return;
+                      setEngineBusy(true);
+                      void studioJson("/engines/select", jsonBody({ family: "tts", backend_id: e.id }))
+                        .then(() => useVoices.getState().load())
+                        .catch((error: Error) => toast(error.message))
+                        .finally(() => setEngineBusy(false));
+                    }}>
+                      {e.label}
+                    </Chip>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-[13px] text-fg2">No local speech server configured. Cloud voices use their own engine; choose one from Voices.</div>
+          )}
         </Section>
 
         <Section title="API usage & spending">

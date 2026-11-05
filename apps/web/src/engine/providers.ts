@@ -400,6 +400,7 @@ export interface ServerEngine {
   id: string;
   name?: string;
   available?: boolean;
+  supports_cloning?: boolean;
 }
 
 export async function fetchServerVoices(signal?: AbortSignal): Promise<{ voices: ServerVoice[]; engines: ServerEngine[] }> {
