@@ -81,7 +81,8 @@ export async function waitForTask(taskId: string, signal: AbortSignal, progress:
 export async function transcribe(file: File, dictation: boolean, signal: AbortSignal): Promise<Transcript> {
   const body = new FormData();
   body.set("audio", file);
-  body.set("mode", "accurate");
+  // VoiceStudio serves "fast" with Whisper Turbo (built for dictation); "accurate" needs the larger model.
+  body.set("mode", dictation ? "fast" : "accurate");
   body.set("dictation", String(dictation));
   return studioJson<Transcript>("/transcribe", { method: "POST", body, signal });
 }

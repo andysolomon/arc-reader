@@ -35,9 +35,15 @@ describe("VoiceStudio workflow contracts", () => {
     const [path, init] = fetch.mock.calls[0];
     expect(path).toBe("/api/vs/transcribe");
     expect(init.body.get("dictation")).toBe("true");
-    expect(init.body.get("mode")).toBe("accurate");
+    expect(init.body.get("mode")).toBe("fast");
     expect(init.body.get("audio").name).toBe("recording.webm");
     expect(init.headers).toBeUndefined();
+  });
+  it("keeps accurate mode for file transcription", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: "Hello" })));
+    vi.stubGlobal("fetch", fetch);
+    await transcribe(new File(["audio"], "talk.mp3"), false, new AbortController().signal);
+    expect(fetch.mock.calls[0][1].body.get("mode")).toBe("accurate");
   });
   it("formats subtitle timing across minute and hour boundaries", () => {
     expect(subtitles([{ start: 59.9996, end: 3600.01, text: "Hello" }])).toBe("1\n00:01:00,000 --> 01:00:00,010\nHello\n");
