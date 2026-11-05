@@ -30,7 +30,8 @@ export function ProgressRing({ value, size = 36, stroke = 2.5, label, className 
         fill="none"
         stroke="var(--accent)"
         strokeWidth={stroke}
-        strokeLinecap="round"
+        // A round cap on an empty arc would draw a stray dot.
+        strokeLinecap={v > 0 ? "round" : "butt"}
         strokeDasharray={`${v * c} ${c}`}
         style={{ transform: "rotate(-90deg)", transformOrigin: "50% 50%", transition: "stroke-dasharray .3s ease-out" }}
       />
