@@ -33,3 +33,33 @@ test("desktop: 216px rail and a 760px capsule", async ({ page }) => {
   const pb = await page.getByRole("region", { name: "Player" }).boundingBox();
   expect(pb!.width).toBe(760);
 });
+
+test.describe("touch phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("fields are at least 16px so iOS doesn't zoom on focus", async ({ page }) => {
+    for (const path of ["/library", "/voices", "/studio", "/settings", "/auth"]) {
+      await page.goto(path);
+      await page.locator("input, select, textarea").first().waitFor();
+      const small = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLInputElement>("input, select, textarea")]
+          .filter((el) => !["checkbox", "radio", "range", "file", "hidden"].includes(el.type))
+          .filter((el) => parseFloat(getComputedStyle(el).fontSize) < 16)
+          .map((el) => el.getAttribute("aria-label") || el.placeholder || el.tagName),
+      );
+      expect(small, path).toEqual([]);
+    }
+  });
+
+  test("library rows keep their actions hidden until swiped", async ({ page }) => {
+    await composeAndListen(page);
+    await page.goto("/library");
+    const title = page.locator("li").first().getByRole("button").first();
+    const del = page.locator("li [aria-label=Delete]").first();
+    const t = (await title.boundingBox())!;
+    const d = (await del.boundingBox())!;
+    // The swipe panel sits under the row, so the row covers the delete button until swiped.
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[aria-label=Delete]"), { x: d.x + d.width / 2, y: d.y + d.height / 2 })).toBeNull();
+    expect(t.width).toBeGreaterThan(200);
+  });
+});

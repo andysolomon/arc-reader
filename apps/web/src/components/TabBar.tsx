@@ -5,7 +5,7 @@ import { NAV } from "./Rail";
 /** Bottom tab bar for < 640px. */
 export function TabBar() {
   return (
-    <nav aria-label="Primary" className="flex h-14 shrink-0 items-stretch border-t border-line bg-bg pb-[env(safe-area-inset-bottom)]">
+    <nav aria-label="Primary" className="flex h-[calc(3.5rem+env(safe-area-inset-bottom))] shrink-0 items-stretch border-t border-line bg-bg pb-[env(safe-area-inset-bottom)]">
       {NAV.map(({ to, label, Icon, end }) => (
         <NavLink
           key={to}
