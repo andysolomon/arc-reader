@@ -14,15 +14,15 @@ export interface LlmConfig {
 
 const MAX_BODY = 8 * 1024 * 1024;
 const USER_AGENT = "readaloud/0.1";
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-/** The OpenCode Go key entered in Settings, saved on this server (mode 600). It overrides LLM_API_KEY. */
+/** An API key entered in Settings, saved on this server (mode 600). It overrides the key from the environment. */
 export class LlmKeyStore {
   private file: string;
-  constructor(private directory: string, private envKey = "") {
-    this.file = resolve(directory, "llm.json");
+  constructor(private directory: string, private envKey = "", fileName = "llm.json") {
+    this.file = resolve(directory, fileName);
   }
   async key(): Promise<{ key: string; source: LlmConfig["source"] }> {
     try {
@@ -46,15 +46,29 @@ export class LlmKeyStore {
   remove = () => rm(this.file, { force: true });
 }
 
-async function body(req: IncomingMessage): Promise<Buffer> {
+export async function body(req: IncomingMessage): Promise<Buffer> {
   const buffers: Buffer[] = [];
   let length = 0;
   for await (const chunk of req) {
     length += Buffer.byteLength(chunk);
-    if (length > MAX_BODY) throw new HttpError(413, "The text is too large to summarize.");
+    if (length > MAX_BODY) throw new HttpError(413, "The text is too large to send.");
     buffers.push(Buffer.from(chunk));
   }
   return Buffer.concat(buffers);
+}
+
+/** GET, PUT (after `verify` accepts it), or DELETE a saved key. Answers with the config, never the key. */
+export async function keyConfig(req: IncomingMessage, store: LlmKeyStore, verify: (key: string) => Promise<void>): Promise<LlmConfig> {
+  if (req.method === "GET") return store.config();
+  if (req.method === "DELETE") { await store.remove(); return store.config(); }
+  if (req.method !== "PUT") throw new HttpError(405, "Use GET, PUT, or DELETE.");
+  let key: unknown;
+  try { key = (JSON.parse((await body(req)).toString("utf8")) as { key?: unknown }).key; }
+  catch { throw new HttpError(400, "Invalid JSON."); }
+  if (typeof key !== "string" || !key.trim() || key.trim().length > 500 || /\s/.test(key.trim())) throw new HttpError(400, "Paste the API key without spaces.");
+  await verify(key.trim());
+  await store.save(key.trim());
+  return store.config();
 }
 
 /**
@@ -74,19 +88,12 @@ export function llmMiddleware(store: LlmKeyStore, upstream: string, fetchImpl: t
         throw new HttpError(403, "Cross-origin requests are not allowed.");
       }
       if (path === "/config") {
-        if (req.method === "GET") return send(200, await store.config());
-        if (req.method === "DELETE") { await store.remove(); return send(200, await store.config()); }
-        if (req.method !== "PUT") throw new HttpError(405, "Use GET, PUT, or DELETE.");
-        let key: unknown;
-        try { key = (JSON.parse((await body(req)).toString("utf8")) as { key?: unknown }).key; }
-        catch { throw new HttpError(400, "Invalid JSON."); }
-        if (typeof key !== "string" || !key.trim() || key.trim().length > 500 || /\s/.test(key.trim())) throw new HttpError(400, "Paste the API key without spaces.");
-        const check = await fetchImpl(`${base}/v1/models`, { headers: { authorization: `Bearer ${key.trim()}`, "user-agent": USER_AGENT }, signal: AbortSignal.timeout(15_000) })
-          .catch(() => { throw new HttpError(502, "Could not reach OpenCode to check the key. Please retry."); });
-        if (check.status === 401 || check.status === 403) throw new HttpError(400, "OpenCode didn't accept that key. Check it and try again.");
-        if (!check.ok) throw new HttpError(502, `OpenCode couldn't check the key (HTTP ${check.status}). Please retry.`);
-        await store.save(key.trim());
-        return send(200, await store.config());
+        return send(200, await keyConfig(req, store, async (key) => {
+          const check = await fetchImpl(`${base}/v1/models`, { headers: { authorization: `Bearer ${key}`, "user-agent": USER_AGENT }, signal: AbortSignal.timeout(15_000) })
+            .catch(() => { throw new HttpError(502, "Could not reach OpenCode to check the key. Please retry."); });
+          if (check.status === 401 || check.status === 403) throw new HttpError(400, "OpenCode didn't accept that key. Check it and try again.");
+          if (!check.ok) throw new HttpError(502, `OpenCode couldn't check the key (HTTP ${check.status}). Please retry.`);
+        }));
       }
       if (path !== "/v1/chat/completions" && path !== "/v1/responses") throw new HttpError(404, "Not found.");
       if (req.method !== "POST") throw new HttpError(405, "Use POST.");

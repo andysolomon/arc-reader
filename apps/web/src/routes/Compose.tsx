@@ -78,7 +78,7 @@ export function Compose() {
     toast(`Fetching ${hostOf(url)}…`);
     try {
       const f = await fetchReadable(url);
-      const rec = await create({ text: f.text, title: f.title, source: "url", domain: f.domain });
+      const rec = await create({ text: f.text, title: f.title, source: "url", domain: f.domain, meta: f.meta });
       await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
     } catch {
       toast(`Couldn't read ${hostOf(url)} — try pasting the text`);

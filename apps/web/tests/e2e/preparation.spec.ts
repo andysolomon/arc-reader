@@ -1,5 +1,37 @@
 import { test, expect } from "./fixtures";
 
+test("prepared audio plays through every passage offline without animation frames", async ({ page, context }) => {
+  await page.addInitScript(() => {
+    const played: HTMLMediaElement[] = [];
+    Object.assign(window, { testPlayedAudio: played });
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      played.push(this);
+      return play.call(this);
+    };
+  });
+  await page.goto("/");
+  await page.getByLabel("Text to read").fill("The first prepared passage plays.\n\nThe second prepared passage follows.\n\nThe third prepared passage finishes.");
+  await page.getByTestId("listen").click();
+  await expect(page.getByText("Audio prepared — playback no longer waits on the server", { exact: true })).toBeVisible();
+  await page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Pause/ }).click();
+  await context.route(/\/api\/(vs|preparations)(?:\/|$)/, (route) => route.abort("connectionrefused"));
+  await page.reload();
+  await page.locator('article [data-i="0"]').click();
+  await expect(page.getByRole("button", { name: /^Pause/ })).toBeVisible();
+  // Simulate a hidden tab's suspended UI clock while the browser plays real audio.
+  await page.evaluate(() => { window.requestAnimationFrame = () => 0; });
+  await expect(page.getByRole("slider", { name: "Progress" })).toHaveAttribute("aria-valuenow", "100", { timeout: 15_000 });
+  await expect(page.getByRole("button", { name: /^Play/ })).toBeVisible();
+  await expect(page.getByTestId("speech-error")).toHaveCount(0);
+  await expect(page.getByTestId("offline-banner")).toHaveCount(0);
+  const playback = await page.evaluate(() => {
+    const played = (window as unknown as { testPlayedAudio: HTMLMediaElement[] }).testPlayedAudio;
+    return { passages: played.length, elements: new Set(played).size };
+  });
+  expect(playback).toEqual({ passages: 3, elements: 1 });
+});
+
 test("composing automatically prepares all passages, continues with the page closed, and reuses audio on return", async ({ page, context }) => {
   const unique = Date.now().toString(36);
   const text = Array.from({ length: 12 }, (_, i) => `Passage ${i + 1} of reading ${unique} continues to render when the phone switches apps.`).join("\n\n");

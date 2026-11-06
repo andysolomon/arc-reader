@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ChevronLeft, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon } from "lucide-react";
+import { ChevronLeft, Library, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon } from "lucide-react";
 import { Button, IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
@@ -17,6 +17,7 @@ import { hasSummary, summaryModelLabel } from "../lib/summary";
 import { useLlm } from "../state/llm";
 import { useSummaries } from "../state/summaries";
 import { ArticleSummary } from "../components/ArticleSummary";
+import { DocumentDetails } from "../components/DocumentDetails";
 
 export function Reader() {
   const { id } = useParams();
@@ -44,6 +45,7 @@ export function Reader() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sheet, setSheet] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [details, setDetails] = useState(false);
 
   // Pull the shared library first so deep links also work on a new device.
   useEffect(() => {
@@ -77,6 +79,7 @@ export function Reader() {
     if (!showSummary && summaryRecord && !hasSummary(summaryRecord)) void useSummaries.getState().request(summaryRecord);
     set("showSummary", !showSummary);
   };
+  const detailsRecord = ready && record?.id === id ? record : null;
 
   const textControls = (
     <>
@@ -111,6 +114,11 @@ export function Reader() {
           <h1 className="min-w-0 flex-1 truncate px-1.5 text-[13px] font-normal text-fg2" title={title}>
             {title}
           </h1>
+          {detailsRecord && !readingSummary && (
+            <IconButton label={details ? "Hide details" : "Details"} active={details} onClick={() => setDetails(!details)}>
+              <Library size={20} strokeWidth={1.5} />
+            </IconButton>
+          )}
           {summaryRecord && !readingSummary && (
             <IconButton label={showSummary ? "Hide summary" : "Summarize"} active={showSummary} onClick={toggleSummary}>
               <Sparkles size={20} strokeWidth={1.5} />
@@ -171,6 +179,14 @@ export function Reader() {
                 Read the full article
               </Button>
             </div>
+          )}
+          {detailsRecord && details && !readingSummary && (
+            <DocumentDetails
+              record={detailsRecord}
+              summaryAvailable={!!summaryRecord}
+              onShowSummary={() => { if (!showSummary) toggleSummary(); }}
+              onClose={() => setDetails(false)}
+            />
           )}
           {summaryRecord && showSummary && !readingSummary && <ArticleSummary record={summaryRecord} />}
           {ready ? (

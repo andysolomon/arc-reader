@@ -4,6 +4,31 @@ import { uid } from "./hash";
 
 export type DocSource = "paste" | "url" | "file" | "share" | "sample";
 
+/** Catalogue details for research: read from the page when fetched, editable in the Reader. */
+export interface DocMeta {
+  /** The original link, for citing and revisiting */
+  url?: string;
+  author?: string;
+  /** As published: a YYYY-MM-DD date when the page gave one */
+  published?: string;
+  /** Publication or site name */
+  site?: string;
+  /** The page's own description */
+  description?: string;
+  /** Your research notes */
+  notes?: string;
+}
+
+/** Library category: suggested by Jev (with its confidence) or chosen by you. */
+export interface DocCategory {
+  name: string;
+  by: "jev" | "you";
+  /** Jev's confidence in its pick, 0..1 */
+  confidence?: number;
+  model?: string;
+  at: number;
+}
+
 export interface DocRecord {
   id: string;
   title: string;
@@ -16,6 +41,8 @@ export interface DocRecord {
   codeSummaries?: Record<string, string>;
   /** Cached descriptions keyed by visual source, alt text, and caption. */
   visualDescriptions?: Record<string, string>;
+  meta?: DocMeta;
+  category?: DocCategory;
   source: DocSource;
   /** Hostname for URLs, file name for uploads, "Pasted text" otherwise */
   domain: string;

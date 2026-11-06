@@ -11,3 +11,6 @@ blob-report
 *.tsbuildinfo
 .readaloud-preparations
 .readaloud-library
+.terraform/
+*.tfstate
+*.tfstate.*

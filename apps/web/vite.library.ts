@@ -13,6 +13,14 @@ class HttpError extends Error {
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const id = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 200;
 const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const text = (value: unknown, max: number) => value === undefined || (typeof value === "string" && value.length <= max);
+const META_LIMITS = { url: 4000, author: 1000, published: 100, site: 1000, description: 10_000, notes: 200_000 };
+const validMeta = (value: unknown) => value === undefined || (object(value)
+  && Object.entries(value).every(([key, field]) => Object.hasOwn(META_LIMITS, key) && text(field, META_LIMITS[key as keyof typeof META_LIMITS])));
+const validCategory = (value: unknown) => value === undefined || (object(value)
+  && typeof value.name === "string" && value.name.trim().length > 0 && value.name.length <= 200
+  && (value.by === "jev" || value.by === "you") && number(value.at)
+  && (value.confidence === undefined || (number(value.confidence) && value.confidence <= 1)) && text(value.model, 200));
 
 function validDoc(value: unknown): value is DocRecord {
   if (!object(value)) return false;
@@ -34,7 +42,8 @@ function validDoc(value: unknown): value is DocRecord {
     && (value.summary === undefined || (object(value.summary) && typeof value.summary.source === "string"
       && value.summary.source.length <= 100 && typeof value.summary.text === "string" && value.summary.text.length <= 100_000
       && typeof value.summary.model === "string" && value.summary.model.length <= 200
-      && number(value.summary.version) && number(value.summary.createdAt)));
+      && number(value.summary.version) && number(value.summary.createdAt)))
+    && validMeta(value.meta) && validCategory(value.category);
 }
 
 function validPosition(value: unknown): value is PositionRecord {

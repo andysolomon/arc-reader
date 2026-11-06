@@ -28,7 +28,7 @@ export function ReadNew() {
         if (url) {
           toast(`Fetching ${hostOf(url)}…`);
           const f = await fetchReadable(url);
-          const rec = await create({ text: f.text, title: title ?? f.title, source: "share", domain: f.domain });
+          const rec = await create({ text: f.text, title: title ?? f.title, source: "share", domain: f.domain, meta: f.meta });
           await openDocument(rec, navigate, { autoplay, resume: false, replace: true });
           return;
         }
