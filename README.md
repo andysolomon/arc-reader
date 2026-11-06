@@ -137,6 +137,8 @@ Needs `kind`, `kubectl` and `terraform` (`mise use -g terraform`) on the PATH. T
 
 **Existing kind cluster cutover:** the kind provider cannot import a cluster created by the old YAML scripts. Deploy stops if that cluster exists without Terraform state. Schedule downtime, back up the Docker volumes, run `kind delete cluster --name readaloud`, then run `deploy/kind/deploy.sh` to recreate it under Terraform. Deleting the kind node keeps the named Docker volumes, but loading VoiceStudio and starting its models takes several minutes. Do not remove the volumes or use `docker compose down -v`. If Terraform previously managed the cluster, restore its state backup instead of treating it as a fresh migration.
 
+The Omarchy `readaloud` cluster completed this cutover on 6 Nov 2026. Terraform now owns its cluster and app resources; the original Docker volumes remain mounted, and the pre-cutover backups are kept outside the repository under `~/.local/state/readaloud/backups`. The AWS target below remains unprovisioned.
+
 #### Or host it privately on AWS
 
 `deploy/aws` runs the same web app and Traefik module on one EC2 host with k3s. VoiceStudio stays on the Mac mini (or another tailnet machine); no speech models run on EC2. Access is through Tailscale Serve at `https://readaloud-aws.tail1b9428.ts.net`. The AWS security group admits only Tailscale's UDP port; HTTP, SSH and the Kubernetes API have no public inbound rule. Tailnet policy controls who can reach the app, the API on TCP 6443, and the remote VoiceStudio.
