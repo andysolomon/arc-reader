@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ReadAloud × VoiceStudio — integration plan</title>
 <style>
-  body{background:var(--background,#161412);margin:0;padding:8px}
+  body{background:transparent;margin:0;padding:0}
   .plan{
     --bg: var(--background, #161412); --fg: var(--foreground, #ece6dc);
     --muted: var(--muted-foreground, #a39a8e); --faint: #6f675d;
@@ -96,15 +96,18 @@
   .plan .q label{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
   .plan .q input{margin-top:3px;accent-color:var(--accent)}
   .plan .note{font-size:12px;color:var(--muted);margin-top:8px}
+  .plan .diagram-container{max-width:100%;overflow-x:auto}
+  .plan #arch{min-width:700px;display:block}
   @media (prefers-reduced-motion:reduce){.plan *{transition:none!important}}
 </style>
 </head>
 <body>
 <div class="plan" id="plan">
   <h1>ReadAloud × VoiceStudio</h1>
-  <p class="sub">Integration plan: replace the browser speech engine with local, high-quality voices served by VoiceStudio.</p>
-  <div class="meta"><span>Drafted <b>4 Nov 2026</b></span><span>Target <b>9 working days</b></span><span>Host <b>Intel i7 laptop · 12 threads · 15 GB · no NVIDIA driver</b></span><span>Status <b>all phases built · VoiceStudio running with KittenTTS · first byte 0.9–2.3 s by sentence length</b></span></div>
+  <p class="sub">Integration record. Runtime architecture and request flow updated 6 Nov 2026; the original scope, estimates, engine table and checklist remain planning history.</p>
+  <div class="meta"><span>Drafted <b>4 Nov 2026</b></span><span>Target <b>9 working days</b></span><span>Hosting <b>kind on Omarchy · private AWS target</b></span><span>Status <b>Traefik ingress · Terraform cutover pending · AWS not provisioned</b></span></div>
 
+  <p class="note">Current operations: <a href="../../README.md">README</a> · <a href="../kind-cluster-explainer.html">Hosting, Terraform and AWS diagrams</a> · <a href="../voicestudio-studio.md">Studio guide</a>. The original scope exclusions below have since been expanded by Studio.</p>
   <nav role="tablist" aria-label="Plan sections">
     <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
     <button role="tab" aria-selected="false" data-tab="arch">Architecture</button>
@@ -127,7 +130,7 @@
     <div class="two">
       <div class="card">
         <h3>Goal</h3>
-        <p>ReadAloud keeps its current playback engine, cache and fallback chain. VoiceStudio becomes the cloud provider behind the existing <code>/api/tts</code> contract, so the browser never talks to it directly and never holds its key.</p>
+        <p>ReadAloud keeps its current playback engine, cache and fallback chain. VoiceStudio is reached through the same-origin <code>/api/vs/v1/audio/speech</code> proxy, so the browser never talks to it directly and never holds its key.</p>
         <h3 style="margin-top:14px">In scope</h3>
         <ul>
           <li>Run VoiceStudio locally in Docker on the CPU, with KittenTTS as the first engine.</li>
@@ -138,7 +141,7 @@
         </ul>
       </div>
       <div class="card">
-        <h3>Not in scope</h3>
+        <h3>Original scope exclusions</h3>
         <ul>
           <li>Voice cloning UI. The server's own app covers it; ReadAloud only lists resulting profiles.</li>
           <li>Dubbing, transcription, dictation and the mobile apps.</li>
@@ -146,7 +149,7 @@
           <li>Forking VoiceStudio. Calling it over HTTP keeps ReadAloud's licence independent of its AGPL terms.</li>
         </ul>
         <h3 style="margin-top:14px">Why this shape</h3>
-        <p>The adapter is small because ReadAloud already synthesizes one sentence per request, prefetches two ahead and caches audio in IndexedDB. The only missing piece on the server side is word timings, which stay estimated unless phase 4 ships.</p>
+        <p>The adapter is small because ReadAloud already synthesizes one sentence per request, prefetches upcoming passages and caches audio in IndexedDB. The only missing piece on the server side is word timings, which stay estimated unless phase 4 ships.</p>
       </div>
     </div>
   </section>
@@ -154,9 +157,9 @@
   <!-- ARCHITECTURE -->
   <section id="tab-arch" role="tabpanel" hidden>
     <div class="card">
-      <h2>Where each piece runs</h2>
-      <p class="sub">Hover or tap a box. Everything stays on the laptop; the tailnet URL is the only remote entry point.</p>
-      <svg id="arch" viewBox="0 0 700 300" role="img" aria-label="Architecture: browser app talks to a Vite or Caddy proxy, which forwards to the VoiceStudio container, which runs a TTS engine. The browser also keeps an IndexedDB cache."></svg>
+      <h2>Where each piece runs now</h2>
+      <p class="sub">Hover or tap a box. Tailscale and Traefik route to the web server. VoiceStudio can run on the Mac or in kind; AWS hosts only the web app. Persistent data stays with the web host.</p>
+      <div class="diagram-container"><svg id="arch" viewBox="0 0 700 480" role="img" aria-labelledby="integration-arch-title integration-arch-desc"><title id="integration-arch-title">ReadAloud and VoiceStudio runtime</title><desc id="integration-arch-desc">Tailnet ingress reaches the web server, which keeps durable server data and calls remote or local VoiceStudio; the browser separately caches audio in IndexedDB.</desc><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs><path class="edge" data-a="app" data-b="ingress" d="M200,76 H260" marker-end="url(#arr)"/><path class="edge" data-a="ingress" data-b="proxy" d="M440,76 H500" marker-end="url(#arr)"/><path class="edge" data-a="app" data-b="idb" d="M110,112 V208" marker-end="url(#arr)"/><path class="edge" data-a="proxy" data-b="vs" d="M620,112 V208" marker-end="url(#arr)"/><path class="edge" data-a="proxy" data-b="files" d="M548,112 V152 Q548,160 540,160 H358 Q350,160 350,168 V208" marker-end="url(#arr)"/><path class="edge" data-a="vs" data-b="eng" d="M590,280 V376" marker-end="url(#arr)"/><rect x="207.0" y="48" width="46" height="16" fill="var(--bg)"/><text x="230" y="60" text-anchor="middle" class="el">HTTPS</text><rect x="450.0" y="48" width="40" height="16" fill="var(--bg)"/><text x="470" y="60" text-anchor="middle" class="el">HTTP</text><rect x="118.0" y="152" width="46" height="16" fill="var(--bg)"/><text x="141" y="164" text-anchor="middle" class="el">CACHE</text><rect x="628.0" y="152" width="52" height="16" fill="var(--bg)"/><text x="654" y="164" text-anchor="middle" class="el">SPEECH</text><rect x="385.0" y="134" width="46" height="16" fill="var(--bg)"/><text x="408" y="146" text-anchor="middle" class="el">FILES</text><rect x="598.0" y="316" width="64" height="16" fill="var(--bg)"/><text x="630" y="328" text-anchor="middle" class="el">GENERATE</text><g class="node" data-node-id="app" tabindex="0" role="button" aria-label="Browser PWA"><title>Browser PWA: player · /api/vs</title><rect x="20" y="40" width="180" height="72" rx="6"/><text x="32" y="68" class="t">Browser PWA</text><text x="32" y="90" class="d">player · /api/vs</text></g><g class="node" data-node-id="ingress" tabindex="0" role="button" aria-label="Tailnet ingress"><title>Tailnet ingress: Serve → Traefik</title><rect x="260" y="40" width="180" height="72" rx="6"/><text x="272" y="68" class="t">Tailnet ingress</text><text x="272" y="90" class="d">Serve → Traefik</text></g><g class="node" data-node-id="proxy" tabindex="0" role="button" aria-label="Web server"><title>Web server: Vite preview · :4173</title><rect x="500" y="40" width="180" height="72" rx="6"/><text x="512" y="68" class="t">Web server</text><text x="512" y="90" class="d">Vite preview · :4173</text></g><g class="node" data-node-id="idb" tabindex="0" role="button" aria-label="IndexedDB"><title>IndexedDB: audio · docs · positions</title><rect x="20" y="208" width="180" height="72" rx="6"/><text x="32" y="236" class="t">IndexedDB</text><text x="32" y="258" class="d">audio · docs · positions</text></g><g class="node" data-node-id="files" tabindex="0" role="button" aria-label="Server data"><title>Server data: library · prepared audio</title><rect x="260" y="208" width="180" height="72" rx="6"/><text x="272" y="236" class="t">Server data</text><text x="272" y="258" class="d">library · prepared audio</text></g><g class="node" data-node-id="vs" tabindex="0" role="button" aria-label="VoiceStudio"><title>VoiceStudio: Mac primary · kind backup</title><rect x="500" y="208" width="180" height="72" rx="6"/><text x="512" y="236" class="t">VoiceStudio</text><text x="512" y="258" class="d">Mac primary · kind backup</text></g><g class="node" data-node-id="eng" tabindex="0" role="button" aria-label="TTS engine"><title>TTS engine: selected on speech host</title><rect x="500" y="376" width="180" height="72" rx="6"/><text x="512" y="404" class="t">TTS engine</text><text x="512" y="426" class="d">selected on speech host</text></g></svg></div>
       <div class="panel" id="arch-panel"><b>Pick a component</b><span class="sub">Details appear here.</span></div>
     </div>
   </section>
@@ -173,6 +176,7 @@
         </div>
       </div>
       <svg id="seq" viewBox="0 0 700 360" role="img" aria-label="Sequence diagram of a sentence request across the playback engine, cache, proxy and VoiceStudio"></svg>
+      <p class="note">The browser calls <code>/api/vs/v1/audio/speech</code>; the web server strips <code>/api/vs</code> and adds the bearer key. Incoming requests pass through the ingress shown in Architecture. The sequence omits those transport hops.</p>
       <div class="panel" id="seq-panel"></div>
     </div>
   </section>
@@ -276,52 +280,29 @@
   const tipOff = () => tip.style.display = "none";
   const hover = (node, html) => { node.addEventListener("pointerenter", (e) => tipOn(html, e)); node.addEventListener("pointermove", tipMove); node.addEventListener("pointerleave", tipOff); };
 
-  // ---- architecture
-  const nodes = [
-    { id: "app", x: 20, y: 48, w: 170, h: 70, t: "ReadAloud (browser)", d: "PWA · playback engine", info: "<b>ReadAloud app</b>Unchanged playback engine: one sentence per request, two prefetched, rAF clock. Provider chain becomes cache → VoiceStudio → local voice. Reads <code>VITE_API_BASE=/api</code>." },
-    { id: "idb", x: 20, y: 208, w: 170, h: 70, t: "IndexedDB cache", d: "audio · positions · docs", info: "<b>IndexedDB</b>Already exists. Cache key gains the engine id so switching engines never replays the wrong voice. Clips are stored at 1× so any playback speed works offline." },
-    { id: "proxy", x: 265, y: 48, w: 170, h: 70, t: "Proxy", d: "Vite dev · Caddy in prod", info: "<b>Proxy</b>Dev: Vite <code>server.proxy</code> rewrites <code>/api/tts</code> → <code>127.0.0.1:3900/v1/audio/speech</code> and injects <code>Authorization: Bearer</code>. Prod: the same two lines in Caddy behind Tailscale. The key never reaches the browser, and VoiceStudio sees a loopback origin it already trusts." },
-    { id: "vs", x: 510, y: 48, w: 170, h: 70, t: "VoiceStudio", d: "Docker · :3900 · FastAPI", info: "<b>VoiceStudio container</b>CPU image, <code>OMNIVOICE_API_KEY</code> set, <code>OMNIVOICE_ALLOWED_ORIGINS</code> listing the proxy origin. Exposes the OpenAI-style audio API, profiles, and its own web UI for cloning voices. Pin the image tag; the project moves fast." },
-    { id: "eng", x: 510, y: 208, w: 170, h: 70, t: "TTS engine", d: "KittenTTS first · swappable", info: "<b>Engine</b>Selected in VoiceStudio's Model Manager or via <code>OMNIVOICE_TTS_BACKEND</code>. KittenTTS to start (8 English presets, tiny), then Supertonic-3 for other languages. ReadAloud passes the engine id as the <code>model</code> field." },
-    { id: "ts", x: 265, y: 208, w: 170, h: 70, t: "Tailnet", d: "ts.net:8464 → proxy", info: "<b>Tailscale serve</b>Already publishes the dev server. Nothing new to expose: VoiceStudio stays bound to loopback and is reached only through the proxy." },
-  ];
-  const edges = [
-    ["app", "proxy", "POST /api/tts", 0], ["proxy", "vs", "bearer · /v1/audio/speech", 0], ["vs", "eng", "generate(text)", 1], ["app", "idb", "get / put mp3", 1], ["ts", "proxy", "https", 2],
-  ];
-  const arch = $("#arch");
-  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
-  const mid = (n) => ({ cx: n.x + n.w / 2, cy: n.y + n.h / 2 });
-  edges.forEach(([a, b, label, kind]) => {
-    const A = byId[a], B = byId[b];
-    let d, lx, ly;
-    if (kind === 0) { d = `M${A.x + A.w},${A.y + A.h / 2} L${B.x},${B.y + B.h / 2}`; lx = (A.x + A.w + B.x) / 2; ly = A.y - 10; }
-    else if (kind === 1) { d = `M${mid(A).cx},${A.y + A.h} L${mid(B).cx},${B.y}`; lx = mid(A).cx + 8; ly = (A.y + A.h + B.y) / 2 + 4; }
-    else { d = `M${mid(A).cx},${A.y} L${mid(B).cx},${B.y + B.h}`; lx = mid(A).cx + 8; ly = (A.y + B.y + B.h) / 2 + 4; }
-    const p = el("path", { d, class: "edge", "data-a": a, "data-b": b, "marker-end": "url(#arr)" });
-    arch.appendChild(p);
-    arch.appendChild(el("text", { x: lx, y: ly, class: "el", "text-anchor": kind === 0 ? "middle" : "start" }, label));
-  });
-  const defs = el("defs"); defs.innerHTML = '<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6f675d"/></marker>'; arch.prepend(defs);
-  const panel = $("#arch-panel");
-  nodes.forEach(n => {
-    const g = el("g", { class: "node", tabindex: "0", role: "button", "aria-label": n.t });
-    g.appendChild(el("rect", { x: n.x, y: n.y, width: n.w, height: n.h, rx: 8 }));
-    g.appendChild(el("text", { x: n.x + 14, y: n.y + 28, class: "t" }, n.t));
-    g.appendChild(el("text", { x: n.x + 14, y: n.y + 48, class: "d" }, n.d));
-    const on = () => { $$(".node", arch).forEach(x => x.classList.remove("on")); g.classList.add("on"); $$(".edge", arch).forEach(e => e.classList.toggle("on", e.dataset.a === n.id || e.dataset.b === n.id)); panel.innerHTML = n.info; };
+  // ---- architecture (static diagram, with optional detail selection)
+  const detailsById = {"app": "<b>Browser</b>Playback, IndexedDB cache and browser speech fallback. Calls the same-origin /api/vs routes. No provider key is bundled.", "ingress": "<b>Ingress</b>kind: HTTPS :8449 \u2192 loopback :4179 \u2192 Traefik NodePort 30179 \u2192 web Ingress and ClusterIP Service. AWS target: HTTPS :443 \u2192 loopback :30179 \u2192 the same routing module. Dev uses Vite directly.", "proxy": "<b>Web server</b>Vite preview runs server middleware and proxies /api/vs/v1/audio/speech to VoiceStudio /v1/audio/speech, injecting the server-side key. Library, preparation and LLM APIs run here too.", "idb": "<b>Browser storage</b>Cached audio and document state support offline reading. Shared library and preparation state also live on the server.", "files": "<b>Persistent server data</b>kind mounts the existing Docker volumes through the node. AWS mounts encrypted EBS under /data. Preparation runs in one web process; Vercel needs durable storage and a worker before it can host these APIs.", "vs": "<b>Speech servers</b>The Mac mini is the configured primary over the tailnet. kind can run the local VoiceStudio as secondary. AWS omits the local server; a second remote URL must be explicit.", "eng": "<b>Engine</b>VoiceStudio hosts the selected synthesis engine and model files. EC2 runs no speech models. The current runtime options and Studio behavior are documented in the README and Studio guide."};
+  const arch = $("#arch"), panel = $("#arch-panel");
+  $$("[data-node-id]", arch).forEach(g => {
+    const on = () => {
+      $$(".node", arch).forEach(x => x.classList.remove("on"));
+      g.classList.add("on");
+      $$(".edge", arch).forEach(edge => edge.classList.toggle("on", edge.dataset.a === g.dataset.nodeId || edge.dataset.b === g.dataset.nodeId));
+      panel.innerHTML = detailsById[g.dataset.nodeId];
+    };
     g.addEventListener("pointerenter", on); g.addEventListener("focus", on); g.addEventListener("click", on);
-    arch.appendChild(g);
+    g.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); on(); } });
   });
 
   // ---- sequence
-  const lanes = [["Engine", 70], ["Cache", 250], ["Proxy", 430], ["VoiceStudio", 610]];
+  const lanes = [["Player", 70], ["Cache", 250], ["Web server", 430], ["VoiceStudio", 610]];
   const flows = {
-    happy: { title: "Happy path", note: "Cold sentence. Everything after the first chunk is hidden by the two-sentence prefetch.", steps: [
-      [0, 1, "get(key: engine|voice|hash)"], [1, 0, "miss", true], [0, 2, "POST /api/tts {text, voice, model}"], [2, 3, "POST /v1/audio/speech + Bearer"], [3, 2, "200 audio/mpeg", true], [2, 0, "mp3 bytes", true], [0, 1, "put(mp3, duration)"], [0, 0, "decode → duration · play at speed×"]] },
+    happy: { title: "Happy path", note: "Cold sentence. Everything after the first chunk is hidden by the playback prefetch.", steps: [
+      [0, 1, "get(key: engine|voice|hash)"], [1, 0, "miss", true], [0, 2, "POST /api/vs/…/speech"], [2, 3, "POST /v1/audio/speech + Bearer"], [3, 2, "200 audio/mpeg", true], [2, 0, "mp3 bytes", true], [0, 1, "put(mp3, duration)"], [0, 0, "decode → duration · play at speed×"]] },
     cached: { title: "Cache hit", note: "Replays and offline listening never touch the network. Word underline uses the stored duration.", steps: [
       [0, 1, "get(key)"], [1, 0, "hit: blob + duration", true], [0, 0, "play immediately"]] },
     down: { title: "VoiceStudio unreachable", note: "Same path the app takes today when no API is configured: banner plus the browser speech engine. Retries on the next document.", steps: [
-      [0, 1, "get(key)"], [1, 0, "miss", true], [0, 2, "POST /api/tts"], [2, 3, "connect", false, "fail"], [2, 0, "502 / network error", true, "fail"], [0, 0, "offline = true · banner"], [0, 0, "speechSynthesis fallback"]] },
+      [0, 1, "get(key)"], [1, 0, "miss", true], [0, 2, "POST /api/vs/…/speech"], [2, 3, "connect", false, "fail"], [2, 0, "502 / network error", true, "fail"], [0, 0, "offline = true · banner"], [0, 0, "speechSynthesis fallback"]] },
   };
   const seq = $("#seq"), seqPanel = $("#seq-panel");
   const drawSeq = (key) => {
@@ -352,7 +333,7 @@
   // ---- timeline
   const phases = [
     { n: "P0", name: "Run VoiceStudio locally", start: 0, len: 1, tasks: ["Pull the CPU image, pin its tag, set OMNIVOICE_API_KEY and OMNIVOICE_SERVER_MODE", "Bind to 127.0.0.1:3900 only", "Select KittenTTS in the Model Manager and download its weights", "Measure time-to-first-byte for a 20-word sentence with curl; record it in the README"] },
-    { n: "P1", name: "Proxy and config", start: 1, len: 1, tasks: ["Vite server.proxy: /api/tts → /v1/audio/speech with bearer header injected from .env", "Caddy snippet for the tailnet build, same rewrite", "Add OMNIVOICE_ALLOWED_ORIGINS for the proxy origin", "VITE_API_BASE=/api in .env.example with comments"] },
+    { n: "P1", name: "Proxy and config", start: 1, len: 1, tasks: ["Vite proxy: /api/vs/v1/audio/speech → /v1/audio/speech with the server-side bearer key", "Vite preview keeps the proxy; Tailscale Serve and Traefik handle private ingress", "Add OMNIVOICE_ALLOWED_ORIGINS for the proxy origin", "VITE_API_BASE=/api/vs in environment configuration with comments"] },
     { n: "P2", name: "Provider adapter", start: 2, len: 2, tasks: ["voicestudioProvider(): body {model, input, voice, response_format: 'mp3', speed: 1}", "Duration from decodeAudioData, not headers", "Cache key includes engine id", "Map 502, timeouts and refused connections to ApiUnreachable; 4xx surface as toasts", "Keep usage counter; unit tests with a fake fetch"] },
     { n: "P3", name: "Voices from the server", start: 4, len: 2, tasks: ["GET /profiles plus KittenTTS presets → VOICES at startup, hard-coded list as fallback", "Stable hue per voice id; language from profile", "Provider chips in Settings become engine ids reported by /v1/models", "Preview button synthesizes a real sample", "Per-document override keeps working across engines"] },
     { n: "P4", name: "Word timings (optional)", start: 6, len: 2, optional: true, tasks: ["After a chunk is cached, POST it to /v1/audio/transcriptions with verbose_json and word granularity", "Align returned words to the sentence's words; store in the audio record", "Feature flag; default off until latency is measured", "Fallback to the estimate on any mismatch"] },
@@ -387,14 +368,14 @@
 
   // ---- risks
   const risks = [
-    ["First chunk slower than the 1 s target on CPU", "serious", "Measured: 0.9 s for 3 words, 2.3 s for 22 words (KittenTTS, warm). KittenTTS is the lightest engine; keep two sentences prefetched; show the skeleton, never a spinner. If it misses, a shorter first sentence can be sent first."],
-    ["VoiceStudio rejects browser requests (origin, host, bearer)", "warning", "Proxy is the only caller, from loopback, with the key injected server-side. Add the proxy origin to OMNIVOICE_ALLOWED_ORIGINS anyway."],
+    ["First chunk slower than the 1 s target on CPU", "serious", "Measured: 0.9 s for 3 words, 2.3 s for 22 words (KittenTTS, warm). KittenTTS is the lightest engine; keep upcoming passages prefetched; show the skeleton, never a spinner. If it misses, a shorter first sentence can be sent first."],
+    ["VoiceStudio rejects browser requests (origin, host, bearer)", "warning", "The web server calls VoiceStudio over cluster networking or the tailnet and injects its key server-side. The browser uses same-origin /api/vs routes."],
     ["No word timings from the speech endpoint", "warning", "Sentence highlight is exact; word underline stays estimated. P4 derives timings from transcription behind a flag."],
     ["API churn: the project pushed today and ships weekly", "warning", "Pin the Docker image tag. Adapter speaks only the OpenAI-shaped subset, which the project treats as a compatibility contract."],
     ["Inaudible watermark in generated audio", "good", "Acceptable for personal listening. Note it in the README so downloads aren't a surprise."],
     ["AGPL licence of VoiceStudio", "good", "Called over HTTP as a separate service; ReadAloud ships no VoiceStudio code. Model weights carry their own terms; all four engines allow personal use."],
     ["Disk and memory on a 15 GB laptop", "warning", "KittenTTS weights are under 100 MB. Defer Supertonic-3 and cloning engines until the first engine is proven. Cap the IndexedDB audio cache, which already exists."],
-    ["Tailnet exposure", "good", "VoiceStudio binds to 127.0.0.1 only. The tailnet reaches the proxy, which forwards a single route."],
+    ["Tailnet exposure", "good", "kind exposes local VoiceStudio through a dedicated Traefik entrypoint; the Mac is reachable over the tailnet. Tailnet policy controls access. AWS does not run a local speech server."],
   ];
   const sev = { good: ["Low", "var(--good)", "✓"], warning: ["Medium", "var(--warn)", "!"], serious: ["High", "var(--serious)", "!!"], critical: ["Critical", "var(--critical)", "✕"] };
   $("#risks").innerHTML = risks.map(([r, s, m]) => `<tr><td>${r}</td><td><span class="st"><i style="background:${sev[s][1]}"></i>${sev[s][0]}<span class="sr"> (${sev[s][2]})</span></span></td><td>${m}</td></tr>`).join("");
@@ -426,7 +407,7 @@
   // ---- decisions
   const decisions = [
     { q: "First engine", opts: ["KittenTTS (English, 8 presets, smallest install)", "Supertonic-3 (31 languages, 7 presets, sidecar)", "Decide after P0 measurements"], note: "Affects which voice names appear first and how much disk P0 needs." },
-    { q: "Where the proxy lives in production", opts: ["Caddy in front of the Vite preview, behind Tailscale serve", "A tiny Node route inside the app's preview server", "Dev-only for now; production waits"], note: "Caddy is the smallest change given the existing tailnet setup." },
+    { q: "Hosting implementation", opts: ["kind: Serve → Traefik → Vite preview and middleware", "AWS target: Serve → Traefik → the same web image", "Vercel: requires durable storage, workers and function routes"], note: "Current design uses the shared Terraform module for kind and AWS; the AWS target is not yet provisioned. These are documented deployment choices, not actions triggered by this control." },
     { q: "Word timings", opts: ["Skip P4; keep the estimate", "Build P4 behind a flag, default off", "Build P4 and enable it if alignment adds under 300 ms per sentence"], note: "P4 is two days and is the only phase that adds a second request per sentence." },
     { q: "Keep the browser voice fallback", opts: ["Yes, as today, with the banner", "No; show an error and stop"], note: "Keeping it preserves the Linux client story: unreachable API falls back to a local voice." },
   ];

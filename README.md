@@ -10,7 +10,12 @@ Paste anything. Hear it read. A React + Vite PWA that streams text-to-speech pas
 apps/web          The app (Vite + React 18 + TypeScript, React Router, Zustand, Framer Motion, PWA)
 packages/ui       Component library (Tailwind + Morphicons + Lucide) with Storybook
 packages/tokens   CSS variables for all 8 themes, a Tailwind preset, and a WCAG contrast check
+deploy/kind       Terraform-managed local kind cluster and deployment helper
+deploy/aws        Private EC2 + k3s target and ECR deployment helper
+deploy/terraform  Shared Kubernetes module and environment mapping
 ```
+
+The [hosting explainer](docs/kind-cluster-explainer.html) shows ingress routing, runtime components, Terraform ownership, deployment flow, storage, and the private AWS target. Its performance charts are explicitly historical. The [VoiceStudio integration record](docs/plans/voicestudio-integration.html) includes the updated runtime and speech request diagrams; its original planning estimates remain marked as history. See the [Studio guide](docs/voicestudio-studio.md) for current voice features and verification notes.
 
 ## Scripts
 
@@ -115,16 +120,82 @@ curl -X POST -H "Authorization: Bearer $VOICESTUDIO_API_KEY" -H "Content-Type: a
 
 #### Or run it in a local kind cluster
 
-`deploy/kind` runs the same two services in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged. Both host ports lead to a [Traefik](https://doc.traefik.io/traefik/) ingress controller (`deploy/kind/traefik.yaml`, namespace `traefik`), and the Ingress objects in `deploy/kind/readaloud.yaml` route each port to its app's ClusterIP Service.
+`deploy/kind` runs the same two services in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged. Both host ports lead to a [Traefik](https://doc.traefik.io/traefik/) ingress controller (namespace `traefik`), and an Ingress routes each port to its app's ClusterIP Service.
+
+Terraform owns all of it in two stages: `deploy/kind/terraform/cluster` creates the kind cluster (ports, mounts, node image) and `deploy/kind/terraform/app` calls the shared `deploy/terraform/modules/readaloud` module for everything in it (Traefik, the Deployments, Services, Ingresses, config and secrets from `.env`). The state lives in `~/.local/state/readaloud/terraform`, outside the repository, so every checkout deploys the same cluster; the app state holds the `.env` secrets.
 
 ```sh
 deploy/kind/deploy.sh   # build the web image, load it into kind, roll out
 kubectl --context kind-readaloud -n readaloud get pods
 kubectl --context kind-readaloud -n readaloud logs deploy/web
 kubectl --context kind-readaloud -n traefik logs deploy/traefik   # routing errors, 404s while a pod restarts
+deploy/kind/terraform.sh app plan       # what a deploy would change (keeps the running web image)
+deploy/kind/terraform.sh cluster plan   # cluster changes; applying one recreates the cluster
 ```
 
-Needs `kind` and `kubectl` on the PATH. The first run stops Compose (volumes are kept), creates the cluster, and loads the 17 GB VoiceStudio image into it, which takes a few minutes; later runs only rebuild and reload the web image. The node container restarts with Docker, like the Compose services did. Each app runs as exactly one pod and updates with `Recreate`: the shared library and the preparation queue are single-process state, so a second web pod would overwrite the first one's files and double-book the speech workers. A deploy therefore still drops the app for a few seconds while the new pod starts. Configuration changes in `.env` restart only the pods that use them. Don't run Compose alongside the cluster. To go back, `kind delete cluster --name readaloud` (the volumes stay) and `docker compose up -d`.
+Needs `kind`, `kubectl` and `terraform` (`mise use -g terraform`) on the PATH. The first run stops Compose (volumes are kept), creates the cluster, and loads the 17 GB VoiceStudio image into it, which takes a few minutes; later runs only rebuild and reload the web image. The node container restarts with Docker, like the Compose services did. Each app runs as exactly one pod and updates with `Recreate`: the shared library and the preparation queue are single-process state, so a second web pod would overwrite the first one's files and double-book the speech workers. A deploy therefore still drops the app for a few seconds while the new pod starts. Configuration changes in `.env` restart only the pods that use them. Don't run Compose alongside the cluster. kind cannot change a running cluster, so `deploy.sh` only applies the cluster stage when the cluster is missing and otherwise warns when it has drifted; apply such a change by hand with `deploy/kind/terraform.sh cluster apply`. To go back to Compose, `deploy/kind/terraform.sh cluster destroy` (the volumes stay) and `docker compose up -d`.
+
+**Existing kind cluster cutover:** the kind provider cannot import a cluster created by the old YAML scripts. Deploy stops if that cluster exists without Terraform state. Schedule downtime, back up the Docker volumes, run `kind delete cluster --name readaloud`, then run `deploy/kind/deploy.sh` to recreate it under Terraform. Deleting the kind node keeps the named Docker volumes, but loading VoiceStudio and starting its models takes several minutes. Do not remove the volumes or use `docker compose down -v`. If Terraform previously managed the cluster, restore its state backup instead of treating it as a fresh migration.
+
+#### Or host it privately on AWS
+
+`deploy/aws` runs the same web app and Traefik module on one EC2 host with k3s. VoiceStudio stays on the Mac mini (or another tailnet machine); no speech models run on EC2. Access is through Tailscale Serve at `https://readaloud-aws.tail1b9428.ts.net`. The AWS security group admits only Tailscale's UDP port; HTTP, SSH and the Kubernetes API have no public inbound rule. Tailnet policy controls who can reach the app, the API on TCP 6443, and the remote VoiceStudio.
+
+Terraform has two independent stages:
+
+- `deploy/aws/terraform/infra`: a VPC, public subnet with outbound internet, EC2 (`t3a.medium`, amd64), ECR, IAM, an encrypted 10 GB EBS data volume, and seven daily snapshots. The 30 GB root disk is disposable. The data disk holds the library, preparations, k3s state, and Tailscale identity.
+- `deploy/aws/terraform/app`: the shared Kubernetes module, with only the web app and Traefik. A [CoreDNS zone override](https://docs.k3s.io/advanced#coredns-custom-configuration-imports) forwards tailnet DNS to Tailscale so the web pod can find the Mac; ordinary DNS uses the [VPC resolver](https://docs.aws.amazon.com/vpc/latest/userguide/AmazonDNS-concepts.html). ECR pulls use the instance role through a [kubelet credential provider](https://kubernetes.io/docs/tasks/administer-cluster/kubelet-credential-provider/); there is no expiring registry password to renew manually.
+
+Prerequisites: Docker with Compose, Terraform, `kubectl`, AWS CLI v2 with a working profile or SSO session, and Tailscale on the deployment machine. AWS credentials need permission to manage the resources above, pass the instance and backup roles, push to ECR, and use SSM Run Command. Enable MagicDNS and HTTPS certificates in the tailnet; its policy must permit the AWS host to reach VoiceStudio and this machine to reach the host's Kubernetes API. A first-boot Tailscale auth key must be approved for the intended tailnet and any required tags.
+
+Put the server settings in the root `.env`, as for kind. At minimum:
+
+```sh
+VOICESTUDIO_REMOTE_URL=https://andrews-mac-mini.tail1b9428.ts.net:3900
+VOICESTUDIO_API_KEY=<the remote server's key>
+# Optional second remote server; AWS does not invent a local fallback.
+# VOICESTUDIO_SECONDARY_REMOTE_URL=https://another-host.example.ts.net:3900
+```
+
+Create the infrastructure, then deploy the app:
+
+```sh
+aws sso login --profile your-profile
+export AWS_PROFILE=your-profile
+aws sts get-caller-identity
+
+# Read a first-boot key without placing it in shell history.
+read -rsp 'Tailscale auth key: ' TF_VAR_tailscale_auth_key; echo
+export TF_VAR_tailscale_auth_key
+deploy/aws/terraform.sh infra plan
+deploy/aws/terraform.sh infra apply
+unset TF_VAR_tailscale_auth_key
+
+deploy/aws/deploy.sh
+```
+
+The first deploy waits for SSM and cloud-init, fetches the admin kubeconfig through SSM into `~/.kube/readaloud-aws.yaml` (mode 600), builds and pushes a uniquely tagged image, and waits for the pods to roll out. It leaves the default kubectl context alone. The first deployment starts with an empty cloud library; local Docker volumes are not uploaded. Existing library and prepared audio require a separate data migration while their writers are stopped.
+
+Infrastructure defaults to `us-east-1`. To override region, hostname, tailnet, instance type, or data disk size, export the corresponding `TF_VAR_*` values consistently for infrastructure commands, for example `TF_VAR_region=us-west-2`. The image build is for amd64; use an x86 instance. App settings still come from `.env`. Later deployments are simply `deploy/aws/deploy.sh`; merging locally continues to deploy kind through the existing hook.
+
+```sh
+deploy/aws/terraform.sh infra output -raw url
+deploy/aws/terraform.sh infra plan
+deploy/aws/terraform.sh app plan   # keeps the image currently running
+kubectl --kubeconfig ~/.kube/readaloud-aws.yaml -n readaloud get pods
+kubectl --kubeconfig ~/.kube/readaloud-aws.yaml -n readaloud logs deploy/web
+kubectl --kubeconfig ~/.kube/readaloud-aws.yaml -n traefik logs deploy/traefik
+```
+
+For bootstrap failures, inspect `/var/log/readaloud-setup.log` and `cloud-init status --long` in an SSM session (`aws ssm start-session --target <instance_id>`; interactive sessions also need the Session Manager plugin). Infrastructure apply returning successfully means EC2 was created; it does not certify that cloud-init finished. No AWS resources are created by validation alone.
+
+State lives in `~/.local/state/readaloud/aws`, with providers cached under `~/.cache/readaloud-aws/terraform`. Keep a protected backup of both Terraform states: the app state contains API keys, and infrastructure state and EC2 user data contain the first-boot Tailscale key. Revoke that join key after the machine joins; its persisted identity handles later boots. EBS snapshots contain private app data and the cluster and tailnet identities, and are crash-consistent rather than an application-level backup. Never boot a restored copy alongside the original host with the same identities.
+
+AMI and user-data edits intentionally do not replace a running instance. To apply them, review `deploy/aws/terraform.sh infra plan -replace=aws_instance.host`, then apply with the same flag. This causes downtime, keeps the data disk, and reuses its Tailscale and k3s identities. The services require the data mount before starting. To refresh an expired or replaced cluster's local admin certificate, remove `~/.kube/readaloud-aws.yaml`; the next app command fetches it again. A complete loss of the data disk requires restoring a snapshot and recovering the Terraform state, not just replacing EC2.
+
+The data volume has `prevent_destroy`, so `infra destroy` is deliberately blocked until that protection is explicitly reviewed and removed. To retire the deployment, destroy the app stage first, then review infrastructure removal and backup retention. EC2, EBS, snapshots, ECR and the public IPv4 address incur AWS charges while present.
+
+Vercel is not a deployment target yet. The current server uses writable local files and an in-memory preparation queue. Hosting the complete app there requires moving the library and audio to durable storage, the queue to a durable worker, and the Vite middleware to functions; its access to the private VoiceStudio also needs a deliberate network design. Deploying the static frontend alone would omit those server features.
 
 ### 2. Develop against it
 

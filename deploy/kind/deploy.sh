@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the web image from this checkout and deploy ReadAloud to the local kind cluster.
 #   deploy/kind/deploy.sh
+# Terraform owns the cluster (terraform/cluster) and everything in it (terraform/app).
 # The first run creates the cluster; Docker Compose is stopped first because the cluster
 # takes over its ports (4179, 3900). Compose volumes are kept and mounted into the cluster.
 # Settings come from the root .env, mapped the same way compose.yaml maps them.
@@ -15,8 +16,8 @@ fi
 
 cluster=readaloud
 node=$cluster-control-plane
-k() { kubectl --context "kind-$cluster" -n readaloud "$@"; }
 step() { echo "==> $*"; }
+tf() { deploy/kind/terraform.sh "$@"; }
 
 [ -f .env ] || { echo "Missing $root/.env (see README: Run VoiceStudio and ReadAloud)" >&2; exit 1; }
 set -a; . ./.env; set +a
@@ -26,8 +27,6 @@ tag=$(git rev-parse --short HEAD)
 [ -z "$(git status --porcelain)" ] || tag="$tag-dirty-$(date +%s)"
 web_image="readaloud-web:$tag"
 voicestudio_image="ghcr.io/debpalash/voicestudio:${VOICESTUDIO_TAG:-stable}"
-# kind load cannot import multi-platform images; the node pulls this one itself.
-traefik_image="traefik:v3.7.17"
 
 step "Building $web_image"
 # compose.yaml owns the build arguments (which providers are bundled).
@@ -43,9 +42,29 @@ if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
     docker volume inspect "$volume" >/dev/null 2>&1 || docker volume create "$volume" >/dev/null
   done
   step "Creating kind cluster $cluster"
-  kind create cluster --config deploy/kind/cluster.yaml --wait 180s
+  # A cluster deleted outside Terraform leaves its entry behind, which fails the refresh.
+  tf cluster state rm kind_cluster.readaloud >/dev/null 2>&1 || true
+  # kind makes the new cluster the current context; keep whichever one was current (other clusters live here too).
+  previous=$(kubectl config current-context 2>/dev/null || true)
+  tf cluster apply -input=false -auto-approve
+  [ -z "$previous" ] || kubectl config use-context "$previous" >/dev/null
   # Come back with Docker after a reboot, as the Compose services did.
   docker update --restart unless-stopped "$node" >/dev/null
+else
+  if ! tf cluster state show kind_cluster.readaloud >/dev/null 2>&1; then
+    echo "The existing $cluster cluster is not recorded in Terraform state (or its state cannot be read)." >&2
+    echo "See README: local kind cluster cutover. Do not apply over the existing Kubernetes objects." >&2
+    exit 1
+  fi
+  # kind cannot change a running cluster, so applying a change replaces it. Leave that to a person.
+  status=0
+  tf cluster plan -input=false -detailed-exitcode >/dev/null || status=$?
+  case $status in
+    0) ;;
+    2) echo "warning: deploy/kind/terraform/cluster differs from the running cluster; applying it recreates the cluster." >&2
+       echo "         Review and apply by hand: deploy/kind/terraform.sh cluster apply" >&2 ;;
+    *) exit "$status" ;;
+  esac
 fi
 
 step "Loading images into the cluster"
@@ -58,37 +77,10 @@ if ! docker exec "$node" crictl inspecti "$voicestudio_image" >/dev/null 2>&1; t
 fi
 kind load docker-image --name "$cluster" "$web_image"
 
-step "Applying configuration"
-remote=${VOICESTUDIO_REMOTE_URL:-}
-kubectl --context "kind-$cluster" create namespace readaloud --dry-run=client -o yaml | kubectl --context "kind-$cluster" apply -f - >/dev/null
-config=$(k create configmap readaloud-config --dry-run=client -o yaml \
-  --from-literal=VOICESTUDIO_URL="${remote:-http://voicestudio:3900}" \
-  --from-literal=VOICESTUDIO_NAME="${VOICESTUDIO_NAME:-VoiceStudio}" \
-  --from-literal=VOICESTUDIO_SECONDARY_URL="${VOICESTUDIO_SECONDARY_REMOTE_URL:-${remote:+http://voicestudio:3900}}" \
-  --from-literal=VOICESTUDIO_SECONDARY_NAME="${VOICESTUDIO_SECONDARY_NAME:-Omarchy}" \
-  --from-literal=LLM_URL="${LLM_URL:-https://opencode.ai/zen/go}" \
-  --from-literal=PREPARATION_YIELD_MS="${PREPARATION_YIELD_MS:-}" \
-  --from-literal=VOICESTUDIO_ASR_MODEL="${VOICESTUDIO_ASR_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}")
-secrets=$(k create secret generic readaloud-secrets --dry-run=client -o yaml \
-  --from-literal=VOICESTUDIO_API_KEY="$VOICESTUDIO_API_KEY" \
-  --from-literal=VOICESTUDIO_SECONDARY_API_KEY="${VOICESTUDIO_SECONDARY_API_KEY:-}" \
-  --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-  --from-literal=FISH_API_KEY="${FISH_API_KEY:-}" \
-  --from-literal=LLM_API_KEY="${LLM_API_KEY:-}")
-printf '%s\n' "$config" | k apply -f - >/dev/null
-printf '%s\n' "$secrets" | k apply -f - >/dev/null
-# Pods only read configuration at start: restart them when theirs changes.
-web_config=$(printf '%s%s' "$config" "$secrets" | sha256sum | cut -c1-16)
-voicestudio_config=$(printf '%s|%s' "$VOICESTUDIO_API_KEY" "${VOICESTUDIO_ASR_MODEL:-}" | sha256sum | cut -c1-16)
-
 step "Deploying"
-sed -e "s|__WEB_IMAGE__|$web_image|" -e "s|__VOICESTUDIO_IMAGE__|$voicestudio_image|" \
-  -e "s|__WEB_CONFIG__|$web_config|" -e "s|__VOICESTUDIO_CONFIG__|$voicestudio_config|" deploy/kind/readaloud.yaml | k apply -f -
-# After readaloud.yaml: on clusters from before Traefik, the app Services held its NodePorts.
-sed -e "s|__TRAEFIK_IMAGE__|$traefik_image|" deploy/kind/traefik.yaml | kubectl --context "kind-$cluster" apply -f -
-kubectl --context "kind-$cluster" -n traefik rollout status deployment/traefik --timeout=120s
-k rollout status deployment/web --timeout=300s
-k rollout status deployment/voicestudio --timeout=900s
+export TF_VAR_web_image=$web_image
+# Waits for every Deployment to roll out.
+tf app apply -input=false -auto-approve
 
 # Keep only the web image that is running; VoiceStudio's 17 GB image stays.
 for image in $(docker exec "$node" crictl images -o json | python3 -c '
