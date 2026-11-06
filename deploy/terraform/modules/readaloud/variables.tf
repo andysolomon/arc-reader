@@ -105,3 +105,10 @@ variable "llm_api_key" {
   nullable  = false
   default   = ""
 }
+
+variable "typesafe_api_key" {
+  type      = string
+  sensitive = true
+  nullable  = false
+  default   = ""
+}

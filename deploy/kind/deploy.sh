@@ -77,6 +77,7 @@ if ! docker exec "$node" crictl inspecti "$voicestudio_image" >/dev/null 2>&1; t
 fi
 kind load docker-image --name "$cluster" "$web_image"
 
+
 step "Deploying"
 export TF_VAR_web_image=$web_image
 # Waits for every Deployment to roll out.

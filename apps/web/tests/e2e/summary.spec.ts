@@ -25,7 +25,7 @@ test("enters, replaces, and removes the OpenCode Go key in Settings", async ({ p
   await page.goto("/settings");
   // The stub server starts with LLM_API_KEY set.
   await expect(page.getByText("Set on the server (LLM_API_KEY) · ends in -key")).toBeVisible();
-  await page.getByRole("button", { name: "Replace" }).click();
+  await page.getByRole("button", { name: "Replace OpenCode Go key" }).click();
   const field = page.getByLabel("OpenCode Go API key");
   await field.fill("wrong-key");
   await page.getByRole("button", { name: "Save" }).click();
@@ -34,7 +34,7 @@ test("enters, replaces, and removes the OpenCode Go key in Settings", async ({ p
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved on this server · ends in -key")).toBeVisible();
   await expect(field).toHaveCount(0);
-  await page.getByRole("button", { name: "Remove" }).click();
+  await page.getByRole("button", { name: "Remove OpenCode Go key" }).click();
   await expect(page.getByText("Set on the server (LLM_API_KEY) · ends in -key")).toBeVisible();
 });
 
