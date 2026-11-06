@@ -14,6 +14,8 @@ export interface LibraryItem {
   progress: number;
   /** total seconds at 1× */
   duration: number;
+  /** Complete readings so far */
+  reads: number;
   prepared: PreparedVoice[];
 }
 
@@ -47,7 +49,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       set({
         items: all.map((rec) => {
           const p = byId.get(rec.id);
-          return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
+          return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: p?.reads ?? 0, prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
         }),
         loaded: true,
       });

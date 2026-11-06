@@ -74,6 +74,7 @@ export function LibraryPage() {
   });
 
   const act = {
+    open: (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: false, resume: it.progress < 1 }),
     resume: (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: true, resume: it.progress < 1 }),
     revoice: (it: LibraryItem) => navigate(`/voices?for=${it.rec.id}`),
     prepare: (it: LibraryItem) => setPrepareIds([it.rec.id]),
@@ -176,6 +177,8 @@ interface ItemProps {
   selected: boolean;
   toggleSelected: (id: string) => void;
   prepare: (it: LibraryItem) => void;
+  /** Open in the Reader without starting playback. */
+  open: (it: LibraryItem) => void;
   resume: (it: LibraryItem) => void;
   revoice: (it: LibraryItem) => void;
   del: (it: LibraryItem) => void;
@@ -184,7 +187,7 @@ interface ItemProps {
 function Actions({ it, resume, revoice, prepare, del, size = 36, className }: ItemProps & { size?: 32 | 36 | 44; className?: string }) {
   return (
     <div className={cn("flex gap-0.5", className)}>
-      <IconButton label="Resume" size={size} onClick={() => resume(it)}>
+      <IconButton label={it.progress > 0 && it.progress < 1 ? "Resume" : "Play"} size={size} onClick={() => resume(it)}>
         <Play size={size === 32 ? 16 : 20} strokeWidth={1.5} />
       </IconButton>
       <IconButton label="Prepare audio" size={size} onClick={() => prepare(it)}>
@@ -215,12 +218,24 @@ function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: s
       <Dot />
       <VoiceServiceName source={voiceSource(prepared ?? voice)}>{prepared?.name ?? voice.name}</VoiceServiceName>
       {withDate && <><Dot /><span>{dateLabel(it.rec.updatedAt)}</span></>}
+      {it.reads > 0 && <><Dot /><ReadBadge reads={it.reads} /></>}
     </div>
   );
 }
 
 function Dot() {
   return <span aria-hidden className="text-fg3">·</span>;
+}
+
+/** Finished readings stay on record while the ring tracks the current pass. */
+function ReadBadge({ reads }: { reads: number }) {
+  const label = reads === 1 ? "Read once" : `Read ${reads} times`;
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap text-accent" aria-label={label} title={label}>
+      <Check size={12} strokeWidth={2} aria-hidden />
+      {reads === 1 ? "Read" : `Read ${reads}×`}
+    </span>
+  );
 }
 
 /** Listening progress: a ring with the percentage inside, or a check once finished. */
@@ -298,7 +313,7 @@ function Row(props: ItemProps & { touch: boolean }) {
         <DocumentSelection {...props} className="mt-3" />
         <ReadProgress value={it.progress} />
         <div className="flex min-w-0 flex-col gap-1">
-          <button type="button" onClick={() => props.resume(it)} className="truncate border-0 bg-transparent p-0 text-left font-serif text-[16px] leading-6 text-fg hover:text-accent">
+          <button type="button" onClick={() => props.open(it)} className="truncate border-0 bg-transparent p-0 text-left font-serif text-[16px] leading-6 text-fg hover:text-accent">
             {it.rec.title}
           </button>
           <Meta it={it} defaultVoice={props.defaultVoice} withDate />
@@ -319,7 +334,7 @@ function CardItem(props: ItemProps) {
         <Actions {...props} size={32} className="opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100" />
       </div>
       <div className="flex-1">
-        <button type="button" onClick={() => props.resume(it)} className="line-clamp-3 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
+        <button type="button" onClick={() => props.open(it)} className="line-clamp-3 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
           {it.rec.title}
         </button>
       </div>

@@ -231,3 +231,34 @@ test("the player only offers voices with prepared audio for the open document", 
   await expect(page.getByText("Choosing a voice for “First document”.", { exact: true })).toBeVisible();
   await expect(page.locator('[data-voice="alloy"]')).toBeVisible();
 });
+
+test("opening from the Library does not start playback, and finished readings stay counted through a reread", async ({ page }) => {
+  await seedLibrary(page, ["local"]);
+  await page.getByRole("button", { name: "First document", exact: true }).click();
+  await page.waitForURL(/\/read\//);
+  const player = page.getByRole("region", { name: "Player" });
+  const playPause = player.getByRole("button", { name: /^(Play|Pause)/ });
+  await expect(playPause).toHaveAttribute("data-playing", "false");
+  await expect(page.locator('article [data-i="0"]')).toHaveClass(/bg-hl/);
+
+  // Read it through to the end.
+  await playPause.click();
+  await expect(playPause).toHaveAttribute("data-playing", "true");
+  await expect(playPause).toHaveAttribute("data-playing", "false", { timeout: 30_000 });
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const item = page.getByRole("listitem").filter({ has: page.getByRole("button", { name: "First document", exact: true }) });
+  await expect(item.getByRole("img", { name: "100% listened", exact: true })).toBeVisible();
+  await expect(item.getByLabel("Read once", { exact: true })).toBeVisible();
+
+  // Rereading starts over and tracks the new pass while the badge remains.
+  await item.getByRole("button", { name: "Play", exact: true }).click();
+  await page.waitForURL(/\/read\//);
+  await expect(playPause).toHaveAttribute("data-playing", "true");
+  await page.keyboard.press("Space");
+  await expect(playPause).toHaveAttribute("data-playing", "false");
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  await expect(item.getByLabel("Read once", { exact: true })).toBeVisible();
+  await expect(item.getByRole("img", { name: /^(?!100%)\d+% listened$/ })).toBeVisible();
+  await page.reload();
+  await expect(item.getByLabel("Read once", { exact: true })).toBeVisible();
+});

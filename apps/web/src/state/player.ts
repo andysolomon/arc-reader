@@ -14,6 +14,8 @@ import { hasPatois, preparePatois } from "../lib/patois";
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
 let retryPreparation: (() => Promise<boolean>) | null = null;
+/** The end of the current reading has already been counted; cleared once playback leaves the end. */
+let endCounted = false;
 const variant = (id: string) => id === JAMAICAN_PATOIS_VOICE_ID ? "patois" : "original";
 
 export interface PlayerState extends EngineSnapshot {
@@ -88,7 +90,9 @@ export const engine = new PlaybackEngine({
   onPersist: (snap) => {
     const { doc } = usePlayer.getState();
     if (!doc || !snap.docId) return;
-    void positions.put({ docId: snap.docId, variant: variant(doc.voice), index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() });
+    const completed = snap.ended && !endCounted;
+    endCounted = snap.ended;
+    void positions.put({ docId: snap.docId, variant: variant(doc.voice), index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() }, { completed });
   },
   onError: (m) => toast(m),
   onUnavailable: (m) => usePlayer.setState({ speechError: m }),

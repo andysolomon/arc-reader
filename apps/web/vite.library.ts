@@ -35,6 +35,7 @@ function validPosition(value: unknown): value is PositionRecord {
   if (!object(value)) return false;
   return id(value.docId) && number(value.index) && Number.isInteger(value.index)
     && number(value.offset) && number(value.fraction) && value.fraction <= 1 && number(value.total) && number(value.updatedAt)
+    && (value.reads === undefined || (number(value.reads) && Number.isInteger(value.reads) && value.reads >= 0))
     && (value.variant === undefined || value.variant === "original" || value.variant === "patois");
 }
 
