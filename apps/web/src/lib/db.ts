@@ -1,5 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { LibraryChange, PendingChange } from "./libraryProtocol";
+import { readsOf, type LibraryChange, type PendingChange } from "./libraryProtocol";
 import { uid } from "./hash";
 
 export type DocSource = "paste" | "url" | "file" | "share" | "sample";
@@ -135,7 +135,7 @@ export const positions = {
     const tx = d.transaction(["docs", "positions", "outbox"], "readwrite");
     if (await tx.objectStore("docs").get(rec.docId)) {
       const previous = await tx.objectStore("positions").get(rec.docId);
-      const reads = (rec.reads ?? previous?.reads ?? 0) + (opts.completed ? 1 : 0);
+      const reads = (rec.reads ?? readsOf(previous)) + (opts.completed ? 1 : 0);
       const record: PositionRecord = reads > 0 ? { ...rec, reads } : rec;
       await tx.objectStore("positions").put(record);
       await tx.objectStore("outbox").put(pendingChange(`position:${rec.docId}`, { kind: "position", record }));
