@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check } from "lucide-react";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -16,6 +16,14 @@ import { useBreakpoint, useIsTouch } from "../hooks/useMedia";
 import { audioCache } from "../lib/db";
 import { syncLibrary, useLibrarySync } from "../lib/librarySync";
 import { PreparationQueue, PrepareDialog, PreparedStatus } from "../components/LibraryPreparation";
+import { useCategories } from "../state/categories";
+import { useJev } from "../state/llm";
+
+/** Category filter value for documents not yet on a shelf */
+const UNCATEGORIZED = "\u0000uncategorized";
+
+/** Everything a researcher might remember a document by. */
+const searchable = ({ rec }: LibraryItem) => [rec.title, rec.domain, rec.category?.name, ...Object.values(rec.meta ?? {})].join("\n").toLowerCase();
 
 export function LibraryPage() {
   const navigate = useNavigate();
@@ -31,6 +39,9 @@ export function LibraryPage() {
   const sync = useLibrarySync();
   const [q, setQ] = useState("");
   const [vf, setVf] = useState<string | null>(null);
+  const [cf, setCf] = useState<string | null>(null);
+  const [filing, setFiling] = useState(false);
+  const jevReady = useJev((s) => !!s.config?.configured);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [prepareIds, setPrepareIds] = useState<string[] | null>(null);
   const closePrepare = useCallback(() => setPrepareIds(null), []);
@@ -39,6 +50,7 @@ export function LibraryPage() {
   useEffect(() => {
     void refresh();
   }, [refresh, voices, openaiModel]);
+  useEffect(() => { void useJev.getState().load(); }, []);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribe = audioCache.subscribe(() => {
@@ -54,15 +66,32 @@ export function LibraryPage() {
 
   const usedVoices = useMemo(() => Array.from(new Set(items.flatMap((i) => [i.rec.voice ?? defaultVoice, ...i.prepared.map((v) => v.voiceId)]))), [items, defaultVoice]);
   const voiceName = (id: string) => voices.find((v) => v.id === id)?.name ?? items.flatMap((i) => i.prepared).find((v) => v.voiceId === id)?.name ?? id;
+  const categories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const it of items) if (it.rec.category) counts.set(it.rec.category.name, (counts.get(it.rec.category.name) ?? 0) + 1);
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [items]);
+  const uncategorized = items.filter((it) => !it.rec.category);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return items.filter((it) => {
       const v = it.rec.voice ?? defaultVoice;
       if (vf && v !== vf && !it.prepared.some((p) => p.voiceId === vf)) return false;
+      if (cf && (cf === UNCATEGORIZED ? !!it.rec.category : it.rec.category?.name !== cf)) return false;
       if (!needle) return true;
-      return it.rec.title.toLowerCase().includes(needle) || it.rec.domain.toLowerCase().includes(needle);
+      return searchable(it).includes(needle);
     });
-  }, [items, q, vf, defaultVoice]);
+  }, [items, q, vf, cf, defaultVoice]);
+  const fileUncategorized = async () => {
+    setFiling(true);
+    try {
+      const filed = await useCategories.getState().suggestAll(uncategorized.map((it) => it.rec));
+      const missed = uncategorized.length - filed;
+      toast(missed ? `Jev filed ${filed} of ${uncategorized.length}. Open a document's details to retry.` : `Jev filed ${filed} ${filed === 1 ? "document" : "documents"}`);
+    } finally {
+      setFiling(false);
+    }
+  };
 
   const grid = bp === "md" || libView === "grid";
   const selectedItems = items.filter((it) => selected.has(it.rec.id));
@@ -121,6 +150,26 @@ export function LibraryPage() {
             ))}
           </div>
         )}
+        {(categories.length > 0 || (jevReady && uncategorized.length > 0)) && (
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by category">
+            {categories.length > 0 && (
+              <>
+                <Chip size="sm" selected={cf === null} onClick={() => setCf(null)}>All categories</Chip>
+                {categories.map(([name, count]) => (
+                  <Chip key={name} size="sm" selected={cf === name} onClick={() => setCf(name)}>{name} <span className="tabular-nums opacity-70">{count}</span></Chip>
+                ))}
+                {uncategorized.length > 0 && (
+                  <Chip size="sm" selected={cf === UNCATEGORIZED} onClick={() => setCf(UNCATEGORIZED)}>Uncategorized <span className="tabular-nums opacity-70">{uncategorized.length}</span></Chip>
+                )}
+              </>
+            )}
+            {jevReady && uncategorized.length > 0 && (
+              <Button variant="ghost" leading={<Sparkles size={14} strokeWidth={1.5} />} loading={filing} onClick={() => void fileUncategorized()}>
+                File {uncategorized.length} uncategorized with Jev
+              </Button>
+            )}
+          </div>
+        )}
         {items.length > 0 && (
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex cursor-pointer items-center gap-2 text-[13px] text-fg2">
@@ -129,7 +178,7 @@ export function LibraryPage() {
                 for (const it of filtered) { if (allVisibleSelected) next.delete(it.rec.id); else next.add(it.rec.id); }
                 return next;
               })} />
-              Select {q || vf ? "visible" : "all"}
+              Select {q || vf || cf ? "visible" : "all"}
             </label>
             <span className="flex-1 text-[13px] text-fg2">{selectedItems.length > 0 ? `${selectedItems.length} selected` : "Select documents to prepare together"}</span>
             {selectedItems.length > 0 && <Button variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>}
@@ -143,7 +192,7 @@ export function LibraryPage() {
         {items.length > 0 && filtered.length === 0 && (
           <EmptyState
             action={
-              <button type="button" onClick={() => { setQ(""); setVf(null); }} className="border-0 bg-transparent p-0 text-accent hover:text-fg">
+              <button type="button" onClick={() => { setQ(""); setVf(null); setCf(null); }} className="border-0 bg-transparent p-0 text-accent hover:text-fg">
                 Clear filters
               </button>
             }
@@ -213,6 +262,15 @@ function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: s
         <SourceIcon rec={it.rec} />
         <span className="truncate">{it.rec.domain}</span>
       </span>
+      {it.rec.category && (
+        <>
+          <Dot />
+          <span className="inline-flex min-w-0 items-center gap-1" title={it.rec.category.by === "jev" ? "Filed by Jev" : "Category"}>
+            <Tag size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
+            <span className="truncate">{it.rec.category.name}</span>
+          </span>
+        </>
+      )}
       <Dot />
       <span className="tabular-nums">{fmtTime(it.duration)}</span>
       <Dot />

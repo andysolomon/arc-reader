@@ -236,6 +236,16 @@ It uses [OpenCode Go](https://opencode.ai/docs/go/). Paste your Go API key in **
 
 Go is designed for coding agents and OpenCode monitors its traffic for abuse. Occasional summaries are light, but if that is a concern, point `LLM_URL` at Zen and pay per token. Article text is sent to OpenCode and the model provider.
 
+## Library catalogue
+
+Each document carries a catalogue record for later research. The Reader's **Details** button (books icon, in the header) opens it above the text: title, the original link (with a button to open it), author, published date, site, category, summary status, the page's description, and your notes. Fields save when they lose focus (Enter for one-line fields, Escape discards) and are shared through library sync. **Copy citation** copies `Author (Date). Title. Site. Link`.
+
+Articles fetched from a URL, the clipboard, or the share target keep their link, and their author, published date (as `YYYY-MM-DD` when parseable), site name, and description are read from the page's meta tags and Schema.org JSON-LD. Documents added before this keep only their domain; paste the link into Details.
+
+Categories come from [Jev](https://docs.typesafe.ai), TypeSafe's classification model. Jev answers one Choice question over the library's shelves (`CATEGORIES` in `src/lib/category.ts`, plus any category you have typed yourself) from the title, link, site, author, description, summary, and the first 24,000 characters of the text, and returns its pick with a confidence score. New documents are filed in the background as they are added; **Ask Jev** in Details refiles one, and the Library's **File N uncategorized with Jev** files the rest. Typing a category in Details overrides Jev and is never replaced by background filing. The Library filters by category and searches titles, links, authors, sites, categories, descriptions, and notes.
+
+Paste a TypeSafe API key in **Settings → Library** (from console.typesafe.ai/keys). Like the OpenCode key, the server checks it, saves it as `typesafe.json` (mode 600) in `LIBRARY_DATA_DIR`, and only ever shows the browser its last four characters; a saved key takes precedence over `TYPESAFE_API_KEY`. `/api/jev` forwards `POST /v1/systemone` only, to `TYPESAFE_URL` (default `https://api.typesafe.ai`). Without a key, documents can still be categorized by hand.
+
 ## Themes
 
 `packages/tokens/src/themes.css` defines `--bg … --danger` on `html[data-theme]` for dark, light, tokyo-night, catppuccin, gruvbox, nord, everforest and kanagawa. The Tailwind preset maps `bg-bg2`, `text-fg2`, `border-line`, `bg-hl`, `rounded-card`, `shadow-overlay` and so on to those variables. First visit follows `prefers-color-scheme`; the rail and reader header cycle themes.
