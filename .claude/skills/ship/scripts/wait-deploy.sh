@@ -28,7 +28,17 @@ echo "rebuild of $sha: $result"
 inspect='docker inspect -f "{{.State.StartedAt}}" readaloud-web-1'
 started=$({ sh -c "$inspect" 2>/dev/null || echo "$inspect" | newgrp docker 2>/dev/null; } | grep -m1 . || echo unknown)
 echo "web container started: $started"
-echo "served bundle: $(curl -s http://127.0.0.1:4179/ | grep -o 'assets/index-[^"]*\.js' | head -1)"
-echo "https://omarchy.tail1b9428.ts.net:8449 -> HTTP $(curl -s -o /dev/null -w '%{http_code}' https://omarchy.tail1b9428.ts.net:8449/)"
+# The container restarts after the build; give the preview server time to start listening.
+bundle=""
+while [ -z "$bundle" ]; do
+  bundle=$(curl -s http://127.0.0.1:4179/ | grep -o 'assets/index-[^"]*\.js' | head -1 || true)
+  if [ -z "$bundle" ]; then
+    [ "$(date +%s)" -lt "$end" ] || { echo "timed out waiting for the app on 127.0.0.1:4179"; exit 1; }
+    sleep 2
+  fi
+done
+echo "served bundle: $bundle"
+status=$(curl -s -o /dev/null -w '%{http_code}' https://omarchy.tail1b9428.ts.net:8449/ || true)
+echo "https://omarchy.tail1b9428.ts.net:8449 -> HTTP $status"
 echo "local main vs origin/main: $(git -C "$main" rev-list --left-right --count origin/main...main | awk '{print $2 " ahead, " $1 " behind"}')"
-[ "$result" = "exit 0" ]
+[ "$result" = "exit 0" ] && [ "$status" = 200 ]
