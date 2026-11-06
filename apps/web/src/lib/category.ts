@@ -1,3 +1,5 @@
+import { readingBlocks } from "./codeBlocks";
+import { visualNarration } from "./visuals";
 import type { DocCategory, DocRecord } from "./db";
 import { hasSummary } from "./summary";
 
@@ -51,7 +53,8 @@ export function categoryRequest(rec: DocRecord, used: Iterable<string>) {
   const state = Object.fromEntries(Object.entries({
     title: rec.title, link: url, site, author, description,
     summary: hasSummary(rec) ? rec.summary!.text : undefined,
-    text: rec.text.slice(0, EXCERPT_CHARS),
+    text: readingBlocks(rec.text).map((block) => block.kind === "visual"
+      ? visualNarration(block.visual, rec.visualDescriptions).text : block.text).join("\n\n").slice(0, EXCERPT_CHARS),
   }).filter(([, value]) => value));
   return {
     model: JEV_MODEL,

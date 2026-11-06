@@ -1,4 +1,6 @@
+import { VisualFigure } from "./VisualFigure";
 import { memo, useEffect, useRef, type MouseEvent } from "react";
+import { Code2, ChevronDown } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { HighlightMode, ParagraphLike } from "../lib/types";
 import { useReducedMotion } from "../lib/useReducedMotion";
@@ -38,17 +40,19 @@ export const SentenceText = memo(function SentenceText({
 }: SentenceTextProps) {
   const ref = useRef<HTMLElement>(null);
   const reduce = useReducedMotion();
-  const last = useRef(-2);
+  const last = useRef<Element | null>(null);
+
+  useEffect(() => { last.current = null; }, [paragraphs]);
 
   useEffect(() => {
-    if (activeIndex === last.current) return;
-    last.current = activeIndex;
     const c = scrollRef?.current;
     const el = ref.current?.querySelector<HTMLElement>(`[data-i="${activeIndex}"]`);
-    if (!c || !el) return;
+    if (!c || !el || el === last.current) return;
+    last.current = el;
+    if (activeIndex === 0 && c.scrollTop === 0) return;
     const top = el.getBoundingClientRect().top - c.getBoundingClientRect().top + c.scrollTop - c.clientHeight / 3;
     c.scrollTo({ top: Math.max(0, top), behavior: reduce ? "auto" : "smooth" });
-  }, [activeIndex, scrollRef, reduce]);
+  }, [activeIndex, paragraphs, scrollRef, reduce]);
 
   const onClick = (e: MouseEvent<HTMLElement>) => {
     if (!onSeek) return;
@@ -65,9 +69,8 @@ export const SentenceText = memo(function SentenceText({
       className={cn("mx-auto font-serif text-fg transition-[font-size,max-width] duration-base [text-wrap:pretty]", className)}
       style={{ maxWidth: `${wide ? 72 : 62}ch`, fontSize, lineHeight: 1.65 }}
     >
-      {paragraphs.map((p, pi) => (
-        <p key={pi} className="mb-[1.35em] mt-0 last:mb-0">
-          {p.sentences.map((s, si) => {
+      {paragraphs.map((p, pi) => {
+        const content = p.sentences.map((s, si) => {
             const i = p.start + si;
             const active = i === activeIndex;
             const past = i < activeIndex;
@@ -105,9 +108,32 @@ export const SentenceText = memo(function SentenceText({
                 {" "}
               </span>
             );
-          })}
-        </p>
-      ))}
+          });
+        if (p.visual) return <VisualFigure key={pi} visual={p.visual} active={activeIndex === p.start}>{content}</VisualFigure>;
+        if (p.code) return (
+          <section key={pi} aria-label="Code example" className={cn(
+            "my-8 overflow-hidden rounded-2xl border bg-bg2 font-sans transition-colors duration-base",
+            activeIndex === p.start ? "border-accent shadow-[0_0_0_3px_var(--hl)]" : "border-line",
+          )}>
+            <div className="flex items-center gap-2 border-b border-line px-5 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-fg2">
+              <Code2 size={15} aria-hidden />
+              <span>{p.code.language || "Code example"}</span>
+              <span className="ml-auto text-[10px] tracking-[0.08em]">{p.code.summarized ? "Spoken summary" : "Skipped in audio"}</span>
+            </div>
+            <p className="m-0 px-5 py-5 text-[0.9em] leading-relaxed">{content}</p>
+            <details className="group border-t border-line">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3 text-[12px] text-fg2 hover:text-fg [&::-webkit-details-marker]:hidden">
+                <ChevronDown size={14} className="transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden />
+                View original code
+              </summary>
+              <pre className="m-0 max-h-96 overflow-auto border-t border-line bg-bg p-5 font-mono text-[12px] leading-6 [tab-size:2]" tabIndex={0} aria-label="Original code">
+                <code>{p.code.text}</code>
+              </pre>
+            </details>
+          </section>
+        );
+        return <p key={pi} className="mb-[1.35em] mt-0 last:mb-0">{content}</p>;
+      })}
     </article>
   );
 });

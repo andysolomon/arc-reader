@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ChevronLeft, Library, Maximize2, Minimize2, Sparkles } from "lucide-react";
+import { ChevronLeft, Library, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon } from "lucide-react";
 import { Button, IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
 import { syncLibrary } from "../lib/librarySync";
 import { useSettings, useThemeId } from "../state/settings";
+import { getVoice } from "../state/voices";
 import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
 import { useBreakpoint } from "../hooks/useMedia";
@@ -26,6 +27,12 @@ export function Reader() {
   const index = usePlayer((s) => s.index);
   const wordIndex = usePlayer((s) => s.wordIndex);
   const loading = usePlayer((s) => s.loading);
+  const playing = usePlayer((s) => s.playing);
+  const ended = usePlayer((s) => s.ended);
+  const progress = usePlayer((s) => Math.round(s.fraction * 100));
+  const remainingMinutes = usePlayer((s) => Math.max(1, Math.ceil((s.total - s.elapsed) / s.speed / 60)));
+  const started = usePlayer((s) => s.elapsed > 0);
+  const offline = usePlayer((s) => s.offline);
   const focus = usePlayer((s) => s.focus);
   const setFocus = usePlayer((s) => s.setFocus);
   const seek = usePlayer((s) => s.seek);
@@ -99,7 +106,7 @@ export function Reader() {
   );
 
   return (
-    <section data-screen="reader" className="flex min-h-0 flex-1 flex-col animate-fadein">
+    <section data-screen="reader" data-playing={playing && !loading} className="reader-surface relative flex min-h-0 flex-1 flex-col animate-fadein">
       {!focus && (
         <header className="flex h-header shrink-0 items-center gap-1.5 px-3">
           <IconButton label="Back" onClick={() => navigate("/")}>
@@ -135,6 +142,18 @@ export function Reader() {
           )}
         </header>
       )}
+      {ready && (
+        <div className={cn("reader-status shrink-0 border-y border-line px-6", focus && "pr-16")}>
+          <div className="mx-auto flex min-h-12 items-center gap-3 text-[11px] text-fg2" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
+            <span aria-hidden className="listening-bars" data-active={playing && !loading}><i /><i /><i /><i /></span>
+            <span className="shrink-0 font-medium" role="status">{loading ? "Preparing audio" : ended ? "Reading complete" : playing ? "Now listening" : started ? "Paused" : "Ready to listen"}</span>
+            <span className="hidden min-w-0 truncate sm:block">{offline ? "Browser voice" : getVoice(doc.voice).name}</span>
+            <span className="ml-auto shrink-0 tabular-nums">{ended ? <Check size={15} aria-label="Complete" /> : `${remainingMinutes} min left`}</span>
+            <span className="w-9 text-right font-mono tabular-nums">{progress}%</span>
+          </div>
+          <div className="reader-progress" aria-hidden><span style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div>
+        </div>
+      )}
       {summarizing && (
         <div role="status" data-summary-status aria-label="Summarizing" className="flex h-9 shrink-0 items-center gap-3 border-b border-line bg-bg px-4 text-[12px] text-fg2 animate-fadein sm:px-6">
           <span aria-hidden className="flex h-3.5 items-end gap-[3px]">
@@ -148,11 +167,22 @@ export function Reader() {
       )}
       <div ref={scrollRef} className={cn("relative min-h-0 flex-1 overflow-y-auto px-6 pb-[200px]", focus ? "pt-16" : "pt-12")}>
         {focus && (
-          <IconButton label="Exit focus mode" title="Exit focus (Esc)" onClick={() => setFocus(false)} className="absolute right-3 top-3">
+          <IconButton label="Exit focus mode" title="Exit focus (Esc)" onClick={() => setFocus(false)} className="fixed right-3 top-3 z-20">
             <Minimize2 size={20} strokeWidth={1.5} />
           </IconButton>
         )}
         <motion.div layoutId="doc-surface" className="mx-auto" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
+          {ready && !focus && (
+            <div className="mb-10 border-b border-line pb-7">
+              <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-medium uppercase tracking-[0.16em] text-fg2">
+                <span className="inline-flex items-center gap-2"><Headphones size={13} aria-hidden />{readingSummary ? "The summary" : "Your listening space"}</span>
+                {doc.paragraphs.some((p) => p.code) && <span className="inline-flex items-center gap-2"><Code2 size={13} aria-hidden />Code examples</span>}
+                {doc.paragraphs.some((p) => p.visual) && <span className="inline-flex items-center gap-2"><ImageIcon size={13} aria-hidden />Images & diagrams</span>}
+              </div>
+              <p className="m-0 font-serif text-[clamp(1.75rem,3vw,2.6rem)] font-normal leading-[1.18] tracking-[-0.025em] text-fg">{title}</p>
+              {record?.domain && <p className="mb-0 mt-4 text-[12px] text-fg2">{record.domain}</p>}
+            </div>
+          )}
           {ready && !readingSummary && doc.voice === JAMAICAN_PATOIS_VOICE_ID && <p className="mb-6 text-sm text-fg2">Jamaican Patois adaptation · Your original is saved. Choose another voice to read the original.</p>}
           {ready && readingSummary && record?.summary && (
             <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-fg2">

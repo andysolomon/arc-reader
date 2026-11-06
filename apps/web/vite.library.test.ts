@@ -71,6 +71,20 @@ describe("shared server library", () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
   });
 
+  it("syncs code explanations and narration positions, and validates their shapes", async () => {
+    const visualDescriptions = { "visual-v1:abc:20": "A diagram connects the client to a server." };
+    const codeSummaries = { "v1:abc:10": "This example prints a greeting." };
+    const result = await service.sync({ changes: [
+      { kind: "doc", record: { ...doc("code"), codeSummaries, visualDescriptions } },
+      { kind: "position", record: { ...position("code"), narrationVersion: 1 } },
+    ] });
+    expect(result.docs[0].codeSummaries).toEqual(codeSummaries);
+    expect(result.docs[0].visualDescriptions).toEqual(visualDescriptions);
+    expect(result.positions[0].narrationVersion).toBe(1);
+    const bad = { ...doc("bad"), codeSummaries: { key: 3 } } as unknown as DocRecord;
+    expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
+  });
+
   it("stores catalogue metadata and categories and rejects malformed ones", async () => {
     const meta = { url: "https://example.com/a", author: "Ada", published: "2026-10-01", site: "Example", description: "About a.", notes: "Cite in ch. 2" };
     const category = { name: "AI agents", by: "jev" as const, confidence: 0.82, model: "jev-1.14.0", at: 3 };

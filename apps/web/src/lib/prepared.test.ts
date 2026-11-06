@@ -1,7 +1,9 @@
+import { visualBlock, visualKey } from "./visuals";
 import { describe, expect, it } from "vitest";
 import { FISH_PRESET_VOICES, JAMAICAN_PATOIS_VOICE_ID, LOCAL_VOICE, OPENAI_VOICES, PRESET_VOICES } from "../data/voices";
 import { cacheKey } from "../engine/providers";
 import type { DocRecord } from "./db";
+import { codeKey } from "./codeBlocks";
 import { preparedVoices } from "./prepared";
 
 const rec: DocRecord = { id: "d", title: "Document", text: "One two. Three four.\n\nFive six.", source: "paste", domain: "Text", voice: null, chars: 32, createdAt: 0, updatedAt: 0 };
@@ -26,6 +28,22 @@ describe("prepared audio coverage", () => {
     expect(preparedVoices(rec, [voice], keys, "gpt-4o-mini-tts")).toEqual([]);
     expect(preparedVoices(rec, [voice], keys, "tts-1")[0].fraction).toBe(2 / 3);
     expect(preparedVoices(rec, [{ ...voice, engine: "other" }], keys, "tts-1")).toEqual([]);
+  });
+
+  it("counts summary audio and ignores previously cached verbatim code", () => {
+    const source = "const answer = 42;";
+    const explanation = "This example assigns a fixed number.";
+    const document = { ...rec, text: "```js\n" + source + "\n```", codeSummaries: { [codeKey({ text: source, language: "js" })]: explanation } };
+    expect(preparedVoices(document, [bella], new Set([key(source)]), "gpt-4o-mini-tts")).toEqual([]);
+    expect(preparedVoices(document, [bella], new Set([key(explanation)]), "gpt-4o-mini-tts")[0].fraction).toBe(1);
+  });
+
+  it("matches cached image descriptions instead of the caption fallback", () => {
+    const visual = { kind: "image" as const, src: "https://example.com/photo.png", alt: "A bird", caption: "" };
+    const explanation = "A bird rests on a branch.";
+    const document = { ...rec, text: visualBlock(visual), visualDescriptions: { [visualKey(visual)]: explanation } };
+    expect(preparedVoices(document, [bella], new Set([key(explanation)]), "gpt-4o-mini-tts")[0].fraction).toBe(1);
+    expect(preparedVoices(document, [bella], new Set([key("Image description from the article: A bird")]), "gpt-4o-mini-tts")).toEqual([]);
   });
 
   it("uses the Patois adaptation only while it matches the original", () => {

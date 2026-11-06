@@ -1,3 +1,4 @@
+import { visualBlock, visualKey } from "./visuals";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DocRecord } from "./db";
 import { CATEGORIES, categoryNames, categoryRequest, citation, suggestCategory } from "./category";
@@ -23,6 +24,14 @@ describe("categories", () => {
     expect(request.questions.category.type).toBe("choice");
     expect(request.questions.category.criteria["AI evaluation"]).toMatch(/Evals/);
     expect(request.questions.category.criteria["Reading list"]).toBeNull();
+  });
+
+  it("classifies visual descriptions without sending embedded image metadata", () => {
+    const visual = { kind: "diagram" as const, src: "https://example.com/chart.png", alt: "Flow chart", caption: "" };
+    const document = rec({ text: "A system design.\n\n" + visualBlock(visual), visualDescriptions: { [visualKey(visual)]: "Requests flow through a server." } });
+    const request = categoryRequest(document, []);
+    expect(request.state.text).toContain("Requests flow through a server.");
+    expect(request.state.text).not.toMatch(/readaloud-visual|chart.png/);
   });
 
   it("returns Jev's pick with its confidence and reports failures", async () => {

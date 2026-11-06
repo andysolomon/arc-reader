@@ -16,8 +16,12 @@ export function PlayerBar(p: PlayerProps) {
       <div
         role="region"
         aria-label="Player"
-        className={cn("absolute inset-x-0 bottom-0 z-10 flex flex-col border-t border-line bg-bg2 px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-1 animate-rise-slow shadow-[0_-8px_30px_-16px_rgba(0,0,0,.4)]", p.className)}
+        className={cn("absolute inset-x-0 bottom-0 z-10 flex flex-col border-t border-line bg-bg2 backdrop-blur-xl px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-1 animate-rise-slow shadow-[0_-8px_30px_-16px_rgba(0,0,0,.4)]", p.className)}
       >
+        {p.title && <div className="flex min-w-0 items-center gap-3 px-1 pb-1 pt-2 text-[11px] text-fg2">
+          <span className="min-w-0 flex-1 truncate text-fg">{p.title}</span>
+          <span className="max-w-[35%] truncate">{p.voice.name}</span>
+        </div>}
         <div className="flex items-center gap-2">
           <Scrubber value={p.progress} ticks={p.ticks} onSeek={p.onSeek} valueText={`${fmtTime(p.elapsed)} elapsed, ${fmtTime(p.remaining)} remaining`} className="h-8" />
           <TimeReadout elapsed={p.elapsed} remaining={p.remaining} status={p.status} />
@@ -49,7 +53,7 @@ export function PlayerBar(p: PlayerProps) {
       role="region"
       aria-label="Player"
       className={cn(
-        "absolute inset-x-0 bottom-0 z-10 flex h-bar items-center gap-1.5 border-t border-line bg-bg2 px-6 shadow-[0_-8px_30px_-16px_rgba(0,0,0,.4)] animate-rise-slow",
+        "absolute inset-x-0 bottom-0 z-10 flex h-bar items-center gap-1.5 border-t border-line bg-bg2 backdrop-blur-xl px-6 shadow-[0_-8px_30px_-16px_rgba(0,0,0,.4)] animate-rise-slow",
         p.className,
       )}
     >

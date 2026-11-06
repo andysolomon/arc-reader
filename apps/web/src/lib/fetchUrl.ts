@@ -1,3 +1,6 @@
+import { fencedCode, readingBlocks } from "./codeBlocks";
+import { visualBlock, type ArticleVisual } from "./visuals";
+import { articleVisual } from "./articleVisuals";
 import type { DocMeta } from "./db";
 
 /** Fetch a web page and extract readable text. Direct fetch first, then the built-in /api/fetch route, then an optional readability proxy. */
@@ -80,27 +83,71 @@ export function pageMeta(doc: Document, url: string): DocMeta {
 export function htmlToText(html: string, url: string): Fetched {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const meta = pageMeta(doc, url);
-  doc.querySelectorAll("script,style,noscript,svg,nav,footer,header,aside,form,iframe,[aria-hidden='true']").forEach((n) => n.remove());
+  doc.querySelectorAll("script,noscript,nav,footer,header,aside,form,iframe,[aria-hidden='true']").forEach((n) => n.remove());
+  doc.querySelectorAll("style").forEach((style) => { if (!style.closest("svg")) style.remove(); });
   const root = doc.querySelector("article") ?? doc.querySelector("main") ?? doc.querySelector('[role="main"]') ?? doc.body;
-  const blocks = Array.from(root.querySelectorAll("h1,h2,h3,h4,p,li,blockquote,pre"))
-    .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
-    .filter((t) => t.length > 1);
-  const text = (blocks.length ? blocks : [(root.textContent ?? "").replace(/\s+/g, " ").trim()]).join("\n\n");
+  root.querySelectorAll("pre").forEach((pre) => {
+    const code = pre.querySelector("code");
+    const language = (code?.className || pre.className).match(/(?:language|lang)-([\w#+.-]+)/)?.[1] ?? "";
+    // Replace with a single leaf so nested syntax-highlighter nodes cannot duplicate code.
+    pre.textContent = fencedCode(pre.textContent ?? "", language);
+  });
+  let base = url;
+  try { base = new URL(doc.querySelector("base[href]")?.getAttribute("href") || url, url).href; } catch { /* Use the article URL. */ }
+  const captions = new Set<Element>();
+  const visuals = new Map<Element, ArticleVisual>();
+  let embeddedBytes = 0;
+  for (const el of root.querySelectorAll("img,svg")) {
+    const captionEl = el.closest("figure")?.querySelector("figcaption");
+    const caption = captionEl?.textContent?.replace(/\s+/g, " ").trim() || "";
+    const visual = articleVisual(el, base, caption);
+    if (!visual) continue;
+    if (visual.src.startsWith("data:")) {
+      embeddedBytes += visual.src.length;
+      if (embeddedBytes > 1_000_000) visual.src = "";
+    }
+    visuals.set(el, visual);
+    if (captionEl) captions.add(captionEl);
+  }
+  const blocks: string[] = [];
+  let inline = "";
+  const flush = () => {
+    const text = inline.replace(/\s+/g, " ").trim();
+    if (text) blocks.push(text);
+    inline = "";
+  };
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) { inline += node.textContent ?? ""; return; }
+    if (!(node instanceof Element)) return;
+    if (captions.has(node)) return;
+    if (node.tagName === "IMG" || node.tagName.toLowerCase() === "svg") {
+      const visual = visuals.get(node);
+      if (visual) { flush(); blocks.push(visualBlock(visual)); }
+      return;
+    }
+    if (node.tagName === "PRE") { flush(); blocks.push(node.textContent ?? ""); return; }
+    const boundary = /^(?:H[1-6]|P|LI|BLOCKQUOTE|DIV|SECTION|BR|UL|OL|FIGURE|FIGCAPTION)$/.test(node.tagName);
+    if (boundary) flush();
+    node.childNodes.forEach(walk);
+    if (boundary) flush();
+  };
+  walk(root);
+  flush();
+  const text = blocks.join("\n\n");
   const title = (doc.querySelector('meta[property="og:title"]')?.getAttribute("content") || doc.title || hostOf(url)).trim();
   return { title, text, domain: hostOf(url), meta };
 }
 
-function markdownToText(md: string): string {
-  return md
+export function markdownToText(md: string, base?: string): string {
+  return readingBlocks(md, base).map((block) => block.kind === "visual" ? visualBlock(block.visual) : block.kind === "code" ? fencedCode(block.text, block.language) : block.text
     .replace(/^Title:.*$/m, "")
     .replace(/^URL Source:.*$/m, "")
     .replace(/^Published Time:.*$/m, "")
     .replace(/^Markdown Content:\s*$/m, "")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/^#{1,6}\s+/gm, "")
     .replace(/[*_`>]+/g, "")
-    .trim();
+    .trim()).filter(Boolean).join("\n\n");
 }
 
 async function readResponse(r: Response, url: string, domain: string): Promise<Fetched> {
@@ -111,7 +158,7 @@ async function readResponse(r: Response, url: string, domain: string): Promise<F
     const f = htmlToText(body, url);
     if (f.text.length > 40) return f;
   } else if (body.trim().length > 40) {
-    return { title: domain, text: body, domain, meta: { url } };
+    return { title: domain, text: ct.includes("markdown") ? markdownToText(body, url) : body, domain, meta: { url } };
   }
   throw new Error("No readable text");
 }
@@ -134,7 +181,7 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
   if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
   const md = await r.text();
   const title = md.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || domain;
-  const text = markdownToText(md);
+  const text = markdownToText(md, url);
   if (text.length < 40) throw new Error("No readable text");
   const published = publishedDate(md.match(/^Published Time:\s*(.+)$/m)?.[1]);
   return { title, text, domain, meta: published ? { url, published } : { url } };

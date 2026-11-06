@@ -69,6 +69,18 @@ describe("LLM key and chat proxy", () => {
     expect(await (await fetch(`${url}/config`, { method: "DELETE" })).json()).toEqual({ configured: true, source: "env", hint: "9999" });
   });
 
+  it("forwards vision Responses requests without exposing credentials", async () => {
+    await start("env-key-9999");
+    const payload = { model: "muse-spark-1.3-contributor", store: false, input: [{ role: "user", content: [{ type: "input_image", image_url: "https://example.com/image.png" }] }] };
+    const result = await fetch(`${url}/v1/responses`, { method: "POST", headers: { "content-type": "application/json", "x-opencode-session": "readaloud-visual-d" }, body: JSON.stringify(payload) });
+    expect(result.status).toBe(200);
+    const [target, init] = upstream.mock.calls.at(-1)!;
+    expect(target).toBe("https://llm.example/zen/go/v1/responses");
+    expect(JSON.parse(Buffer.from(init.body as Uint8Array).toString())).toEqual(payload);
+    expect(new Headers(init.headers).get("x-opencode-session")).toBe("readaloud-visual-d");
+    expect((await fetch(`${url}/v1/responses`)).status).toBe(405);
+  });
+
   it("refuses cross-site writes and other endpoints", async () => {
     await start();
     expect((await put("good-key-1234", { origin: "https://evil.example" })).status).toBe(403);

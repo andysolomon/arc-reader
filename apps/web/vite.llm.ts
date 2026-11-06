@@ -95,12 +95,12 @@ export function llmMiddleware(store: LlmKeyStore, upstream: string, fetchImpl: t
           if (!check.ok) throw new HttpError(502, `OpenCode couldn't check the key (HTTP ${check.status}). Please retry.`);
         }));
       }
-      if (path !== "/v1/chat/completions") throw new HttpError(404, "Not found.");
+      if (path !== "/v1/chat/completions" && path !== "/v1/responses") throw new HttpError(404, "Not found.");
       if (req.method !== "POST") throw new HttpError(405, "Use POST.");
       const { key } = await store.key();
       if (!key) throw new HttpError(503, "Add your OpenCode Go API key in Settings → Summaries.");
       const session = req.headers["x-opencode-session"];
-      const upstreamResponse = await fetchImpl(`${base}/v1/chat/completions`, {
+      const upstreamResponse = await fetchImpl(`${base}${path}`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${key}`, "content-type": "application/json", "user-agent": USER_AGENT,
