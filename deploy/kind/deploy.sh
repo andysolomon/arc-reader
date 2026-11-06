@@ -26,6 +26,8 @@ tag=$(git rev-parse --short HEAD)
 [ -z "$(git status --porcelain)" ] || tag="$tag-dirty-$(date +%s)"
 web_image="readaloud-web:$tag"
 voicestudio_image="ghcr.io/debpalash/voicestudio:${VOICESTUDIO_TAG:-stable}"
+# kind load cannot import multi-platform images; the node pulls this one itself.
+traefik_image="traefik:v3.7.17"
 
 step "Building $web_image"
 # compose.yaml owns the build arguments (which providers are bundled).
@@ -82,6 +84,9 @@ voicestudio_config=$(printf '%s|%s' "$VOICESTUDIO_API_KEY" "${VOICESTUDIO_ASR_MO
 step "Deploying"
 sed -e "s|__WEB_IMAGE__|$web_image|" -e "s|__VOICESTUDIO_IMAGE__|$voicestudio_image|" \
   -e "s|__WEB_CONFIG__|$web_config|" -e "s|__VOICESTUDIO_CONFIG__|$voicestudio_config|" deploy/kind/readaloud.yaml | k apply -f -
+# After readaloud.yaml: on clusters from before Traefik, the app Services held its NodePorts.
+sed -e "s|__TRAEFIK_IMAGE__|$traefik_image|" deploy/kind/traefik.yaml | kubectl --context "kind-$cluster" apply -f -
+kubectl --context "kind-$cluster" -n traefik rollout status deployment/traefik --timeout=120s
 k rollout status deployment/web --timeout=300s
 k rollout status deployment/voicestudio --timeout=900s
 

@@ -115,12 +115,13 @@ curl -X POST -H "Authorization: Bearer $VOICESTUDIO_API_KEY" -H "Content-Type: a
 
 #### Or run it in a local kind cluster
 
-`deploy/kind` runs the same two services in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged.
+`deploy/kind` runs the same two services in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged. Both host ports lead to a [Traefik](https://doc.traefik.io/traefik/) ingress controller (`deploy/kind/traefik.yaml`, namespace `traefik`), and the Ingress objects in `deploy/kind/readaloud.yaml` route each port to its app's ClusterIP Service.
 
 ```sh
 deploy/kind/deploy.sh   # build the web image, load it into kind, roll out
 kubectl --context kind-readaloud -n readaloud get pods
 kubectl --context kind-readaloud -n readaloud logs deploy/web
+kubectl --context kind-readaloud -n traefik logs deploy/traefik   # routing errors, 404s while a pod restarts
 ```
 
 Needs `kind` and `kubectl` on the PATH. The first run stops Compose (volumes are kept), creates the cluster, and loads the 17 GB VoiceStudio image into it, which takes a few minutes; later runs only rebuild and reload the web image. The node container restarts with Docker, like the Compose services did. Each app runs as exactly one pod and updates with `Recreate`: the shared library and the preparation queue are single-process state, so a second web pod would overwrite the first one's files and double-book the speech workers. A deploy therefore still drops the app for a few seconds while the new pod starts. Configuration changes in `.env` restart only the pods that use them. Don't run Compose alongside the cluster. To go back, `kind delete cluster --name readaloud` (the volumes stay) and `docker compose up -d`.
