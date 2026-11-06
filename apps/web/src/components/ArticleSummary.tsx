@@ -1,9 +1,10 @@
-import { RotateCw, Sparkles, X } from "lucide-react";
+import { Play, RotateCw, Sparkles, X } from "lucide-react";
 import { Button, IconButton, Skeleton } from "@readaloud/ui";
 import type { DocRecord } from "../lib/db";
 import { hasSummary, summaryModelLabel } from "../lib/summary";
 import { useSettings } from "../state/settings";
 import { useSummaries } from "../state/summaries";
+import { usePlayer } from "../state/player";
 
 /** Summary panel above the Reader text. The Reader's header button opens it. */
 export function ArticleSummary({ record }: { record: DocRecord }) {
@@ -22,6 +23,11 @@ export function ArticleSummary({ record }: { record: DocRecord }) {
         <h2 className="m-0 flex-1 text-[13px] font-normal text-fg2">
           Summary · {label}
         </h2>
+        {ready && !pending && (
+          <Button leading={<Play size={14} strokeWidth={1.5} />} onClick={() => void usePlayer.getState().open(record, { summary: true, autoplay: true })}>
+            Listen
+          </Button>
+        )}
         {ready && !pending && (
           <IconButton label="Summarize again" size={32} onClick={() => void request(record)}>
             <RotateCw size={16} strokeWidth={1.5} />

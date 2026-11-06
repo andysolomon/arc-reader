@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ChevronLeft, Maximize2, Minimize2, Sparkles } from "lucide-react";
-import { IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
+import { Button, IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
 import { syncLibrary } from "../lib/librarySync";
@@ -12,7 +12,7 @@ import { toast } from "../state/toast";
 import { useBreakpoint } from "../hooks/useMedia";
 import { useCycleTheme } from "../components/Rail";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
-import { hasSummary } from "../lib/summary";
+import { hasSummary, summaryModelLabel } from "../lib/summary";
 import { useLlm } from "../state/llm";
 import { useSummaries } from "../state/summaries";
 import { ArticleSummary } from "../components/ArticleSummary";
@@ -30,6 +30,7 @@ export function Reader() {
   const seek = usePlayer((s) => s.seek);
   const setShortcuts = usePlayer((s) => s.setShortcutsOpen);
   const record = usePlayer((s) => s.record);
+  const readingSummary = usePlayer((s) => s.summary);
   const { fontSize, wide, highlightStyle, showSummary, set } = useSettings();
   const theme = getTheme(useThemeId());
   const cycleTheme = useCycleTheme();
@@ -103,7 +104,7 @@ export function Reader() {
           <h1 className="min-w-0 flex-1 truncate px-1.5 text-[13px] font-normal text-fg2" title={title}>
             {title}
           </h1>
-          {summaryRecord && (
+          {summaryRecord && !readingSummary && (
             <IconButton label={showSummary ? "Hide summary" : "Summarize"} active={showSummary} onClick={toggleSummary}>
               <Sparkles size={20} strokeWidth={1.5} />
             </IconButton>
@@ -132,8 +133,16 @@ export function Reader() {
           </IconButton>
         )}
         <motion.div layoutId="doc-surface" className="mx-auto" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
-          {ready && doc.voice === JAMAICAN_PATOIS_VOICE_ID && <p className="mb-6 text-sm text-fg2">Jamaican Patois adaptation · Your original is saved. Choose another voice to read the original.</p>}
-          {summaryRecord && showSummary && <ArticleSummary record={summaryRecord} />}
+          {ready && !readingSummary && doc.voice === JAMAICAN_PATOIS_VOICE_ID && <p className="mb-6 text-sm text-fg2">Jamaican Patois adaptation · Your original is saved. Choose another voice to read the original.</p>}
+          {ready && readingSummary && record?.summary && (
+            <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-fg2">
+              <span className="flex-1">Summary · {summaryModelLabel(record.summary.model)}</span>
+              <Button variant="link" className="underline underline-offset-2" onClick={() => void usePlayer.getState().open(record, { autoplay: usePlayer.getState().playing })}>
+                Read the full article
+              </Button>
+            </div>
+          )}
+          {summaryRecord && showSummary && !readingSummary && <ArticleSummary record={summaryRecord} />}
           {ready ? (
             <SentenceText
               paragraphs={doc.paragraphs}
