@@ -1,6 +1,8 @@
 # ReadAloud Studio
 
-`/studio` connects directly to the installed VoiceStudio 0.5.7 API through the existing server-side `/api/vs` proxy. API credentials stay in the ignored `apps/web/.env.local` file.
+`/studio` reaches the installed VoiceStudio 0.5.7 API through the server-side `/api/vs` proxy. Development credentials live in the ignored `apps/web/.env.local`; kind and AWS deployment helpers read the root `.env` and put server credentials in a Kubernetes Secret. The browser never receives the provider key.
+
+The [hosting explainer](kind-cluster-explainer.html) shows the ingress and storage paths. Tailscale Serve and Traefik route requests to the web server, which calls VoiceStudio over cluster networking or the tailnet. The private AWS target keeps VoiceStudio on the Mac and does not run a local speech server. See the [README](../README.md) for Terraform setup, cutover status, and recovery; the machine-specific measurements below remain dated observations.
 
 - **Clone:** upload or record a reference, optionally provide its transcript, and create a clone profile with multipart `POST /profiles`.
 - **Design:** `POST /design/describe` maps descriptions onto the model's supported attributes. Unsupported words are displayed before saving the recipe with `kind=design`, `vd_states`, and a deterministic seed.
