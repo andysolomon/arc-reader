@@ -1,11 +1,11 @@
 ---
 name: ship
-description: Commit the current worktree branch, merge it into main in the main checkout, and deploy the ReadAloud Docker app (ts.net:8449). Use when the user asks to "commit, merge and deploy", "ship it", "merge to main", or "update local main" for ReadAloud work.
+description: Commit the current worktree branch, merge it into main in the main checkout, and deploy the ReadAloud app (ts.net:8449) to the local kind cluster. Use when the user asks to "commit, merge and deploy", "ship it", "merge to main", or "update local main" for ReadAloud work.
 ---
 
 # Ship: commit, merge and deploy
 
-The user runs only the Docker Compose app at https://omarchy.tail1b9428.ts.net:8449, which is built from `main` in the main checkout. Work happens on a `t3/*` branch in a worktree. Shipping means getting that branch onto local `main` and confirming the container rebuilt.
+The user runs only the app at https://omarchy.tail1b9428.ts.net:8449. It runs in a local kind cluster (`deploy/kind`, context `kind-readaloud`, namespace `readaloud`), built from `main` in the main checkout. Work happens on a `t3/*` branch in a worktree. Shipping means getting that branch onto local `main` and confirming the new web pod is serving.
 
 Find the main checkout once and reuse it:
 
@@ -56,7 +56,7 @@ git -C "$MAIN" merge --no-ff -m "Merge <one-line summary of the change>" "$BRANC
 
 If the main checkout is dirty or not on `main`, stop and tell the user rather than stashing or switching. The stash stack is shared with other sessions.
 
-The `post-merge` hook in the shared `.git/hooks` starts `docker compose up -d --build` in the background and logs to `.git/docker-rebuild.log`.
+The `post-merge` hook in the shared `.git/hooks` starts `deploy/kind/deploy.sh` in the background (build the web image, load it into kind, roll out) and logs to `.git/docker-rebuild.log`.
 
 ## 5. Confirm the deploy
 
@@ -64,13 +64,16 @@ The `post-merge` hook in the shared `.git/hooks` starts `docker compose up -d --
 .claude/skills/ship/scripts/wait-deploy.sh "$MAIN"
 ```
 
-It waits for the rebuild of main's current commit, then prints the result, when the web container started, the served bundle, and the Tailscale URL status. A non-zero exit means the deploy did not complete.
+It waits for the deploy of main's current commit, then prints the result, the running web pod's image and start time, the served bundle, and the Tailscale URL status. A non-zero exit means the deploy did not complete.
 
-If the log says `skipped` or the build failed, rebuild by hand from the main checkout. The session may lack the docker group, so go through `newgrp`:
+If the deploy failed, read the end of `.git/docker-rebuild.log`, fix the cause, and deploy by hand from the main checkout (`deploy.sh` adds the docker group through `newgrp` itself when the session lacks it):
 
 ```sh
-cd "$MAIN" && echo "docker compose up -d --build" | newgrp docker
+cd "$MAIN" && deploy/kind/deploy.sh
+kubectl --context kind-readaloud -n readaloud get pods   # both pods should be Running and ready
 ```
+
+Never start Docker Compose alongside the cluster: both want ports 4179 and 3900, and the cluster mounts Compose's volumes.
 
 ## 6. Report
 

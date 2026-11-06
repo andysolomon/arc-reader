@@ -113,6 +113,18 @@ curl -X POST -H "Authorization: Bearer $VOICESTUDIO_API_KEY" -H "Content-Type: a
   -d '{"family":"tts","backend_id":"kittentts"}' http://127.0.0.1:3900/engines/select
 ```
 
+#### Or run it in a local kind cluster
+
+`deploy/kind` runs the same two services in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged.
+
+```sh
+deploy/kind/deploy.sh   # build the web image, load it into kind, roll out
+kubectl --context kind-readaloud -n readaloud get pods
+kubectl --context kind-readaloud -n readaloud logs deploy/web
+```
+
+Needs `kind` and `kubectl` on the PATH. The first run stops Compose (volumes are kept), creates the cluster, and loads the 17 GB VoiceStudio image into it, which takes a few minutes; later runs only rebuild and reload the web image. The node container restarts with Docker, like the Compose services did. Each app runs as exactly one pod and updates with `Recreate`: the shared library and the preparation queue are single-process state, so a second web pod would overwrite the first one's files and double-book the speech workers. A deploy therefore still drops the app for a few seconds while the new pod starts. Configuration changes in `.env` restart only the pods that use them. Don't run Compose alongside the cluster. To go back, `kind delete cluster --name readaloud` (the volumes stay) and `docker compose up -d`.
+
 ### 2. Develop against it
 
 To run the app with `npm run dev` against the Compose VoiceStudio, create `apps/web/.env.local` with the same key:
