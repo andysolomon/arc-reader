@@ -75,6 +75,7 @@ export function Reader() {
   useEffect(() => { void useLlm.getState().load(); }, []);
   // Saved summaries stay readable even without a key on this server.
   const summaryRecord = ready && record?.id === id && (llmReady || hasSummary(record)) ? record : null;
+  const summarizing = useSummaries((s) => !!(id && s.pending[id]));
   const toggleSummary = () => {
     if (!showSummary && summaryRecord && !hasSummary(summaryRecord)) void useSummaries.getState().request(summaryRecord);
     set("showSummary", !showSummary);
@@ -120,8 +121,8 @@ export function Reader() {
             </IconButton>
           )}
           {summaryRecord && !readingSummary && (
-            <IconButton label={showSummary ? "Hide summary" : "Summarize"} active={showSummary} onClick={toggleSummary}>
-              <Sparkles size={20} strokeWidth={1.5} />
+            <IconButton label={showSummary ? "Hide summary" : "Summarize"} active={showSummary} aria-busy={summarizing || undefined} onClick={toggleSummary}>
+              <Sparkles size={20} strokeWidth={1.5} className={summarizing ? "animate-pulse" : undefined} />
             </IconButton>
           )}
           {bp === "sm" ? (
@@ -151,6 +152,17 @@ export function Reader() {
             <span className="w-9 text-right font-mono tabular-nums">{progress}%</span>
           </div>
           <div className="reader-progress" aria-hidden><span style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div>
+        </div>
+      )}
+      {summarizing && (
+        <div role="status" data-summary-status aria-label="Summarizing" className="flex h-9 shrink-0 items-center gap-3 border-b border-line bg-bg px-4 text-[12px] text-fg2 animate-fadein sm:px-6">
+          <span aria-hidden className="flex h-3.5 items-end gap-[3px]">
+            <i className="block h-2 w-0.5 origin-bottom rounded-full bg-current animate-wave" />
+            <i className="block h-3.5 w-0.5 origin-bottom rounded-full bg-current animate-wave [animation-delay:-0.25s]" />
+            <i className="block h-2.5 w-0.5 origin-bottom rounded-full bg-current animate-wave [animation-delay:-0.5s]" />
+          </span>
+          <span>Summarizing</span>
+          <span className="summary-processing-track" aria-hidden><i /></span>
         </div>
       )}
       <div ref={scrollRef} className={cn("relative min-h-0 flex-1 overflow-y-auto px-6 pb-[200px]", focus ? "pt-16" : "pt-12")}>

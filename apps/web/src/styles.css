@@ -45,3 +45,45 @@ body,
   .reader-progress > span { transition: none; }
 }
 @keyframes listening { from { transform: scaleY(0.55); } to { transform: scaleY(1.2); } }
+
+/* Stays in the reader chrome while a summary is generated, including mid-playback. */
+.summary-processing-track {
+  position: relative;
+  width: 7.5rem;
+  height: 2px;
+  margin-left: auto;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--bg3);
+}
+.summary-processing-track > i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--fg2);
+  animation: summary-sweep 1.6s ease-in-out infinite;
+}
+@keyframes summary-sweep {
+  from { transform: translateX(-130%); }
+  to { transform: translateX(320%); }
+}
+
+.summary-draft {
+  position: relative;
+  overflow: hidden;
+}
+.summary-draft::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 15%, color-mix(in srgb, var(--fg) 16%, transparent) 50%, transparent 85%);
+  transform: translateX(-100%);
+  animation: summary-sheen 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes summary-sheen {
+  to { transform: translateX(100%); }
+}
