@@ -8,8 +8,8 @@ name: readaloud
 nodes:
   - role: control-plane
     extraPortMappings:
-      - { containerPort: 30179, hostPort: 4179, listenAddress: 127.0.0.1, protocol: TCP } # web
-      - { containerPort: 30900, hostPort: 3900, listenAddress: 127.0.0.1, protocol: TCP } # VoiceStudio
+      - { containerPort: 30179, hostPort: 4179, listenAddress: 127.0.0.1, protocol: TCP } # Traefik → web
+      - { containerPort: 30900, hostPort: 3900, listenAddress: 127.0.0.1, protocol: TCP } # Traefik → VoiceStudio
     extraMounts:
       - { hostPath: /var/lib/docker/volumes/readaloud_library-data/_data, containerPath: /data/library }
       - { hostPath: /var/lib/docker/volumes/readaloud_preparation-data/_data, containerPath: /data/preparations }
