@@ -42,8 +42,13 @@ describe("shared server library", () => {
     expect(await new LibraryService(directory).sync({ changes: [{ kind: "doc", record: doc("a", 100) }, { kind: "position", record: position("a", 100) }] })).toEqual({ docs: [], positions: [], deleted: ["a"] });
   });
 
+  it("stores the completed reading count on positions", async () => {
+    expect((await service.sync({ changes: [{ kind: "doc", record: doc("a") }, { kind: "position", record: { ...position("a"), reads: 2 } }] })).positions[0].reads).toBe(2);
+  });
+
   it("validates the entire batch before writing and leaves damaged storage intact", async () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: doc("a") }, { kind: "position", record: { ...position("a"), fraction: 2 } }] })).toThrow("Invalid library change");
+    expect(() => service.sync({ changes: [{ kind: "doc", record: doc("a") }, { kind: "position", record: { ...position("a"), reads: 1.5 } }] })).toThrow("Invalid library change");
     expect((await service.sync({ changes: [] })).docs).toEqual([]);
     await writeFile(join(directory, "library.json"), "damaged");
     await expect(service.sync({ changes: [{ kind: "doc", record: doc("b") }] })).rejects.toThrow();

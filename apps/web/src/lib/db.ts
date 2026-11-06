@@ -30,6 +30,8 @@ export interface PositionRecord {
   fraction: number;
   /** total duration estimate at 1× */
   total: number;
+  /** Complete readings so far; survives rereads, which restart the fraction. */
+  reads?: number;
   updatedAt: number;
 }
 
@@ -125,12 +127,16 @@ export const docs = {
 export const positions = {
   get: async (docId: string) => (await db()).get("positions", docId),
   all: async () => (await db()).getAll("positions"),
-  async put(rec: PositionRecord) {
+  /** Save a listening position. `completed` counts one more full reading; the count otherwise carries over. */
+  async put(rec: PositionRecord, opts: { completed?: boolean } = {}) {
     const d = await db();
     const tx = d.transaction(["docs", "positions", "outbox"], "readwrite");
     if (await tx.objectStore("docs").get(rec.docId)) {
-      await tx.objectStore("positions").put(rec);
-      await tx.objectStore("outbox").put(pendingChange(`position:${rec.docId}`, { kind: "position", record: rec }));
+      const previous = await tx.objectStore("positions").get(rec.docId);
+      const reads = (rec.reads ?? previous?.reads ?? 0) + (opts.completed ? 1 : 0);
+      const record: PositionRecord = reads > 0 ? { ...rec, reads } : rec;
+      await tx.objectStore("positions").put(record);
+      await tx.objectStore("outbox").put(pendingChange(`position:${rec.docId}`, { kind: "position", record }));
     }
     await tx.done;
     notifyLibrary();

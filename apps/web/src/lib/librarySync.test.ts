@@ -129,6 +129,20 @@ describe("offline library synchronization", () => {
     expect(await d.count("outbox")).toBe(0);
   });
 
+  it("counts each completed reading, keeps the count when a reread restarts, and syncs it", async () => {
+    await docs.put(doc("a"));
+    await positions.put(position("a", 10));
+    expect((await positions.get("a"))?.reads).toBeUndefined();
+    await positions.put({ ...position("a", 20), fraction: 1 }, { completed: true });
+    expect((await positions.get("a"))?.reads).toBe(1);
+    await positions.put({ ...position("a", 30), index: 0, fraction: 0 });
+    expect(await positions.get("a")).toMatchObject({ fraction: 0, reads: 1 });
+    await positions.put({ ...position("a", 40), fraction: 1 }, { completed: true });
+    expect((await positions.get("a"))?.reads).toBe(2);
+    await syncLibrary();
+    expect((await service.sync({ changes: [] })).positions[0]).toMatchObject({ reads: 2, updatedAt: 40 });
+  });
+
   it("recovers newer local edits and positions that have no outgoing queue entry", async () => {
     await service.sync({ changes: [{ kind: "doc", record: doc("a", 10) }, { kind: "position", record: position("a", 10) }] });
     const d = await db();
