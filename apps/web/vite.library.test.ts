@@ -71,6 +71,20 @@ describe("shared server library", () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
   });
 
+  it("stores catalogue metadata and categories and rejects malformed ones", async () => {
+    const meta = { url: "https://example.com/a", author: "Ada", published: "2026-10-01", site: "Example", description: "About a.", notes: "Cite in ch. 2" };
+    const category = { name: "AI agents", by: "jev" as const, confidence: 0.82, model: "jev-1.14.0", at: 3 };
+    const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), meta, category } }] });
+    expect(result.docs[0]).toMatchObject({ meta, category });
+    for (const record of [
+      { ...doc("b"), meta: { url: 5 } },
+      { ...doc("b"), meta: { toString: "x" } },
+      { ...doc("b"), category: { ...category, name: " " } },
+      { ...doc("b"), category: { ...category, by: "llm" } },
+      { ...doc("b"), category: { ...category, confidence: 1.5 } },
+    ]) expect(() => service.sync({ changes: [{ kind: "doc", record: record as unknown as DocRecord }] })).toThrow("Invalid library change");
+  });
+
   it("serves JSON sync over HTTP and rejects cross-site writes and malformed requests", async () => {
     const handler = libraryMiddleware(service);
     server = createServer((req, res) => { req.url = req.url?.replace("/api/library", ""); handler(req, res, () => {}); });

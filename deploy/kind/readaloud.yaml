@@ -1,0 +1,143 @@
+# ReadAloud in the kind cluster (deploy/kind/cluster.yaml). Applied by deploy.sh, which
+# fills in the __PLACEHOLDERS__ and creates the readaloud-config ConfigMap and
+# readaloud-secrets Secret from the root .env. The Services are ClusterIP; the host
+# reaches them through the Ingress objects and Traefik (traefik.yaml).
+#
+# Both apps run exactly one pod and update with Recreate: the shared library and the
+# preparation queue live in one server process and its files, and VoiceStudio owns its
+# model directory. Two copies at once would overwrite each other's state.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: readaloud
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: readaloud
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+      # Changes when the configuration or secrets change, so the pod restarts to read them.
+      annotations: { readaloud/config: "__WEB_CONFIG__" }
+    spec:
+      containers:
+        - name: web
+          image: __WEB_IMAGE__
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 4173 }]
+          envFrom:
+            - configMapRef: { name: readaloud-config }
+            - secretRef: { name: readaloud-secrets }
+          env:
+            - { name: LIBRARY_DATA_DIR, value: /app/library }
+            - { name: PREPARATION_DATA_DIR, value: /app/preparations }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          volumeMounts:
+            - { name: library, mountPath: /app/library }
+            - { name: preparations, mountPath: /app/preparations }
+      volumes:
+        - name: library
+          hostPath: { path: /data/library, type: Directory }
+        - name: preparations
+          hostPath: { path: /data/preparations, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: readaloud
+spec:
+  selector: { app: web }
+  ports: [{ name: http, port: 4173, targetPort: http }]
+---
+# 127.0.0.1:4179 on the host, through Traefik (traefik.yaml).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  namespace: readaloud
+  annotations: { traefik.ingress.kubernetes.io/router.entrypoints: web }
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths: [{ path: /, pathType: Prefix, backend: { service: { name: web, port: { name: http } } } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voicestudio
+  namespace: readaloud
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: voicestudio }
+  template:
+    metadata:
+      labels: { app: voicestudio }
+      annotations: { readaloud/config: "__VOICESTUDIO_CONFIG__" }
+    spec:
+      containers:
+        - name: voicestudio
+          image: __VOICESTUDIO_IMAGE__
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 3900 }]
+          env:
+            - name: OMNIVOICE_API_KEY
+              valueFrom: { secretKeyRef: { name: readaloud-secrets, key: VOICESTUDIO_API_KEY } }
+            - { name: OMNIVOICE_SERVER_MODE, value: "1" }
+            - { name: OMNIVOICE_ANALYTICS_DISABLED, value: "1" }
+            - { name: OMNIVOICE_DATA_DIR, value: /app/omnivoice_data }
+            # The CPU performance profile otherwise picks the smallest installed Whisper on every start.
+            - name: ASR_MODEL_FASTER
+              valueFrom: { configMapKeyRef: { name: readaloud-config, key: VOICESTUDIO_ASR_MODEL } }
+          # Loading models can take minutes on this CPU.
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          volumeMounts:
+            - { name: data, mountPath: /app/omnivoice_data }
+      volumes:
+        - name: data
+          hostPath: { path: /data/voicestudio, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voicestudio
+  namespace: readaloud
+spec:
+  selector: { app: voicestudio }
+  ports: [{ name: http, port: 3900, targetPort: http }]
+---
+# 127.0.0.1:3900 on the host, for local dev servers and scripts. The web pod skips
+# Traefik and calls http://voicestudio:3900 directly.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: voicestudio
+  namespace: readaloud
+  annotations: { traefik.ingress.kubernetes.io/router.entrypoints: voicestudio }
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths: [{ path: /, pathType: Prefix, backend: { service: { name: voicestudio, port: { name: http } } } }]

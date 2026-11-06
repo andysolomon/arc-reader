@@ -113,6 +113,19 @@ curl -X POST -H "Authorization: Bearer $VOICESTUDIO_API_KEY" -H "Content-Type: a
   -d '{"family":"tts","backend_id":"kittentts"}' http://127.0.0.1:3900/engines/select
 ```
 
+#### Or run it in a local kind cluster
+
+`deploy/kind` runs the same two services in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged. Both host ports lead to a [Traefik](https://doc.traefik.io/traefik/) ingress controller (`deploy/kind/traefik.yaml`, namespace `traefik`), and the Ingress objects in `deploy/kind/readaloud.yaml` route each port to its app's ClusterIP Service.
+
+```sh
+deploy/kind/deploy.sh   # build the web image, load it into kind, roll out
+kubectl --context kind-readaloud -n readaloud get pods
+kubectl --context kind-readaloud -n readaloud logs deploy/web
+kubectl --context kind-readaloud -n traefik logs deploy/traefik   # routing errors, 404s while a pod restarts
+```
+
+Needs `kind` and `kubectl` on the PATH. The first run stops Compose (volumes are kept), creates the cluster, and loads the 17 GB VoiceStudio image into it, which takes a few minutes; later runs only rebuild and reload the web image. The node container restarts with Docker, like the Compose services did. Each app runs as exactly one pod and updates with `Recreate`: the shared library and the preparation queue are single-process state, so a second web pod would overwrite the first one's files and double-book the speech workers. A deploy therefore still drops the app for a few seconds while the new pod starts. Configuration changes in `.env` restart only the pods that use them. Don't run Compose alongside the cluster. To go back, `kind delete cluster --name readaloud` (the volumes stay) and `docker compose up -d`.
+
 ### 2. Develop against it
 
 To run the app with `npm run dev` against the Compose VoiceStudio, create `apps/web/.env.local` with the same key:
@@ -222,6 +235,16 @@ It uses [OpenCode Go](https://opencode.ai/docs/go/). Paste your Go API key in **
 - **GLM 5.3** (`glm-5.3`): about a minute and about $0.20 for the same essay, against GLM 5.3's $15 monthly Go limit (shared with any coding use).
 
 Go is designed for coding agents and OpenCode monitors its traffic for abuse. Occasional summaries are light, but if that is a concern, point `LLM_URL` at Zen and pay per token. Article text is sent to OpenCode and the model provider.
+
+## Library catalogue
+
+Each document carries a catalogue record for later research. The Reader's **Details** button (books icon, in the header) opens it above the text: title, the original link (with a button to open it), author, published date, site, category, summary status, the page's description, and your notes. Fields save when they lose focus (Enter for one-line fields, Escape discards) and are shared through library sync. **Copy citation** copies `Author (Date). Title. Site. Link`.
+
+Articles fetched from a URL, the clipboard, or the share target keep their link, and their author, published date (as `YYYY-MM-DD` when parseable), site name, and description are read from the page's meta tags and Schema.org JSON-LD. Documents added before this keep only their domain; paste the link into Details.
+
+Categories come from [Jev](https://docs.typesafe.ai), TypeSafe's classification model. Jev answers one Choice question over the library's shelves (`CATEGORIES` in `src/lib/category.ts`, plus any category you have typed yourself) from the title, link, site, author, description, summary, and the first 24,000 characters of the text, and returns its pick with a confidence score. New documents are filed in the background as they are added; **Ask Jev** in Details refiles one, and the Library's **File N uncategorized with Jev** files the rest. Typing a category in Details overrides Jev and is never replaced by background filing. The Library filters by category and searches titles, links, authors, sites, categories, descriptions, and notes.
+
+Paste a TypeSafe API key in **Settings → Library** (from console.typesafe.ai/keys). Like the OpenCode key, the server checks it, saves it as `typesafe.json` (mode 600) in `LIBRARY_DATA_DIR`, and only ever shows the browser its last four characters; a saved key takes precedence over `TYPESAFE_API_KEY`. `/api/jev` forwards `POST /v1/systemone` only, to `TYPESAFE_URL` (default `https://api.typesafe.ai`). Without a key, documents can still be categorized by hand.
 
 ## Themes
 
