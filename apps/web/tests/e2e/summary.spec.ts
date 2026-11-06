@@ -1,6 +1,32 @@
 import { test, expect } from "./fixtures";
 import { composeAndListen } from "./helpers";
 
+test("shows summarizing in the reader chrome while playback continues", async ({ page }) => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/llm/v1/chat/completions", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  try {
+    await composeAndListen(page);
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+    await page.getByRole("button", { name: "Summarize" }).click();
+    const status = page.getByRole("status", { name: "Summarizing" });
+    await expect(status).toBeVisible();
+    // Playback follows the sentence, so the summary panel can sit above the viewport.
+    // The chrome status has to stay on screen anyway.
+    await page.locator("[data-screen=reader] .overflow-y-auto").evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await expect(status).toBeInViewport();
+    await expect(page.getByRole("region", { name: "Summary" })).toContainText("Summarizing");
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+  } finally {
+    release();
+  }
+  await expect(page.getByRole("region", { name: "Summary" })).toContainText("A stub summary of the main point.");
+  await expect(page.getByRole("status", { name: "Summarizing" })).toHaveCount(0);
+});
+
 test("summarizes a document once, keeps it across reloads, and hides it", async ({ page }) => {
   let calls = 0;
   page.on("request", (r) => { if (r.url().includes("/api/llm/v1/chat/completions")) calls++; });
