@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 # Copy every VoiceStudio voice from the Mac mini (the source of truth) into the
-# local Compose VoiceStudio, keeping profile ids and reference audio byte-identical
-# so the preparation scheduler accepts Omarchy for the same voices.
+# local VoiceStudio (the kind cluster's pod, or the Compose container), keeping profile
+# ids and reference audio byte-identical so the preparation scheduler accepts Omarchy
+# for the same voices.
 #   scripts/sync-voices.sh [ssh-host=mini] [container=readaloud-voicestudio-1]
 # Persona import can't be used: it always assigns a new id. Run it after creating
 # or editing a voice on the Mac. Voices that exist only here are listed, never deleted.
 set -euo pipefail
 HOST="${1:-mini}"; CONTAINER="${2:-readaloud-voicestudio-1}"
+# The kind cluster (deploy/kind) replaces Compose when it exists.
+if [ -z "${2:-}" ] && kubectl --context kind-readaloud -n readaloud get deployment voicestudio >/dev/null 2>&1; then
+  target() { kubectl --context kind-readaloud -n readaloud exec -i deployment/voicestudio -- "$@"; }
+else
+  target() { docker exec -i "$CONTAINER" "$@"; }
+fi
 SOURCE='Library/Application Support/OmniVoice'
 TARGET=/app/omnivoice_data
 
 # Audio first, so no row ever points at a missing file. Same-named files are replaced.
-ssh -n "$HOST" "cd \"\$HOME/$SOURCE/voices\" && COPYFILE_DISABLE=1 tar --no-xattrs -cf - ." | docker exec -i "$CONTAINER" tar xf - --no-same-owner --no-overwrite-dir -C "$TARGET/voices"
+ssh -n "$HOST" "cd \"\$HOME/$SOURCE/voices\" && COPYFILE_DISABLE=1 tar --no-xattrs -cf - ." | target tar xf - --no-same-owner --no-overwrite-dir -C "$TARGET/voices"
 
 ssh -n "$HOST" "sqlite3 -json \"\$HOME/$SOURCE/omnivoice.db\" 'select * from voice_profiles'" \
-  | docker exec -i "$CONTAINER" python -c '
+  | target python -c '
 import json, sqlite3, sys
 rows = json.load(sys.stdin)
 db = sqlite3.connect(sys.argv[1])
