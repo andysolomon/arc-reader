@@ -47,6 +47,9 @@ if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
 fi
 
 step "Loading images into the cluster"
+# kind stages images as tar files; /tmp is too small for VoiceStudio's 17 GB image.
+export TMPDIR="${XDG_CACHE_HOME:-$HOME/.cache}/readaloud-kind"
+mkdir -p "$TMPDIR"
 if ! docker exec "$node" crictl inspecti "$voicestudio_image" >/dev/null 2>&1; then
   docker image inspect "$voicestudio_image" >/dev/null 2>&1 || docker pull "$voicestudio_image"
   kind load docker-image --name "$cluster" "$voicestudio_image"
