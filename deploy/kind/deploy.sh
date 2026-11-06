@@ -74,7 +74,8 @@ secrets=$(k create secret generic readaloud-secrets --dry-run=client -o yaml \
   --from-literal=VOICESTUDIO_SECONDARY_API_KEY="${VOICESTUDIO_SECONDARY_API_KEY:-}" \
   --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
   --from-literal=FISH_API_KEY="${FISH_API_KEY:-}" \
-  --from-literal=LLM_API_KEY="${LLM_API_KEY:-}")
+  --from-literal=LLM_API_KEY="${LLM_API_KEY:-}" \
+  --from-literal=TYPESAFE_API_KEY="${TYPESAFE_API_KEY:-}")
 printf '%s\n' "$config" | k apply -f - >/dev/null
 printf '%s\n' "$secrets" | k apply -f - >/dev/null
 # Pods only read configuration at start: restart them when theirs changes.

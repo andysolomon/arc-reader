@@ -49,6 +49,18 @@ createServer(async (req, res) => {
     const content = /Summarize/.test(j.messages?.[0]?.content ?? "") ? "A stub summary of the main point.\n\nOne key idea from the article." : "Stub reply.";
     return json(res, 200, { model: j.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }] });
   }
+  if (url.pathname === "/v1/systemone" && req.method === "POST") {
+    // TypeSafe's Jev: answer every Choice with its last option ("Personal writing" for library shelves).
+    let body = "";
+    for await (const c of req) body += c;
+    const j = JSON.parse(body);
+    const answers = Object.fromEntries(Object.entries(j.questions ?? {}).map(([id, q]) => {
+      const options = Object.keys(q.criteria ?? {});
+      const choice = options.includes("Personal writing") ? "Personal writing" : options.at(-1);
+      return [id, { type: "choice", choice, confidence: 0.74, probabilities: Object.fromEntries(options.map((o) => [o, o === choice ? 0.8 : 0.2 / Math.max(1, options.length - 1)])) }];
+    }));
+    return json(res, 200, { model: "jev-1.14.0", answers, usage: { input_tokens: body.length / 4, output_tokens: 1 } });
+  }
   if (url.pathname === "/v1/audio/speech" && req.method === "POST") {
     let body = "";
     for await (const c of req) body += c;

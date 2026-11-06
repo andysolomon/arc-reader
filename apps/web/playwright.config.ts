@@ -70,6 +70,8 @@ export default defineConfig({
         OPENAI_API_KEY: LIVE ? process.env.OPENAI_API_KEY || localEnv.OPENAI_API_KEY || "" : "oa-test-key",
         LLM_URL: LIVE ? process.env.LLM_URL || localEnv.LLM_URL || "https://opencode.ai/zen/go" : `http://127.0.0.1:${openaiPort}`,
         LLM_API_KEY: LIVE ? process.env.LLM_API_KEY || localEnv.LLM_API_KEY || "" : "oa-test-key",
+        TYPESAFE_URL: LIVE ? process.env.TYPESAFE_URL || localEnv.TYPESAFE_URL || "https://api.typesafe.ai" : `http://127.0.0.1:${openaiPort}`,
+        TYPESAFE_API_KEY: LIVE ? process.env.TYPESAFE_API_KEY || localEnv.TYPESAFE_API_KEY || "" : "oa-test-key",
         // Local credentials must not enable a real provider in the stub suite.
         VITE_FISH_BASE: LIVE ? process.env.VITE_FISH_BASE || localEnv.VITE_FISH_BASE || "" : "",
         FISH_API_KEY: LIVE ? process.env.FISH_API_KEY || localEnv.FISH_API_KEY || "" : "",
