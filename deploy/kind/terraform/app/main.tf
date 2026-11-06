@@ -42,4 +42,5 @@ module "readaloud" {
   openai_api_key                   = local.env.openai_api_key
   fish_api_key                     = local.env.fish_api_key
   llm_api_key                      = local.env.llm_api_key
+  typesafe_api_key                 = local.env.typesafe_api_key
 }
