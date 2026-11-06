@@ -33,6 +33,8 @@ export class PreparationService {
   private active = new Map<string, PreparationWorker>();
   private changes = new Map<string, Set<() => void>>();
   private scheduling = new Map<string, Promise<void>>();
+  /** Whether the overflow machine has each queued reading's voice; absent until discovery answers. */
+  private overflow = new Map<string, boolean>();
   private retryTimer?: ReturnType<typeof setTimeout>;
   private uploaded = new Set<string>();
   private discovery: PreparationWorkers;
@@ -79,8 +81,13 @@ export class PreparationService {
   }
   private status(job: Job): PreparationStatus {
     const worker = this.discovery.workers.find((worker) => worker.id === job.workerId);
-    return { id: job.id, state: job.state, done: job.done, total: job.total,
-      queued: job.state === "running" && !this.active.has(job.id),
+    const queued = job.state === "running" && !this.active.has(job.id);
+    // A reading kept on its original machine, or one only the Mac has the voice for,
+    // waits for that machine even when the other one is free.
+    const waitingFor = !queued ? undefined : worker
+      ? worker.name : this.discovery.workers.length > 1 && this.overflow.get(job.id) === false ? this.discovery.workers[0].name : undefined;
+    return { id: job.id, state: job.state, done: job.done, total: job.total, queued,
+      ...(waitingFor ? { waitingFor } : {}),
       ...(worker && (job.state !== "running" || this.active.has(job.id)) ? { worker: worker.name } : {}),
       ...(job.error ? { error: job.error } : {}) };
   }
@@ -106,7 +113,13 @@ export class PreparationService {
   }
 
   private schedule() {
-    // Discovery on a disconnected secondary must never stall the primary.
+    // Discovery on a disconnected secondary must never stall the primary, so the
+    // primary only reads answers that have already arrived.
+    const secondary = this.discovery.workers.find((worker) => worker.id !== "primary");
+    for (const job of this.jobs.values()) {
+      if (!secondary || job.state !== "running" || job.workerId || this.active.has(job.id)) continue;
+      void this.discovery.supports(secondary, job.requests).then((supported) => { this.overflow.set(job.id, supported); });
+    }
     for (const worker of this.discovery.workers) {
       const pending = (this.scheduling.get(worker.id) || Promise.resolve())
         .then(() => this.assign(worker)).finally(() => this.retryDiscovery());
@@ -118,13 +131,18 @@ export class PreparationService {
     if ([...this.active.values()].some((active) => active.id === worker.id)) return;
     const pending = [...this.jobs.values()].filter((job) => job.state === "running" && !this.active.has(job.id))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    // The Mac takes the oldest reading only it can prepare before ones the secondary
+    // can take while the Mac is busy. Unknown support keeps arrival order.
+    if (worker.id === "primary") pending.sort((a, b) => Number(this.overflow.get(a.id) !== false) - Number(this.overflow.get(b.id) !== false));
     for (const job of pending) {
       // Keep partial audio on its original machine after a web restart.
       if (job.workerId && job.workerId !== worker.id) continue;
       // New readings belong to the primary whenever it is free. The secondary
       // is overflow capacity; discovery completion order must not decide priority.
       if (worker.id !== "primary" && !job.workerId && !this.primaryBusy()) return;
-      if (!await this.discovery.supports(worker, job.requests)) continue;
+      const supported = await this.discovery.supports(worker, job.requests);
+      if (worker.id !== "primary" && !job.workerId) this.overflow.set(job.id, supported);
+      if (!supported) continue;
       if (job.state !== "running" || this.active.has(job.id)) continue;
       // The primary may have finished while secondary discovery was in flight.
       if (worker.id !== "primary" && !job.workerId && !this.primaryBusy()) return;

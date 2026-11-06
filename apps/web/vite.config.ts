@@ -8,6 +8,7 @@ import { siteFavicons } from "./vite.favicon";
 import { audioPreparation } from "./vite.prepare";
 import { sharedLibrary } from "./vite.library";
 import { SpeechActivity } from "./vite.speech-activity";
+import { llm } from "./vite.llm";
 
 export default defineConfig(({ mode }) => {
   // Server-side only (no VITE_ prefix): never reaches the bundle.
@@ -23,6 +24,7 @@ export default defineConfig(({ mode }) => {
     siteFavicons(),
     audioPreparation(env, activity),
     sharedLibrary(env),
+    llm(env),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icons/*.svg", "icons/*.png", "splash.svg"],

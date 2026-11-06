@@ -13,6 +13,9 @@ services:
       OMNIVOICE_SERVER_MODE: "1"
       OMNIVOICE_ANALYTICS_DISABLED: "1"
       OMNIVOICE_DATA_DIR: /app/omnivoice_data
+      # The CPU performance profile otherwise picks the smallest installed Whisper on
+      # every start. Turbo matches the Mac's MLX Turbo; install it from the Model Manager.
+      ASR_MODEL_FASTER: ${VOICESTUDIO_ASR_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
     volumes:
       - voicestudio-data:/app/omnivoice_data
 
@@ -47,6 +50,8 @@ services:
       VOICESTUDIO_SECONDARY_API_KEY: ${VOICESTUDIO_SECONDARY_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       FISH_API_KEY: ${FISH_API_KEY:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_URL: ${LLM_URL:-https://opencode.ai/zen/go}
       PREPARATION_DATA_DIR: /app/preparations
       PREPARATION_YIELD_MS: ${PREPARATION_YIELD_MS:-}
       LIBRARY_DATA_DIR: /app/library

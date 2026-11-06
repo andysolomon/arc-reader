@@ -68,6 +68,8 @@ export default defineConfig({
         VITE_OPENAI_TTS_MODEL: "gpt-4o-mini-tts",
         OPENAI_URL: LIVE ? process.env.OPENAI_URL || localEnv.OPENAI_URL || "https://api.openai.com" : `http://127.0.0.1:${openaiPort}`,
         OPENAI_API_KEY: LIVE ? process.env.OPENAI_API_KEY || localEnv.OPENAI_API_KEY || "" : "oa-test-key",
+        LLM_URL: LIVE ? process.env.LLM_URL || localEnv.LLM_URL || "https://opencode.ai/zen/go" : `http://127.0.0.1:${openaiPort}`,
+        LLM_API_KEY: LIVE ? process.env.LLM_API_KEY || localEnv.LLM_API_KEY || "" : "oa-test-key",
         // Local credentials must not enable a real provider in the stub suite.
         VITE_FISH_BASE: LIVE ? process.env.VITE_FISH_BASE || localEnv.VITE_FISH_BASE || "" : "",
         FISH_API_KEY: LIVE ? process.env.FISH_API_KEY || localEnv.FISH_API_KEY || "" : "",

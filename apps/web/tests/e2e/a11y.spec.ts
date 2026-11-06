@@ -25,6 +25,15 @@ for (const theme of THEMES) {
       });
     }
 
+    test("reader with summary", async ({ page }) => {
+      await composeAndListen(page);
+      await page.keyboard.press("Space"); // paused: stable DOM for the scan
+      await page.getByRole("button", { name: "Summarize" }).click();
+      await expect(page.getByRole("region", { name: "Summary" })).toContainText("A stub summary of the main point.");
+      const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+    });
+
     test("reader with player and menu", async ({ page }) => {
       await composeAndListen(page);
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);

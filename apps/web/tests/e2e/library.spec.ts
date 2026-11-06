@@ -104,7 +104,7 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
 
 test("shows live server progress before audio is downloaded, then distinguishes saving from prepared audio", async ({ page }) => {
   await seedLibrary(page, [null]);
-  const status = { id: "", state: "running", done: 0, total: 2, queued: true, worker: undefined as string | undefined };
+  const status = { id: "", state: "running", done: 0, total: 2, queued: true, worker: undefined as string | undefined, waitingFor: undefined as string | undefined };
   let submissions = 0;
   await page.route("**/api/preparations", async (route) => {
     if (route.request().method() !== "POST") return route.fallback();
@@ -127,8 +127,11 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     await page.getByRole("button", { name: "Prepare selected" }).click();
     await page.getByRole("dialog", { name: "Prepare audio", exact: true }).getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
     await expect(page.getByRole("img", { name: "Bella: 0% generated · 0/2 passages · Queued", exact: true })).toBeVisible();
+    // A voice only the Mac has names the machine it is waiting for.
+    status.waitingFor = "Mac";
+    await expect(page.getByRole("img", { name: "Bella: 0% generated · 0/2 passages · Waiting for Mac", exact: true })).toBeVisible();
 
-    Object.assign(status, { done: 1, queued: false, worker: "Mac" });
+    Object.assign(status, { done: 1, queued: false, worker: "Mac", waitingFor: undefined });
     const live = page.getByRole("img", { name: "Bella: 50% generated · 1/2 passages · Preparing on Mac", exact: true });
     await expect(live).toBeVisible();
     const halfRing = await live.locator("circle").nth(1).getAttribute("stroke-dasharray");

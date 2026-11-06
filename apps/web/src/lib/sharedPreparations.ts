@@ -30,7 +30,7 @@ export function sharedPreparationJobs(records: DocRecord[], catalogue: SharedPre
         voice: { ...voiceFor(reading.voice), engine: reading.engine },
         openaiModel: "", wordTimings: false,
         status: reading.state === "done" ? "ready" : reading.state === "cancelled" ? "cancelled" : reading.state === "error" ? "error" : reading.queued ? "queued" : "preparing",
-        done: reading.done, total: reading.total, worker: reading.worker,
+        done: reading.done, total: reading.total, worker: reading.worker, waitingFor: reading.waitingFor,
         message: reading.error || (reading.state === "done" && reading.available.length < reading.total ? "Some audio remains on the original device" : undefined),
       });
     }

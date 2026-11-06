@@ -25,6 +25,8 @@ export interface PreparationJob {
   total: number;
   message?: string;
   worker?: string;
+  /** Set when a queued reading can only run on one machine. */
+  waitingFor?: string;
   serverId?: string;
   remote?: boolean;
 }
@@ -44,17 +46,19 @@ interface PreparationState {
   cancelDocument: (docId: string) => void;
   cancelAll: () => void;
   dismissFinished: () => void;
+  /** Finished server readings cleared from the queue; persisted so sync doesn't bring them back. */
+  hiddenShared: string[];
   sharedError: string | null;
   sharing: number;
   refreshShared: () => Promise<void>;
 }
 
 let sharedRefresh: Promise<void> | null = null;
-const hiddenSharedJobs = new Set<string>();
 const sameReading = (a: PreparationJob, b: PreparationJob) => a.docId === b.docId && a.voice.id === b.voice.id && a.voice.engine === b.voice.engine;
 
 export const usePreparation = create<PreparationState>()(persist((set, get) => ({
   jobs: [],
+  hiddenShared: [],
   sharedError: null,
   sharing: 0,
   async refreshShared() {
@@ -64,15 +68,18 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
       try {
         const catalogue = await refreshPreparationCatalog();
         const remote = sharedPreparationJobs(await docs.all(), catalogue, getVoice);
+        const hidden = new Set(get().hiddenShared);
         let jobs = get().jobs.filter((job) => !job.remote);
         for (const job of remote) {
-          if (hiddenSharedJobs.has(job.id) && !isPreparing(job)) continue;
+          if (hidden.has(job.id) && !isPreparing(job)) continue;
           const local = jobs.find((other) => sameReading(job, other));
           if (local && (isPreparing(local) || (local.serverId === job.serverId && local.status === job.status))) continue;
           jobs = jobs.filter((other) => !sameReading(job, other));
           jobs.push(job);
         }
-        set({ jobs, sharedError: null, sharing: sharedAudioRemaining() });
+        // Forget dismissals for readings the server no longer lists.
+        const hiddenShared = remote.filter((job) => hidden.has(job.id)).map((job) => job.id);
+        set({ jobs, hiddenShared, sharedError: null, sharing: sharedAudioRemaining() });
       } catch (error) {
         set({ sharedError: (error as Error).message });
       }
@@ -110,15 +117,15 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
     for (const job of get().jobs) if (isPreparing(job)) get().cancel(job.id);
   },
   dismissFinished() {
-    for (const job of get().jobs) if (job.remote && !isPreparing(job)) hiddenSharedJobs.add(job.id);
-    set({ jobs: get().jobs.filter(isPreparing) });
+    const cleared = get().jobs.filter((job) => job.remote && !isPreparing(job)).map((job) => job.id);
+    set({ jobs: get().jobs.filter(isPreparing), hiddenShared: [...new Set([...get().hiddenShared, ...cleared])] });
   },
 }), {
   name: "readaloud:preparation-queue",
-  partialize: ({ jobs }) => ({ jobs: jobs.filter((job) => !job.remote) }),
+  partialize: ({ jobs, hiddenShared }) => ({ jobs: jobs.filter((job) => !job.remote), hiddenShared }),
   merge: (persisted, current) => {
-    const { jobs = [] } = (persisted ?? {}) as { jobs?: PreparationJob[] };
-    return { ...current, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined } : job) };
+    const { jobs = [], hiddenShared = [] } = (persisted ?? {}) as { jobs?: PreparationJob[]; hiddenShared?: string[] };
+    return { ...current, hiddenShared, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined, waitingFor: undefined } : job) };
   },
   // Local storage hydrates synchronously, before usePreparation is initialized.
   // Re-enter the worker afterwards; server jobs reconnect and saved audio is reused.
@@ -141,7 +148,7 @@ function drain() {
     const controller = new AbortController();
     active.set(job.id, { controller, provider });
     counts.set(provider, (counts.get(provider) || 0) + 1);
-    update(job.id, { status: background ? "queued" : "preparing", worker: undefined });
+    update(job.id, { status: background ? "queued" : "preparing", worker: undefined, waitingFor: undefined });
     void run(job, controller.signal).finally(() => {
       active.delete(job.id);
       drain();
@@ -171,10 +178,10 @@ async function run(job: PreparationJob, signal: AbortSignal) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {
-        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker, serverId: status?.id });
+        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor, serverId: status?.id });
       }, signal);
       signal.throwIfAborted();
-      update(job.id, { status: "saving", worker: undefined });
+      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined });
     }
     for (const passage of passages) {
       signal.throwIfAborted();
@@ -196,7 +203,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     update(job.id, { status: "ready" });
   } catch (error) {
     if (!signal.aborted && (isTransientPreparationError(error) || error instanceof ApiUnreachable || error instanceof ApiBusy)) {
-      update(job.id, { status: "queued", worker: undefined, message: "Waiting for the speech server to reconnect…" });
+      update(job.id, { status: "queued", worker: undefined, waitingFor: undefined, message: "Waiting for the speech server to reconnect…" });
       await new Promise<void>((resolve) => {
         const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
         const timer = setTimeout(finish, 1500);

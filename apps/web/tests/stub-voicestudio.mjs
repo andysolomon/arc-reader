@@ -42,6 +42,13 @@ createServer(async (req, res) => {
   if (url.pathname === "/profiles") return json(res, 200, PROFILES.map(p => ({ ...p, kind: "clone" })));
   if (url.pathname === "/v1/models") return json(res, 200, { object: "list", data: ENGINES.filter((e) => e.available).map((e) => ({ id: e.id, object: "model", owned_by: "voicestudio" })) });
   if (url.pathname === "/v1/audio/voices") return json(res, 200, { voices: PROFILES.map((p) => ({ ...p, voice_id: p.id })), engines: ENGINES });
+  if (url.pathname === "/v1/chat/completions" && req.method === "POST") {
+    let body = "";
+    for await (const c of req) body += c;
+    const j = JSON.parse(body);
+    const content = /Summarize/.test(j.messages?.[0]?.content ?? "") ? "A stub summary of the main point.\n\nOne key idea from the article." : "Stub reply.";
+    return json(res, 200, { model: j.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }] });
+  }
   if (url.pathname === "/v1/audio/speech" && req.method === "POST") {
     let body = "";
     for await (const c of req) body += c;
