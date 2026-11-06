@@ -25,6 +25,12 @@ function validDoc(value: unknown): value is DocRecord {
     && (value.patois === undefined || (object(value.patois) && typeof value.patois.sourceText === "string"
       && value.patois.sourceText.length <= 5_000_000 && typeof value.patois.text === "string"
       && value.patois.text.length <= 5_000_000 && number(value.patois.version)))
+    && (value.visualDescriptions === undefined || (object(value.visualDescriptions)
+      && Object.keys(value.visualDescriptions).length <= 2000
+      && Object.entries(value.visualDescriptions).every(([key, text]) => key.length <= 100 && typeof text === "string" && text.length <= 1000)))
+    && (value.codeSummaries === undefined || (object(value.codeSummaries)
+      && Object.keys(value.codeSummaries).length <= 2000
+      && Object.entries(value.codeSummaries).every(([key, text]) => key.length <= 100 && typeof text === "string" && text.length <= 700)))
     && (value.summary === undefined || (object(value.summary) && typeof value.summary.source === "string"
       && value.summary.source.length <= 100 && typeof value.summary.text === "string" && value.summary.text.length <= 100_000
       && typeof value.summary.model === "string" && value.summary.model.length <= 200
@@ -36,6 +42,7 @@ function validPosition(value: unknown): value is PositionRecord {
   return id(value.docId) && number(value.index) && Number.isInteger(value.index)
     && number(value.offset) && number(value.fraction) && value.fraction <= 1 && number(value.total) && number(value.updatedAt)
     && (value.reads === undefined || (number(value.reads) && Number.isInteger(value.reads) && value.reads >= 0))
+    && (value.narrationVersion === undefined || number(value.narrationVersion))
     && (value.variant === undefined || value.variant === "original" || value.variant === "patois");
 }
 

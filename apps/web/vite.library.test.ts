@@ -71,6 +71,20 @@ describe("shared server library", () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
   });
 
+  it("syncs code explanations and narration positions, and validates their shapes", async () => {
+    const visualDescriptions = { "visual-v1:abc:20": "A diagram connects the client to a server." };
+    const codeSummaries = { "v1:abc:10": "This example prints a greeting." };
+    const result = await service.sync({ changes: [
+      { kind: "doc", record: { ...doc("code"), codeSummaries, visualDescriptions } },
+      { kind: "position", record: { ...position("code"), narrationVersion: 1 } },
+    ] });
+    expect(result.docs[0].codeSummaries).toEqual(codeSummaries);
+    expect(result.docs[0].visualDescriptions).toEqual(visualDescriptions);
+    expect(result.positions[0].narrationVersion).toBe(1);
+    const bad = { ...doc("bad"), codeSummaries: { key: 3 } } as unknown as DocRecord;
+    expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
+  });
+
   it("serves JSON sync over HTTP and rejects cross-site writes and malformed requests", async () => {
     const handler = libraryMiddleware(service);
     server = createServer((req, res) => { req.url = req.url?.replace("/api/library", ""); handler(req, res, () => {}); });

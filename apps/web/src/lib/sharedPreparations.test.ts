@@ -1,3 +1,4 @@
+import { visualBlock, visualKey } from "./visuals";
 import { describe, expect, it } from "vitest";
 import { PRESET_VOICES } from "../data/voices";
 import type { SharedPreparation } from "../engine/preparation";
@@ -14,6 +15,14 @@ describe("shared preparation jobs", () => {
   it("shows the server worker and passage progress without a local preparation queue", () => {
     expect(sharedPreparationJobs([rec], [job], () => voice)).toEqual([expect.objectContaining({ docId: "a", serverId: "server-job", remote: true, status: "preparing", done: 1, total: 2, worker: "Mac" })]);
     expect(sharedPreparationJobs([{ ...rec, text: "Changed document." }], [job], () => voice)).toEqual([]);
+  });
+  it("finds shared audio using the saved visual description", () => {
+    const visual = { kind: "image" as const, src: "https://example.com/photo.png", alt: "A bird", caption: "" };
+    const description = "A bird rests on a branch.";
+    const document = { ...rec, text: visualBlock(visual), visualDescriptions: { [visualKey(visual)]: description } };
+    const reading = { ...job, total: 1, done: 1, keys: [cacheKey({ text: description, voice: voice.id, engine: voice.engine })] };
+    expect(sharedPreparationJobs([document], [reading], () => voice)[0].docId).toBe(rec.id);
+    expect(sharedPreparationJobs([{ ...document, visualDescriptions: {} }], [reading], () => voice)).toEqual([]);
   });
   it("prefers active work over historical readings and distinguishes device-only audio", () => {
     const older: SharedPreparation = { ...job, id: "old", state: "done", done: 2, available: [], createdAt: 0 };

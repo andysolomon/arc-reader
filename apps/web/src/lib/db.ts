@@ -12,6 +12,10 @@ export interface DocRecord {
   patois?: { sourceText: string; text: string; version: number };
   /** LLM summary of `text`; `source` fingerprints the text it was made from. */
   summary?: { source: string; text: string; model: string; version: number; createdAt: number };
+  /** Spoken explanations keyed by code content, shared across voices and devices. */
+  codeSummaries?: Record<string, string>;
+  /** Cached descriptions keyed by visual source, alt text, and caption. */
+  visualDescriptions?: Record<string, string>;
   source: DocSource;
   /** Hostname for URLs, file name for uploads, "Pasted text" otherwise */
   domain: string;
@@ -25,6 +29,7 @@ export interface DocRecord {
 export interface PositionRecord {
   docId: string;
   variant?: "original" | "patois";
+  narrationVersion?: number;
   index: number;
   /** seconds into the sentence at 1× */
   offset: number;

@@ -216,12 +216,30 @@ The Reader's **Summarize** button (sparkles, in the header) asks an LLM for a pl
 
 It uses [OpenCode Go](https://opencode.ai/docs/go/). Paste your Go API key in **Settings → Summaries** (it is the `key` under `opencode-go` in `~/.local/share/opencode/auth.json`). The server checks it with OpenCode, then saves it as `llm.json` (mode 600) in `LIBRARY_DATA_DIR`, so Compose keeps it in the library volume. The browser only ever sees its last four characters. A saved key takes precedence over the optional server-side `LLM_API_KEY`; **Remove** falls back to it. `LLM_URL` (default `https://opencode.ai/zen/go`) points at any OpenAI-compatible base, e.g. `https://opencode.ai/zen` for pay-as-you-go Zen. Anyone who can reach the server can replace or remove the key, as with the shared library.
 
-`/api/llm` forwards `POST /v1/chat/completions` only, adding the key, a `readaloud` user agent, and a per-document `x-opencode-session`, which Go requires. Settings → Summaries picks the model:
+`/api/llm` forwards `POST /v1/chat/completions` for text and `POST /v1/responses` for image descriptions, adding the key, a `readaloud` user agent, and a per-document `x-opencode-session`, which Go requires. Settings → Summaries picks the model:
 
 - **Muse Spark** (`muse-spark-1.3-contributor`, default): about 20 s and about $0.002 of Go allowance for a 15,000-word essay. Go only serves it once **Allow paid endpoints that train on request data** is on in the OpenCode console, so the article text may be used for training.
 - **GLM 5.3** (`glm-5.3`): about a minute and about $0.20 for the same essay, against GLM 5.3's $15 monthly Go limit (shared with any coding use).
 
 Go is designed for coding agents and OpenCode monitors its traffic for abuse. Occasional summaries are light, but if that is a concern, point `LLM_URL` at Zen and pay per token. Article text is sent to OpenCode and the model provider.
+
+## Code in readings
+
+Code blocks are narrated as short explanations instead of source code. Fenced Markdown, indented code, imported HTML `<pre>` blocks, and recognizable unfenced snippets are detected before sentence splitting. The reader shows an explanation card with expandable original code. Both live speech (including browser voices) and prepared/downloaded audio use the same narration.
+
+When a summary connection is configured, opening or preparing a reading generates explanations with the model in **Settings → Summaries**. Code and a small amount of surrounding context are sent to that provider. Explanations are saved with the document and shared across voices and devices; changing a block invalidates its explanation. If the service is unavailable, the output is unusable, or an example exceeds the request limits, narration announces that the code is being skipped and continues. Raw code is never used as the fallback for a detected block. Unformatted text without recognizable code syntax may still be treated as prose; retain code fences when pasting.
+
+Older saved positions in documents containing code restart at the beginning once, because code blocks now occupy a single seek target. Subsequent positions resume normally.
+
+## Images and diagrams in readings
+
+Article fetching preserves meaningful images, responsive/lazy image sources, figure captions, alt text, and inline SVG diagrams in reading order. Relative URLs are resolved against the article URL. Decorative images and tiny tracking pixels are omitted. Markdown image links are preserved too. Each visual gets one spoken explanation and an expandable **View image** or **View diagram** card. Image addresses and SVG markup are never narrated.
+
+Opening or preparing a reading uses the saved **Settings → Summaries** connection to describe its visuals. Images use Muse Spark through the Responses API, independently of the text-summary model; set `VITE_VISUAL_MODEL` at build time to use another vision-capable Responses model on your `LLM_URL`. The provider receives the image URL (or rasterized inline diagram), caption, alt text, and nearby article context. Inline SVG is rendered as an inert image and converted to PNG for vision. Descriptions focus on a picture's subject, a diagram's relationships, or a chart's main trend, rather than reading every label.
+
+Descriptions are saved and synced with the document, reused across voices, and used by live, browser, prepared, and downloaded audio. If vision is unavailable, the reader explicitly uses the article's caption or alt text; without either, it announces the unavailable description and continues. Broken images never stop the article. Up to eight uncached visuals are described per opening, two at a time, with a one-minute overall deadline; remaining visuals use article metadata. Previously saved descriptions remain available offline, though remote images themselves may not.
+
+This applies to new imports. Re-import older articles whose images were already stripped. Fetching cannot recover diagrams drawn only by page JavaScript or canvas, and a provider may not be able to load protected or unsupported image URLs. Inline SVG requires a browser with canvas support. Large embedded visuals are bounded to keep the shared library small. Old positions in documents with newly recognized visual blocks restart once because sentence indices changed.
 
 ## Themes
 

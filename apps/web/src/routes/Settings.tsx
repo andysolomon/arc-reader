@@ -135,6 +135,7 @@ export function SettingsPage() {
 
         {llmAvailable && (
           <Section title="Summaries">
+            <p className="mb-3 text-sm text-fg2">This connection also explains code blocks and describes article images and diagrams when you open or prepare a reading. Image descriptions use a vision model (Muse Spark by default). Without it, the reader uses captions or alt text and skips code.</p>
             <div className="flex flex-col rounded-panel border border-line bg-bg2">
               <LlmKeyField />
               <RowItem label="Summary model" hint="Muse Spark is quick and uses little of your OpenCode Go allowance, but its provider may train on the text you send. GLM 5.3 takes about a minute and uses roughly 100× more allowance." last>

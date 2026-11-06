@@ -12,6 +12,7 @@ import { Menu, type MenuItem } from "./Menu";
 
 export interface PlayerState {
   voice: Voice;
+  title?: string;
   playing: boolean;
   loading?: boolean;
   speed: number;
@@ -63,9 +64,9 @@ export function PlayButton({ playing, loading, onToggle, size = 48 }: { playing:
       <PlayPauseIcon playing={playing} size={Math.round(size / 2)} />
       {loading ? (
         // Generating this sentence: a spinning arc inside the button, no pulse.
-        <span aria-hidden className="pointer-events-none absolute inset-[3px] rounded-full border-2 border-transparent border-t-accent-fg animate-spin motion-reduce:animate-pulse" />
+        <span aria-hidden className="pointer-events-none absolute inset-[3px] rounded-full border-2 border-transparent border-t-accent-fg animate-spin motion-reduce:animate-none" />
       ) : playing ? (
-        <span aria-hidden className="pointer-events-none absolute inset-0 rounded-full border-[1.5px] border-accent animate-ping motion-reduce:hidden" />
+        <span aria-hidden className="pointer-events-none absolute inset-0 rounded-full border-[1.5px] border-accent shadow-[0_0_0_5px_var(--hl)]" />
       ) : null}
     </IconButton>
   );
@@ -73,9 +74,9 @@ export function PlayButton({ playing, loading, onToggle, size = 48 }: { playing:
 
 export function TimeReadout({ elapsed, remaining, status, className }: { elapsed: number; remaining: number; status?: string; className?: string }) {
   return (
-    <div className={cn("whitespace-nowrap font-mono text-[12px] text-fg2 tabular-nums", className)} aria-live="off">
+    <div className={cn("min-w-0 font-mono text-[12px] text-fg2 tabular-nums", className)} aria-live="off">
       <span aria-label="Elapsed">{fmtTime(elapsed)}</span> <span className="text-fg3">/</span> <span aria-label="Remaining">−{fmtTime(remaining)}</span>
-      {status ? <span className="ml-2 font-sans text-fg2" aria-live="polite">{status}</span> : null}
+      {status ? <span className="block truncate font-sans text-[10px] text-fg2" aria-live="polite">{status}</span> : null}
     </div>
   );
 }

@@ -28,7 +28,7 @@ export function Shell() {
   const clipboard = useClipboardImportController(!isAuth);
   const showRail = !focus && !isAuth && bp !== "sm";
   const showTabs = !focus && !isAuth && bp === "sm";
-  const playerOffset = hasDoc && !isAuth ? (bp === "sm" ? 128 : 112) : 24;
+  const playerOffset = hasDoc && !isAuth ? (bp === "sm" ? 160 : 156) : 24;
 
   return (
     <ClipboardImportContext.Provider value={clipboard}>

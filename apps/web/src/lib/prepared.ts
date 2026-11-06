@@ -14,8 +14,8 @@ export interface PreparedVoice {
 
 /** Coverage follows the same text, model and passage boundaries as playback. */
 export function preparedVoices(rec: DocRecord, voices: Voice[], keys: Set<string>, openaiModel: string): PreparedVoice[] {
-  const original = segment(rec.text).sentences;
-  const adapted = hasPatois(rec) ? segment(rec.patois!.text).sentences : null;
+  const original = segment(rec.text, rec.codeSummaries, rec.visualDescriptions).sentences;
+  const adapted = hasPatois(rec) ? segment(rec.patois!.text, rec.codeSummaries, rec.visualDescriptions).sentences : null;
   const originalPassages = planPassages(original);
   const adaptedPassages = adapted ? planPassages(adapted) : [];
   return voices.flatMap((voice) => {

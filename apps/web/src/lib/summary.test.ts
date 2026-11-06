@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { visualBlock, visualKey } from "./visuals";
 import type { DocRecord } from "./db";
 
 const rec = (text: string, summary?: DocRecord["summary"]): DocRecord =>
@@ -33,6 +34,17 @@ describe("summary", () => {
     const body = JSON.parse(init.body as string);
     expect(body.model).toBe("glm-5.3");
     expect(body.messages[1].content).toBe("Title: T\n\nBody text.");
+  });
+
+  it("summarizes visual descriptions without sending image data to a text model", async () => {
+    const visual = { kind: "image" as const, src: "https://example.com/picture.png", alt: "Picture", caption: "" };
+    const { summarize } = await load();
+    const fetch = vi.fn(async () => Response.json({ choices: [{ finish_reason: "stop", message: { content: "Summary." } }] }));
+    vi.stubGlobal("fetch", fetch);
+    await summarize({ ...rec(visualBlock(visual)), visualDescriptions: { [visualKey(visual)]: "A team works together." } }, "glm-5.3");
+    const body = JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.messages[1].content).toContain("A team works together.");
+    expect(body.messages[1].content).not.toMatch(/https:|readaloud-visual/);
   });
 
   it("rejects truncated output and reports upstream errors", async () => {
