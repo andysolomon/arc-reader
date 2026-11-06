@@ -46,6 +46,14 @@ describe("shared server library", () => {
     expect((await service.sync({ changes: [{ kind: "doc", record: doc("a") }, { kind: "position", record: { ...position("a"), reads: 2 } }] })).positions[0].reads).toBe(2);
   });
 
+  it("never lets an older client or a stale position lower the read count, and counts a legacy finish once", async () => {
+    await service.sync({ changes: [{ kind: "doc", record: doc("a") }, { kind: "position", record: { ...position("a", 10), reads: 2 } }] });
+    expect((await service.sync({ changes: [{ kind: "position", record: position("a", 20, 0.1) }] })).positions[0]).toMatchObject({ fraction: 0.1, reads: 2 });
+    expect((await service.sync({ changes: [{ kind: "position", record: { ...position("a", 5), reads: 3 } }] })).positions[0]).toMatchObject({ fraction: 0.1, updatedAt: 20, reads: 3 });
+    await service.sync({ changes: [{ kind: "doc", record: doc("b") }, { kind: "position", record: position("b", 10, 1) }] });
+    expect((await service.sync({ changes: [{ kind: "position", record: position("b", 20, 0.03) }] })).positions.find((p) => p.docId === "b")).toMatchObject({ fraction: 0.03, reads: 1 });
+  });
+
   it("validates the entire batch before writing and leaves damaged storage intact", async () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: doc("a") }, { kind: "position", record: { ...position("a"), fraction: 2 } }] })).toThrow("Invalid library change");
     expect(() => service.sync({ changes: [{ kind: "doc", record: doc("a") }, { kind: "position", record: { ...position("a"), reads: 1.5 } }] })).toThrow("Invalid library change");

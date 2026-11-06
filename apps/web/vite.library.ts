@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
 import type { DocRecord, PositionRecord } from "./src/lib/db";
-import type { LibraryChange, LibrarySnapshot } from "./src/lib/libraryProtocol";
+import { mergeReads, type LibraryChange, type LibrarySnapshot } from "./src/lib/libraryProtocol";
 
 const MAX_BODY = 16 * 1024 * 1024;
 class HttpError extends Error {
@@ -87,8 +87,10 @@ export class LibraryService {
       for (const change of changes) {
         if (change.kind !== "position") continue;
         const rec = change.record;
-        if (docs.has(rec.docId) && !deleted.has(rec.docId)
-          && (!positions.has(rec.docId) || rec.updatedAt >= positions.get(rec.docId)!.updatedAt)) positions.set(rec.docId, rec);
+        if (!docs.has(rec.docId) || deleted.has(rec.docId)) continue;
+        const current = positions.get(rec.docId);
+        // Older clients omit read counts; never let them erase one.
+        positions.set(rec.docId, !current || rec.updatedAt >= current.updatedAt ? mergeReads(rec, current) : mergeReads(current, rec));
       }
       const next = { docs: [...docs.values()], positions: [...positions.values()], deleted: [...deleted] };
       if (changes.length) {

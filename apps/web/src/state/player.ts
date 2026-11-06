@@ -3,6 +3,7 @@ import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/e
 import { API_BASE, hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground } from "../engine/providers";
 import { hasActivePreparation } from "../engine/preparation";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
+import { FINISHED_FRACTION } from "../lib/libraryProtocol";
 import { segment } from "../lib/segment";
 import { getVoice, voiceLang, isLocalVoice } from "./voices";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -157,7 +158,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       let index = 0, offset = 0;
       if (opts.resume !== false && !summary) {
         const pos = await positions.get(rec.id).catch(() => undefined);
-        if (pos && (pos.variant ?? "original") === variant(voiceId) && pos.fraction < 0.995) {
+        if (pos && (pos.variant ?? "original") === variant(voiceId) && pos.fraction < FINISHED_FRACTION) {
           index = pos.index;
           offset = pos.offset;
         }

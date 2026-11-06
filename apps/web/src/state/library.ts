@@ -7,6 +7,7 @@ import { useVoices } from "./voices";
 import { useSettings } from "./settings";
 import { usePreparation } from "./preparation";
 import { serverPreparedKeys } from "../engine/preparation";
+import { readsOf } from "../lib/libraryProtocol";
 
 export interface LibraryItem {
   rec: DocRecord;
@@ -49,7 +50,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       set({
         items: all.map((rec) => {
           const p = byId.get(rec.id);
-          return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: p?.reads ?? 0, prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
+          return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
         }),
         loaded: true,
       });
