@@ -10,6 +10,7 @@ import { useSettings } from "./settings";
 import { toast } from "./toast";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { hasPatois, preparePatois } from "../lib/patois";
+import { hasSummary } from "../lib/summary";
 
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
@@ -28,6 +29,8 @@ export interface PlayerState extends EngineSnapshot {
   shortcutsOpen: boolean;
   /** Effective voice id for the loaded doc (override or default) */
   voiceId: string;
+  /** Reading the document's summary instead of its text; positions and read counts are left alone. */
+  summary: boolean;
   preparing: string | null;
   preparationError: string | null;
   /** The chosen voice could not be generated; playback is stopped until the user retries or switches voice. */
@@ -38,7 +41,7 @@ export interface PlayerState extends EngineSnapshot {
 
 interface Actions {
   /** `persist` saves the record (e.g. a voice change) once preparation succeeds. */
-  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean; prepare?: boolean }) => Promise<boolean>;
+  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean; prepare?: boolean; summary?: boolean }) => Promise<boolean>;
   cancelPreparation: () => void;
   retryPreparation: () => Promise<boolean>;
   /** Try the speech server again for the current sentence. */
@@ -88,8 +91,9 @@ export const engine = new PlaybackEngine({
     if (usePlayer.getState().offline) usePlayer.setState({ offline: false });
   },
   onPersist: (snap) => {
-    const { doc } = usePlayer.getState();
-    if (!doc || !snap.docId) return;
+    const { doc, summary } = usePlayer.getState();
+    // The summary is short and separate: keep the place in the full text.
+    if (!doc || !snap.docId || summary) return;
     const completed = snap.ended && !endCounted;
     endCounted = snap.ended;
     void positions.put({ docId: snap.docId, variant: variant(doc.voice), index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() }, { completed });
@@ -119,6 +123,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
     menuOpen: false,
     shortcutsOpen: false,
     voiceId: useSettings.getState().voice,
+    summary: false,
     preparing: null,
     preparationError: null,
     speechError: null,
@@ -135,19 +140,22 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       try {
       const voiceId = rec.voice ?? useSettings.getState().voice;
       const voice = getVoice(voiceId);
-      const rewrite = voiceId === JAMAICAN_PATOIS_VOICE_ID && !hasPatois(rec);
+      // Summaries are read as written, in any voice.
+      const summary = !!opts.summary && hasSummary(rec);
+      const patois = voiceId === JAMAICAN_PATOIS_VOICE_ID && !summary;
+      const rewrite = patois && !hasPatois(rec);
       if (rewrite) {
         engine.pause();
         set({ preparing: "Rewriting into Jamaican Patois…" });
       }
-      const prepared = voiceId === JAMAICAN_PATOIS_VOICE_ID
+      const prepared = patois
         ? await preparePatois(rec, signal, (preparing) => { if (!signal.aborted) set({ preparing }); })
         : rec;
       signal.throwIfAborted();
-      const seg = segment(voiceId === JAMAICAN_PATOIS_VOICE_ID ? prepared.patois!.text : prepared.text);
+      const seg = segment(summary ? rec.summary!.text : patois ? prepared.patois!.text : prepared.text);
       const doc: EngineDoc = { id: rec.id, title: rec.title, voice: voice.id, lang: voiceLang(voice), ...seg };
       let index = 0, offset = 0;
-      if (opts.resume !== false) {
+      if (opts.resume !== false && !summary) {
         const pos = await positions.get(rec.id).catch(() => undefined);
         if (pos && (pos.variant ?? "original") === variant(voiceId) && pos.fraction < 0.995) {
           index = pos.index;
@@ -159,7 +167,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       signal.throwIfAborted();
       engine.load(doc, index, offset);
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
-      set({ doc, record: prepared, voiceId: voice.id, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
+      set({ doc, record: prepared, voiceId: voice.id, summary, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
       const requests = engine.passages.map((p) => ({ text: p.text, voice: voice.id, engine: voice.engine, profile: voice.kind === "profile" }));
       const autoPrepare = opts.prepare && API_BASE === "/api/vs" && voice.engine !== LOCAL_ENGINE
         && !isPaidEngine(voice.engine) && useSettings.getState().engine !== LOCAL_ENGINE && !get().offline;
@@ -227,7 +235,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       get().cancelPreparation();
       get().cancelPrerender();
       engine.unload();
-      set({ doc: null, record: null, focus: false, menuOpen: false, speechError: null });
+      set({ doc: null, record: null, summary: false, focus: false, menuOpen: false, speechError: null });
     },
     toggle: () => { if (!get().preparing) engine.toggle(); },
     play: () => { if (!get().preparing) void engine.play(); },
@@ -256,7 +264,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         const next = { ...record, voice: voiceId, updatedAt: Date.now() };
         if (variant(v.id) !== variant(get().voiceId) || v.id === JAMAICAN_PATOIS_VOICE_ID) {
           set({ offline: false });
-          return get().open(next, { autoplay: wasPlaying, resume: variant(v.id) === variant(get().voiceId), persist: true });
+          return get().open(next, { autoplay: wasPlaying, resume: variant(v.id) === variant(get().voiceId), persist: true, summary: get().summary });
         }
         await docStore.put(next);
         set({ record: next });

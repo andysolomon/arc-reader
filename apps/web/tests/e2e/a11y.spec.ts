@@ -32,6 +32,12 @@ for (const theme of THEMES) {
       await expect(page.getByRole("region", { name: "Summary" })).toContainText("A stub summary of the main point.");
       const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
       expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+      // Reading the summary aloud swaps the text and shows a way back.
+      await page.getByRole("region", { name: "Summary" }).getByRole("button", { name: "Listen" }).click();
+      await page.getByRole("button", { name: "Read the full article" }).waitFor();
+      await page.keyboard.press("Space");
+      const reading = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      expect(reading.violations, JSON.stringify(reading.violations, null, 2)).toEqual([]);
     });
 
     test("reader with player and menu", async ({ page }) => {

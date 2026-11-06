@@ -37,3 +37,36 @@ test("enters, replaces, and removes the OpenCode Go key in Settings", async ({ p
   await page.getByRole("button", { name: "Remove" }).click();
   await expect(page.getByText("Set on the server (LLM_API_KEY) · ends in -key")).toBeVisible();
 });
+
+test("reads the summary aloud with the document's voice and returns to the article's place", async ({ page }) => {
+  const spoken: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/v1/audio/speech") && r.method() === "POST") spoken.push(JSON.parse(r.postData() || "{}").input ?? "");
+  });
+  await composeAndListen(page);
+  await page.keyboard.press("Space"); // pause the article
+  const position = () => page.evaluate(async () => {
+    const d = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open("readaloud"); r.onsuccess = () => resolve(r.result); });
+    const id = location.pathname.split("/").pop()!;
+    return new Promise<{ index: number; updatedAt: number } | undefined>((resolve) => { const r = d.transaction("positions").objectStore("positions").get(id); r.onsuccess = () => resolve(r.result); });
+  });
+  await expect.poll(position).toBeTruthy();
+  const before = await position();
+
+  await page.getByRole("button", { name: "Summarize" }).click();
+  await page.getByRole("region", { name: "Summary" }).getByRole("button", { name: "Listen" }).click();
+  // The Reader now shows and highlights the summary, and speech is generated from it.
+  await expect(page.getByText("Read the full article")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Summary" })).toHaveCount(0);
+  await expect(page.locator('[data-screen="reader"]')).toContainText("A stub summary of the main point.");
+  await expect(page.locator('[data-screen="reader"]')).not.toContainText("Pack my box");
+  await expect.poll(() => spoken.some((text) => text.includes("A stub summary of the main point."))).toBe(true);
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(1200); // past the engine's persist delay
+
+  // Listening to the summary leaves the article's saved place alone.
+  expect(await position()).toEqual(before);
+  await page.getByRole("button", { name: "Read the full article" }).click();
+  await expect(page.locator('[data-screen="reader"]')).toContainText("Pack my box");
+  await expect(page.getByRole("region", { name: "Summary" })).toBeVisible();
+});
