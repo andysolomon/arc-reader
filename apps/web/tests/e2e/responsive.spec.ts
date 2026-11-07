@@ -13,7 +13,7 @@ test("phone: tab bar, compact bottom player, text controls in a sheet", async ({
   await expect(page.getByRole("dialog", { name: "Text" })).toBeVisible();
 });
 
-test("tablet: collapsed rail and floating pill", async ({ page }) => {
+test("tablet: collapsed rail and floating listening dock", async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 1180 });
   await composeAndListen(page);
   const nav = page.getByRole("navigation", { name: "Primary" });
@@ -21,7 +21,9 @@ test("tablet: collapsed rail and floating pill", async ({ page }) => {
   expect(box!.width).toBeLessThanOrEqual(64);
   const player = page.getByRole("region", { name: "Player" });
   const pb = await player.boundingBox();
-  expect(pb!.height).toBeCloseTo(64, 0);
+  expect(pb!.height).toBeGreaterThan(90);
+  expect(pb!.height).toBeLessThan(140);
+  await expect(player).toContainText("The quick brown fox");
 });
 
 test("desktop: 216px rail and a 760px capsule", async ({ page }) => {

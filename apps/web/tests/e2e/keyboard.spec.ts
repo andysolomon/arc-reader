@@ -71,12 +71,15 @@ test.describe("keyboard flow", () => {
     await composeAndListen(page);
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("ArrowRight");
+    await expect(page.locator('article [data-i="2"]')).toHaveClass(/bg-hl/);
     await page.keyboard.press("Space"); // pause → persist now
-    await page.goto("/library");
+    await expect(page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Play/ })).toHaveAttribute("data-playing", "false");
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Library" }).click();
     const ring = page.getByRole("img", { name: /% listened/ }).first();
-    await expect(ring).toBeVisible();
-    const label = await ring.getAttribute("aria-label");
-    expect(Number(label!.match(/\d+/)![0])).toBeGreaterThan(0);
+    await expect(ring).toHaveAttribute("aria-label", /^[1-9]\d*% listened$/);
+    // A fresh page must restore the saved position, not just the in-memory player.
+    await page.reload();
+    await expect(ring).toHaveAttribute("aria-label", /^[1-9]\d*% listened$/);
   });
 
   test("speed chip cycles on tap and opens a slider on right-click", async ({ page }) => {

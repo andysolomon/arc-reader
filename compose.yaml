@@ -30,6 +30,7 @@ services:
         VITE_OPENAI_BASE: ${OPENAI_API_KEY:+/api/oa}
         VITE_OPENAI_TTS_MODEL: ${VITE_OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
         VITE_PATOIS_MODEL: ${VITE_PATOIS_MODEL:-gpt-4.1-mini}
+        VITE_VISUAL_MODEL: ${VITE_VISUAL_MODEL:-muse-spark-1.3-contributor}
         VITE_FISH_BASE: ${FISH_API_KEY:+/api/fish}
         VITE_FISH_TTS_MODEL: ${VITE_FISH_TTS_MODEL:-s2.1-pro}
     restart: unless-stopped
@@ -52,6 +53,7 @@ services:
       FISH_API_KEY: ${FISH_API_KEY:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_URL: ${LLM_URL:-https://opencode.ai/zen/go}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
       PREPARATION_DATA_DIR: /app/preparations
       PREPARATION_YIELD_MS: ${PREPARATION_YIELD_MS:-}
       LIBRARY_DATA_DIR: /app/library

@@ -1,4 +1,6 @@
+import { visualNarration, type VisualDescriptions } from "./visuals";
 import type { ParagraphLike } from "@readaloud/ui";
+import { readingBlocks, codeNarration, codeKey, safeCodeSummary, type CodeSummaries } from "./codeBlocks";
 
 export interface Sentence {
   index: number;
@@ -37,18 +39,25 @@ export function splitWords(sentence: string): string[] {
   return sentence.split(/\s+/).filter(Boolean);
 }
 
-export function segment(text: string): Segmented {
+export function segment(text: string, summaries: CodeSummaries = {}, descriptions: VisualDescriptions = {}): Segmented {
   const sentences: Sentence[] = [];
   const paragraphs: ParagraphLike[] = [];
-  splitParagraphs(text).forEach((p, pi) => {
-    const start = sentences.length;
-    const ss = splitSentences(p).map((t) => {
-      const s: Sentence = { index: sentences.length, para: pi, text: t, words: splitWords(t) };
-      sentences.push(s);
-      return { text: s.text, words: s.words };
-    });
-    if (ss.length) paragraphs.push({ sentences: ss, start });
-  });
+  for (const block of readingBlocks(text)) {
+    const narration = block.kind === "visual" ? visualNarration(block.visual, descriptions) : null;
+    const parts = narration ? [narration.text] : block.kind === "code" ? [codeNarration(block, summaries)] : splitParagraphs(block.text);
+    for (const p of parts) {
+      const start = sentences.length;
+      // One seek target per code block or visual, even when its explanation has several sentences.
+      const ss = (block.kind !== "prose" ? [p] : splitSentences(p)).map((t) => {
+        const s: Sentence = { index: sentences.length, para: paragraphs.length, text: t, words: splitWords(t) };
+        sentences.push(s);
+        return { text: s.text, words: s.words };
+      });
+      if (ss.length) paragraphs.push({ sentences: ss, start, ...(block.kind === "code" ? {
+        code: { text: block.text, language: block.language, summarized: safeCodeSummary(summaries[codeKey(block)]) },
+      } : block.kind === "visual" ? { visual: { ...block.visual, source: narration!.source } } : {}) });
+    }
+  }
   return { sentences, paragraphs };
 }
 

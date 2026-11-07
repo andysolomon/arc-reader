@@ -1,3 +1,4 @@
+import { prepareVisualDescriptions } from "../lib/visualDescriptions";
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
 import { API_BASE, hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground } from "../engine/providers";
@@ -12,6 +13,8 @@ import { toast } from "./toast";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { hasPatois, preparePatois } from "../lib/patois";
 import { hasSummary } from "../lib/summary";
+import { prepareCodeSummaries } from "../lib/codeSummaries";
+import { readingBlocks } from "../lib/codeBlocks";
 
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
@@ -97,7 +100,7 @@ export const engine = new PlaybackEngine({
     if (!doc || !snap.docId || summary) return;
     const completed = snap.ended && !endCounted;
     endCounted = snap.ended;
-    void positions.put({ docId: snap.docId, variant: variant(doc.voice), index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() }, { completed });
+    void positions.put({ docId: snap.docId, variant: variant(doc.voice), narrationVersion: 2, index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() }, { completed });
   },
   onError: (m) => toast(m),
   onUnavailable: (m) => usePlayer.setState({ speechError: m }),
@@ -149,22 +152,44 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         engine.pause();
         set({ preparing: "Rewriting into Jamaican Patois…" });
       }
-      const prepared = patois
+      let prepared = patois
         ? await preparePatois(rec, signal, (preparing) => { if (!signal.aborted) set({ preparing }); })
         : rec;
       signal.throwIfAborted();
-      const seg = segment(summary ? rec.summary!.text : patois ? prepared.patois!.text : prepared.text);
+      const readingText = summary ? rec.summary!.text : patois ? prepared.patois!.text : prepared.text;
+      if (readingBlocks(readingText).some((block) => block.kind === "code")) {
+        engine.pause();
+        prepared = await prepareCodeSummaries(prepared, readingText, useSettings.getState().summaryModel, signal,
+          (preparing) => { if (!signal.aborted) set({ preparing }); });
+      }
+      signal.throwIfAborted();
+      if (readingBlocks(readingText).some((block) => block.kind === "visual")) {
+        engine.pause();
+        prepared = await prepareVisualDescriptions(prepared, readingText, signal,
+          (preparing) => { if (!signal.aborted) set({ preparing }); });
+      }
+      signal.throwIfAborted();
+      const seg = segment(readingText, prepared.codeSummaries, prepared.visualDescriptions);
       const doc: EngineDoc = { id: rec.id, title: rec.title, voice: voice.id, lang: voiceLang(voice), ...seg };
       let index = 0, offset = 0;
       if (opts.resume !== false && !summary) {
         const pos = await positions.get(rec.id).catch(() => undefined);
-        if (pos && (pos.variant ?? "original") === variant(voiceId) && pos.fraction < FINISHED_FRACTION) {
+        if (pos && (pos.variant ?? "original") === variant(voiceId) && pos.fraction < FINISHED_FRACTION
+          && ((pos.narrationVersion ?? 0) >= 1 || !seg.paragraphs.some((p) => p.code))
+          && (pos.narrationVersion === 2 || !seg.paragraphs.some((p) => p.visual))) {
           index = pos.index;
           offset = pos.offset;
         }
       }
       signal.throwIfAborted();
-      if (rewrite || opts.persist) await docStore.put(prepared);
+      if (rewrite || opts.persist || prepared.codeSummaries !== rec.codeSummaries || prepared.visualDescriptions !== rec.visualDescriptions) {
+        const latest = await docStore.get(rec.id);
+        signal.throwIfAborted();
+        if (!latest || latest.text !== rec.text) throw new Error("The document changed. Open it again to continue.");
+        // Retain concurrent summary/metadata edits when saving derived narration.
+        prepared = { ...(latest ?? rec), ...(opts.persist ? rec : {}), patois: prepared.patois, codeSummaries: { ...latest.codeSummaries, ...prepared.codeSummaries }, visualDescriptions: { ...latest.visualDescriptions, ...prepared.visualDescriptions } };
+        await docStore.put(prepared);
+      }
       signal.throwIfAborted();
       engine.load(doc, index, offset);
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);

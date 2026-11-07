@@ -113,6 +113,8 @@ export class PlaybackEngine {
   private ended = false;
   private slowNoted = false;
   private speed = 1;
+  /** Keep the user's playback permission across passages; some browsers grant it per element. */
+  private audioElement: HTMLAudioElement | null = null;
   private audio: HTMLAudioElement | null = null;
   private audioUrl: string | null = null;
   private utter: SpeechSynthesisUtterance | null = null;
@@ -261,6 +263,8 @@ export class PlaybackEngine {
   }
 
   pause() {
+    // Animation frames may be suspended while audio keeps playing in a background tab.
+    this.readAudioPosition();
     // Bumping the token discards a sentence that is still being generated.
     this.token++;
     this.playing = false;
@@ -517,33 +521,42 @@ export class PlaybackEngine {
 
   private startAudio(chunk: Chunk, token: number) {
     const url = URL.createObjectURL(chunk.audio!);
-    const a = new Audio(url);
+    const a = this.audioElement ??= new Audio();
     this.audio = a;
     this.audioUrl = url;
+    const active = () => token === this.token && this.audio === a && this.audioUrl === url;
+    const failed = (message: string) => {
+      if (!active()) return;
+      this.pause();
+      this.opts.onError(message);
+    };
     a.preload = "auto";
-    a.playbackRate = this.speed;
     a.volume = this.gainFor(chunk);
     const passage = this.passageAt(this.index);
     let at = this.clipStart(chunk, this.index) + this.offset;
     // From the top of a clip, skip the encoder's leading silence so passages join without a dead gap.
     if (this.index === passage.start && this.offset === 0 && chunk.lead) at = Math.max(0, chunk.lead - 0.05);
     a.onloadedmetadata = () => {
-      if (token !== this.token) return;
+      if (!active()) return;
       if (passage.end - passage.start === 1 && Number.isFinite(a.duration) && a.duration > 0) this.durations[this.index] = a.duration;
-      if (at > 0) a.currentTime = Math.min(at, a.duration - 0.05);
+      if (at > 0) a.currentTime = Math.max(0, Math.min(at, a.duration - 0.05));
+    };
+    a.ontimeupdate = () => {
+      if (!active() || !this.playing) return;
+      // Media events keep passage handoffs and position working without animation frames.
+      if (!this.updateAudio()) this.emit();
     };
     a.onended = () => {
-      if (token === this.token) this.finishPassage();
+      if (active()) this.finishPassage();
     };
     a.onerror = () => {
-      if (token === this.token) this.finishPassage();
+      failed("Audio playback failed. Tap play to retry.");
     };
+    a.src = url;
+    a.load();
+    a.playbackRate = this.speed;
     a.play().catch((e: Error) => {
-      if (token !== this.token) return;
-      this.playing = false;
-      this.stopMedia();
-      this.opts.onError(e.name === "NotAllowedError" ? "Tap play to start listening" : "Audio playback failed");
-      this.emit();
+      failed(e.name === "NotAllowedError" ? "Tap play to start listening" : "Audio playback failed. Tap play to retry.");
     });
   }
 
@@ -596,10 +609,13 @@ export class PlaybackEngine {
   private stopMedia() {
     cancelAnimationFrame(this.raf);
     if (this.audio) {
+      this.audio.onloadedmetadata = null;
+      this.audio.ontimeupdate = null;
       this.audio.onended = null;
       this.audio.onerror = null;
       this.audio.pause();
-      this.audio.src = "";
+      this.audio.removeAttribute("src");
+      this.audio.load();
       this.audio = null;
     }
     if (this.audioUrl) {
@@ -614,27 +630,41 @@ export class PlaybackEngine {
     }
   }
 
+  /** Read the media clock even when the UI has not received an animation frame. */
+  private readAudioPosition() {
+    if (!this.audio || this.audio.readyState < 2 || !this.current || !this.doc) return;
+    const t = this.audio.currentTime;
+    const c = this.current;
+    const g = this.passageAt(this.index);
+    while (this.index + 1 < g.end && c.starts && t >= c.starts[this.index + 1 - g.start]) {
+      this.index++;
+      this.wordIndex = -1;
+      this.persistSoon();
+    }
+    this.offset = Math.max(0, t - this.clipStart(c, this.index));
+    this.wordIndex = this.wordFromOffset(this.offset, this.doc.sentences[this.index].words.length, this.sentenceTimings());
+  }
+
+  /** Returns true when trimming trailing silence has handed off to another passage. */
+  private updateAudio(): boolean {
+    if (!this.audio || this.audio.paused || this.audio.readyState < 2) return false;
+    this.readAudioPosition();
+    const c = this.current!;
+    if (c.tail && c.tail > TAIL_KEEP && this.audio.currentTime >= c.duration - c.tail + TAIL_KEEP) {
+      this.finishPassage();
+      return true;
+    }
+    return false;
+  }
+
   private loop = (t: number) => {
     if (!this.playing || !this.doc) return;
     const dt = Math.min(1, (t - this.last) / 1000);
     this.last = t;
     const dur = this.durations[this.index] || 0.01;
-    if (this.audio && !this.audio.paused && this.audio.readyState >= 2) {
-      const t = this.audio.currentTime;
-      const c = this.current!;
-      const g = this.passageAt(this.index);
-      // Crossing into the next sentence of the same clip: move the reader, leave the audio alone.
-      while (this.index + 1 < g.end && c.starts && t >= c.starts[this.index + 1 - g.start]) {
-        this.index++;
-        this.wordIndex = -1;
-        this.persistSoon();
-      }
-      this.offset = Math.max(0, t - this.clipStart(c, this.index));
-      // Trailing silence: hand over to the next passage once the voice has finished.
-      if (c.tail && c.tail > TAIL_KEEP && t >= c.duration - c.tail + TAIL_KEEP) {
-        this.finishPassage();
-        return;
-      }
+    if (this.audio) {
+      // A paused or buffering element must never advance on an estimated clock.
+      if (this.updateAudio()) return;
     } else if (!this.utter) {
       this.offset += dt * this.speed;
     } else {

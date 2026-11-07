@@ -88,6 +88,7 @@ export function PlayerHost() {
   ];
 
   const props: PlayerProps = {
+    title: p.doc.title,
     voice: p.offline || browserOnly ? LOCAL_VOICE : voice,
     playing: p.playing,
     loading: p.loading,

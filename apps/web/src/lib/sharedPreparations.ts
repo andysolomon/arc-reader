@@ -9,7 +9,7 @@ import { planPassages, segment } from "./segment";
 export function sharedPreparationJobs(records: DocRecord[], catalogue: SharedPreparation[], voiceFor: (id: string) => Voice): PreparationJob[] {
   const jobs: PreparationJob[] = [];
   for (const rec of records) {
-    const passages = planPassages(segment(rec.text).sentences);
+    const passages = planPassages(segment(rec.text, rec.codeSummaries, rec.visualDescriptions).sentences);
     const expected = new Map<string, string[]>();
     const seen = new Set<string>();
     // Prefer a current reading, then the newest completed reading for each voice.

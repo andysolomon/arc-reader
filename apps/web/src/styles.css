@@ -21,3 +21,69 @@ body,
     scroll-behavior: smooth;
   }
 }
+
+.reader-surface {
+  background-image: radial-gradient(ellipse at 50% 0%, var(--hl), transparent 65%);
+  background-size: 100% 420px;
+  background-repeat: no-repeat;
+}
+.reader-status { position: relative; background: var(--bg); }
+.reader-progress { position: absolute; inset: auto 0 -1px; height: 2px; }
+.reader-progress > span { display: block; height: 100%; background: var(--accent); transition: width 400ms linear; }
+.listening-bars { display: flex; align-items: center; gap: 3px; width: 21px; height: 18px; color: var(--fg2); }
+.listening-bars i { width: 3px; height: 5px; border-radius: 4px; background: currentColor; }
+.listening-bars i:nth-child(2) { height: 13px; }
+.listening-bars i:nth-child(3) { height: 9px; }
+.listening-bars[data-active="true"] { color: var(--accent); }
+@media (prefers-reduced-motion: no-preference) {
+  .listening-bars[data-active="true"] i { animation: listening 1.2s ease-in-out infinite alternate; }
+  .listening-bars i:nth-child(2) { animation-delay: -0.6s; }
+  .listening-bars i:nth-child(3) { animation-delay: -0.9s; }
+  .listening-bars i:nth-child(4) { animation-delay: -0.3s; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-progress > span { transition: none; }
+}
+@keyframes listening { from { transform: scaleY(0.55); } to { transform: scaleY(1.2); } }
+
+/* Stays in the reader chrome while a summary is generated, including mid-playback. */
+.summary-processing-track {
+  position: relative;
+  width: 7.5rem;
+  height: 2px;
+  margin-left: auto;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--bg3);
+}
+.summary-processing-track > i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--fg2);
+  animation: summary-sweep 1.6s ease-in-out infinite;
+}
+@keyframes summary-sweep {
+  from { transform: translateX(-130%); }
+  to { transform: translateX(320%); }
+}
+
+.summary-draft {
+  position: relative;
+  overflow: hidden;
+}
+.summary-draft::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 15%, color-mix(in srgb, var(--fg) 16%, transparent) 50%, transparent 85%);
+  transform: translateX(-100%);
+  animation: summary-sheen 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes summary-sheen {
+  to { transform: translateX(100%); }
+}

@@ -24,6 +24,7 @@ ARG VITE_DEFAULT_ENGINE=kittentts
 ARG VITE_OPENAI_BASE=
 ARG VITE_OPENAI_TTS_MODEL=gpt-4o-mini-tts
 ARG VITE_PATOIS_MODEL=gpt-4.1-mini
+ARG VITE_VISUAL_MODEL=muse-spark-1.3-contributor
 ARG VITE_FISH_BASE=
 ARG VITE_FISH_TTS_MODEL=s2.1-pro
 RUN pnpm --filter @readaloud/web build

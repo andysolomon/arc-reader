@@ -1,9 +1,11 @@
+import { visualBlock, visualKey } from "../lib/visuals";
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JAMAICAN_PATOIS_VOICE_ID, FISH_PRESET_VOICES, OPENAI_VOICES, PRESET_VOICES } from "../data/voices";
 import { cacheKey, prepareInBackground, synthesize } from "../engine/providers";
 import { audioCache, db, docs, type DocRecord } from "../lib/db";
+import { codeKey } from "../lib/codeBlocks";
 import { preparePatois } from "../lib/patois";
 import { isPreparing, usePreparation, type PreparationJob } from "./preparation";
 
@@ -53,6 +55,30 @@ beforeEach(async () => {
 afterEach(async () => { usePreparation.getState().cancelAll(); await settled(); });
 
 describe("Library preparation queue", () => {
+  it("prepares spoken code summaries and never submits original source to speech", async () => {
+    const source = "const answer = 42;";
+    const explanation = "This example assigns a fixed number.";
+    const rec = { ...record("a"), text: "Before.\n\n```js\n" + source + "\n```\n\nAfter.", codeSummaries: { [codeKey({ text: source, language: "js" })]: explanation } };
+    await docs.put(rec);
+    usePreparation.getState().enqueue([rec], [bella]);
+    await settled();
+    expect(usePreparation.getState().jobs[0].status).toBe("ready");
+    expect(vi.mocked(prepareInBackground).mock.calls[0][0].map((r) => r.text)).toEqual(["Before.", explanation, "After."]);
+    expect(vi.mocked(synthesize).mock.calls.map(([r]) => r.text)).toEqual(["Before.", explanation, "After."]);
+  });
+
+  it("prepares image descriptions instead of visual metadata", async () => {
+    const visual = { kind: "image" as const, src: "https://example.com/photo.png", alt: "A bird", caption: "" };
+    const explanation = "A bird rests on a branch.";
+    const rec = { ...record("a"), text: "Before.\n\n" + visualBlock(visual) + "\n\nAfter.", visualDescriptions: { [visualKey(visual)]: explanation } };
+    await docs.put(rec);
+    usePreparation.getState().enqueue([rec], [bella]);
+    await settled();
+    expect(usePreparation.getState().jobs[0].status).toBe("ready");
+    expect(vi.mocked(prepareInBackground).mock.calls[0][0].map((r) => r.text)).toEqual(["Before.", explanation, "After."]);
+    expect(vi.mocked(synthesize).mock.calls.map(([r]) => r.text)).toEqual(["Before.", explanation, "After."]);
+  });
+
   it("restores interrupted and queued readings automatically, keeping finished jobs and saved progress", async () => {
     const job = (docId: string, status: PreparationJob["status"]): PreparationJob => ({
       id: docId, docId, title: docId, voice: bella, openaiModel: "tts-1", wordTimings: true,

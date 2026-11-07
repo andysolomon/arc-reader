@@ -23,6 +23,28 @@
           document.documentElement.dataset.theme = t;
         } catch (e) {}
       })();
+      // A page cached by the service worker can outlive a deploy and ask for
+      // bundles the server no longer has, leaving a blank page. Drop the
+      // service worker and reload once to get the current page.
+      addEventListener("error", function (e) {
+        var el = e.target;
+        var url = el && (el.src || el.href);
+        if (!url || !/\/assets\//.test(url) || !/^(SCRIPT|LINK)$/.test(el.tagName)) return;
+        try {
+          var last = Number(sessionStorage.getItem("readaloud:asset-reload"));
+          if (Date.now() - last < 30000) return;
+          sessionStorage.setItem("readaloud:asset-reload", String(Date.now()));
+        } catch (err) {
+          // Without a persistent retry marker, a reload could loop forever.
+          return;
+        }
+        var sw = navigator.serviceWorker;
+        var done = function () { location.reload(); };
+        if (!sw) return done();
+        sw.getRegistrations()
+          .then(function (regs) { return Promise.all(regs.map(function (r) { return r.unregister(); })); })
+          .then(done, done);
+      }, true);
     </script>
   </head>
   <body>
