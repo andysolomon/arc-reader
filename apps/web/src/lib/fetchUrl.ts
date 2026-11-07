@@ -3,6 +3,8 @@ import { visualBlock, type ArticleVisual } from "./visuals";
 import { articleVisual } from "./articleVisuals";
 import type { DocMeta } from "./db";
 
+import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
+
 /** Fetch a web page and extract readable text. Direct fetch first, then the built-in /api/fetch route, then an optional readability proxy. */
 export interface Fetched {
   title: string;
@@ -10,6 +12,8 @@ export interface Fetched {
   domain: string;
   /** The link as fetched, plus whatever catalogue details the page declares */
   meta: DocMeta;
+  /** Hyperlinks in the readable part of the page */
+  links: DocLink[];
 }
 
 const PROXY = import.meta.env.VITE_FETCH_PROXY as string | undefined;
@@ -135,7 +139,11 @@ export function htmlToText(html: string, url: string): Fetched {
   flush();
   const text = blocks.join("\n\n");
   const title = (doc.querySelector('meta[property="og:title"]')?.getAttribute("content") || doc.title || hostOf(url)).trim();
-  return { title, text, domain: hostOf(url), meta };
+  const links = Array.from(root.querySelectorAll("a[href]")).flatMap((a) => {
+    const href = absoluteUrl(a.getAttribute("href") ?? "", base);
+    return href ? [{ url: href, text: a.textContent ?? "" }] : [];
+  });
+  return { title, text, domain: hostOf(url), meta, links: uniqueLinks(links) };
 }
 
 export function markdownToText(md: string, base?: string): string {
@@ -158,7 +166,8 @@ async function readResponse(r: Response, url: string, domain: string): Promise<F
     const f = htmlToText(body, url);
     if (f.text.length > 40) return f;
   } else if (body.trim().length > 40) {
-    return { title: domain, text: ct.includes("markdown") ? markdownToText(body, url) : body, domain, meta: { url } };
+    const text = ct.includes("markdown") ? markdownToText(body, url) : body;
+    return { title: domain, text, domain, meta: { url }, links: ct.includes("markdown") ? linksInMarkdown(body, url) : linksInText(body) };
   }
   throw new Error("No readable text");
 }
@@ -184,5 +193,6 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
   const text = markdownToText(md, url);
   if (text.length < 40) throw new Error("No readable text");
   const published = publishedDate(md.match(/^Published Time:\s*(.+)$/m)?.[1]);
-  return { title, text, domain, meta: published ? { url, published } : { url } };
+  const content = md.replace(/^(Title|URL Source|Published Time):.*$/gm, "");
+  return { title, text, domain, meta: published ? { url, published } : { url }, links: linksInMarkdown(content, url) };
 }

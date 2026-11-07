@@ -71,6 +71,14 @@ describe("shared server library", () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
   });
 
+  it("stores document links and rejects malformed ones", async () => {
+    const links = [{ url: "https://example.com/a", text: "A" }];
+    const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), links } }] });
+    expect(result.docs[0].links).toEqual(links);
+    const bad = { ...doc("b"), links: [{ url: "javascript:alert(1)", text: "x" }] } as unknown as DocRecord;
+    expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
+  });
+
   it("syncs code explanations and narration positions, and validates their shapes", async () => {
     const visualDescriptions = { "visual-v1:abc:20": "A diagram connects the client to a server." };
     const codeSummaries = { "v1:abc:10": "This example prints a greeting." };
