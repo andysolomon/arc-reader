@@ -71,6 +71,14 @@ describe("shared server library", () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
   });
 
+  it("stores document links and rejects malformed ones", async () => {
+    const links = [{ url: "https://example.com/a", text: "A" }];
+    const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), links } }] });
+    expect(result.docs[0].links).toEqual(links);
+    const bad = { ...doc("b"), links: [{ url: "javascript:alert(1)", text: "x" }] } as unknown as DocRecord;
+    expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
+  });
+
   it("serves JSON sync over HTTP and rejects cross-site writes and malformed requests", async () => {
     const handler = libraryMiddleware(service);
     server = createServer((req, res) => { req.url = req.url?.replace("/api/library", ""); handler(req, res, () => {}); });

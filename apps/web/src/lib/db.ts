@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { readsOf, type LibraryChange, type PendingChange } from "./libraryProtocol";
 import { uid } from "./hash";
+import type { DocLink } from "./links";
 
 export type DocSource = "paste" | "url" | "file" | "share" | "sample";
 
@@ -15,6 +16,8 @@ export interface DocRecord {
   source: DocSource;
   /** Hostname for URLs, file name for uploads, "Pasted text" otherwise */
   domain: string;
+  /** Hyperlinks to other sites, in document order and without duplicates. */
+  links?: DocLink[];
   /** Per-document voice override */
   voice: string | null;
   chars: number;

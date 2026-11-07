@@ -8,6 +8,7 @@ import { useSettings } from "./settings";
 import { usePreparation } from "./preparation";
 import { serverPreparedKeys } from "../engine/preparation";
 import { readsOf } from "../lib/libraryProtocol";
+import { linksInMarkdown, uniqueLinks, type DocLink } from "../lib/links";
 
 export interface LibraryItem {
   rec: DocRecord;
@@ -24,7 +25,7 @@ interface LibraryState {
   items: LibraryItem[];
   loaded: boolean;
   refresh: () => Promise<void>;
-  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null }) => Promise<DocRecord>;
+  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null; links?: DocLink[] }) => Promise<DocRecord>;
   remove: (id: string) => Promise<void>;
   touch: (id: string) => Promise<void>;
 }
@@ -58,8 +59,10 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       set({ loaded: true });
     }
   },
-  async create({ text, title, source, domain, voice = null }) {
+  async create({ text, title, source, domain, voice = null, links = [] }) {
     const now = Date.now();
+    // Page links come from the HTML; links written into the text itself count too.
+    const allLinks = uniqueLinks([...links, ...linksInMarkdown(text)]);
     const rec: DocRecord = {
       id: uid(),
       title: title?.trim() || titleFrom(text),
@@ -68,6 +71,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       domain: domain ?? (source === "paste" ? "Pasted text" : source === "sample" ? "Sample" : source === "share" ? "Shared" : "Text"),
       voice,
       chars: text.length,
+      ...(allLinks.length ? { links: allLinks } : {}),
       createdAt: now,
       updatedAt: now,
     };

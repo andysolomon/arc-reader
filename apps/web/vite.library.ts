@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
 import type { DocRecord, PositionRecord } from "./src/lib/db";
+import { MAX_LINK_TEXT, MAX_LINK_URL, MAX_LINKS } from "./src/lib/links";
 import { mergeReads, type LibraryChange, type LibrarySnapshot } from "./src/lib/libraryProtocol";
 
 const MAX_BODY = 16 * 1024 * 1024;
@@ -14,6 +15,10 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 const id = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 200;
 const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
+const validLinks = (value: unknown) => Array.isArray(value) && value.length <= MAX_LINKS
+  && value.every((link) => object(link) && typeof link.url === "string" && /^https?:\/\//i.test(link.url)
+    && link.url.length <= MAX_LINK_URL && typeof link.text === "string" && link.text.length <= MAX_LINK_TEXT);
+
 function validDoc(value: unknown): value is DocRecord {
   if (!object(value)) return false;
   return id(value.id) && typeof value.title === "string" && value.title.length <= 10000
@@ -21,6 +26,7 @@ function validDoc(value: unknown): value is DocRecord {
     && ["paste", "url", "file", "share", "sample"].includes(value.source as string)
     && typeof value.domain === "string" && value.domain.length <= 10000
     && (value.voice === null || id(value.voice)) && number(value.chars)
+    && (value.links === undefined || validLinks(value.links))
     && number(value.createdAt) && number(value.updatedAt)
     && (value.patois === undefined || (object(value.patois) && typeof value.patois.sourceText === "string"
       && value.patois.sourceText.length <= 5_000_000 && typeof value.patois.text === "string"

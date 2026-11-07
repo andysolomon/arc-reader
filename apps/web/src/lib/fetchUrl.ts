@@ -1,8 +1,12 @@
 /** Fetch a web page and extract readable text. Direct fetch first, then the built-in /api/fetch route, then an optional readability proxy. */
+import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
+
 export interface Fetched {
   title: string;
   text: string;
   domain: string;
+  /** Hyperlinks in the readable part of the page */
+  links: DocLink[];
 }
 
 const PROXY = import.meta.env.VITE_FETCH_PROXY as string | undefined;
@@ -30,7 +34,12 @@ export function htmlToText(html: string, url: string): Fetched {
     .filter((t) => t.length > 1);
   const text = (blocks.length ? blocks : [(root.textContent ?? "").replace(/\s+/g, " ").trim()]).join("\n\n");
   const title = (doc.querySelector('meta[property="og:title"]')?.getAttribute("content") || doc.title || hostOf(url)).trim();
-  return { title, text, domain: hostOf(url) };
+  const base = doc.querySelector("base[href]")?.getAttribute("href") ?? "";
+  const links = Array.from(root.querySelectorAll("a[href]")).flatMap((a) => {
+    const href = absoluteUrl(a.getAttribute("href") ?? "", absoluteUrl(base, url) ?? url);
+    return href ? [{ url: href, text: a.textContent ?? "" }] : [];
+  });
+  return { title, text, domain: hostOf(url), links: uniqueLinks(links) };
 }
 
 function markdownToText(md: string): string {
@@ -53,7 +62,7 @@ async function readResponse(r: Response, url: string, domain: string): Promise<F
     const f = htmlToText(body, url);
     if (f.text.length > 40) return f;
   } else if (body.trim().length > 40) {
-    return { title: domain, text: body, domain };
+    return { title: domain, text: body, domain, links: linksInText(body) };
   }
   throw new Error("No readable text");
 }
@@ -78,5 +87,6 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
   const title = md.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || domain;
   const text = markdownToText(md);
   if (text.length < 40) throw new Error("No readable text");
-  return { title, text, domain };
+  const content = md.replace(/^(Title|URL Source):.*$/gm, "");
+  return { title, text, domain, links: linksInMarkdown(content, url) };
 }
