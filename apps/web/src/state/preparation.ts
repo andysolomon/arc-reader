@@ -1,3 +1,4 @@
+import { prepareVisualDescriptions } from "../lib/visualDescriptions";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Voice } from "../data/voices";
@@ -7,6 +8,7 @@ import { isTransientPreparationError, refreshPreparationCatalog, sharedAudioRema
 import { API_BASE, baseFor, cacheKey, isPaidEngine, prepareInBackground, synthesize } from "../engine/providers";
 import { ApiBusy, ApiUnreachable, LOCAL_ENGINE } from "../engine/types";
 import { audioCache, docs } from "../lib/db";
+import { prepareCodeSummaries } from "../lib/codeSummaries";
 import { preparePatois } from "../lib/patois";
 import { planPassages, segment } from "../lib/segment";
 import { useSettings } from "./settings";
@@ -170,7 +172,19 @@ async function run(job: PreparationJob, signal: AbortSignal) {
       rec = { ...latest, patois: prepared.patois };
       await docs.put(rec);
     }
-    const { sentences } = segment(job.voice.id === JAMAICAN_PATOIS_VOICE_ID ? rec.patois!.text : rec.text);
+    const text = job.voice.id === JAMAICAN_PATOIS_VOICE_ID ? rec.patois!.text : rec.text;
+    let explained = await prepareCodeSummaries(rec, text, useSettings.getState().summaryModel, signal, (message) => update(job.id, { message }));
+    signal.throwIfAborted();
+    explained = await prepareVisualDescriptions(explained, text, signal, (message) => update(job.id, { message }));
+    signal.throwIfAborted();
+    if (explained !== rec) {
+      const latest = await docs.get(job.docId);
+      signal.throwIfAborted();
+      if (!latest || latest.text !== rec.text) throw new Error("The document changed. Prepare it again.");
+      rec = { ...latest, codeSummaries: { ...latest.codeSummaries, ...explained.codeSummaries }, visualDescriptions: { ...latest.visualDescriptions, ...explained.visualDescriptions } };
+      await docs.put(rec);
+    }
+    const { sentences } = segment(text, rec.codeSummaries, rec.visualDescriptions);
     const passages = planPassages(sentences);
     if (!passages.length) throw new Error("There is no text to prepare.");
     update(job.id, { total: passages.length, message: undefined });

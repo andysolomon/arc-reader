@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { audioCache, docs as docStore, positions, type DocRecord, type DocSource } from "../lib/db";
+import { audioCache, docs as docStore, positions, type DocMeta, type DocRecord, type DocSource } from "../lib/db";
 import { estimateTotal, titleFrom } from "../lib/segment";
 import { uid } from "../lib/hash";
 import { preparedVoices, type PreparedVoice } from "../lib/prepared";
@@ -9,6 +9,8 @@ import { usePreparation } from "./preparation";
 import { serverPreparedKeys } from "../engine/preparation";
 import { readsOf } from "../lib/libraryProtocol";
 import { linksInMarkdown, uniqueLinks, type DocLink } from "../lib/links";
+import { updateDocument, type DocPatch } from "./documents";
+import { useCategories } from "./categories";
 
 export interface LibraryItem {
   rec: DocRecord;
@@ -25,7 +27,9 @@ interface LibraryState {
   items: LibraryItem[];
   loaded: boolean;
   refresh: () => Promise<void>;
-  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null; links?: DocLink[] }) => Promise<DocRecord>;
+  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null; meta?: DocMeta; links?: DocLink[] }) => Promise<DocRecord>;
+  /** Edit catalogue fields: title, metadata, category. */
+  update: (id: string, patch: DocPatch) => Promise<DocRecord | undefined>;
   remove: (id: string) => Promise<void>;
   touch: (id: string) => Promise<void>;
 }
@@ -59,7 +63,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       set({ loaded: true });
     }
   },
-  async create({ text, title, source, domain, voice = null, links = [] }) {
+  async create({ text, title, source, domain, voice = null, meta, links = [] }) {
     const now = Date.now();
     // Page links come from the HTML; links written into the text itself count too.
     const allLinks = uniqueLinks([...links, ...linksInMarkdown(text)]);
@@ -70,6 +74,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       source,
       domain: domain ?? (source === "paste" ? "Pasted text" : source === "sample" ? "Sample" : source === "share" ? "Shared" : "Text"),
       voice,
+      ...(meta && Object.keys(meta).length ? { meta } : {}),
       chars: text.length,
       ...(allLinks.length ? { links: allLinks } : {}),
       createdAt: now,
@@ -77,7 +82,14 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     };
     await docStore.put(rec);
     void get().refresh();
+    // Shelve new documents in the background when Jev is set up; you can change it later.
+    void useCategories.getState().suggest(rec, { quiet: true });
     return rec;
+  },
+  async update(id, patch) {
+    const next = await updateDocument(id, patch);
+    void get().refresh();
+    return next;
   },
   async remove(id) {
     usePreparation.getState().cancelDocument(id);

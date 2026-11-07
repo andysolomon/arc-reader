@@ -1,11 +1,27 @@
 import { useState } from "react";
-import { Button, Input } from "@readaloud/ui";
-import { useLlm } from "../state/llm";
+import { Button, Input, cn } from "@readaloud/ui";
+import type { StoreApi, UseBoundStore } from "zustand";
+import { useLlm, type KeyState } from "../state/llm";
 import { toast } from "../state/toast";
 
-/** Enter, replace, or remove the OpenCode Go key. The key goes to this ReadAloud server, never back to the browser. */
-export function LlmKeyField() {
-  const config = useLlm((s) => s.config);
+interface KeyFieldProps {
+  store?: UseBoundStore<StoreApi<KeyState>>;
+  /** Provider name, as in "OpenCode Go API key" */
+  name?: string;
+  envName?: string;
+  /** Where to find a key */
+  help?: string;
+  /** Last row of its panel: no divider below */
+  last?: boolean;
+}
+
+/** Enter, replace, or remove a provider key (OpenCode Go by default). The key goes to this ReadAloud server, never back to the browser. */
+export function LlmKeyField({
+  store = useLlm, name = "OpenCode Go", envName = "LLM_API_KEY",
+  help = "From the OpenCode console, or “key” under “opencode-go” in ~/.local/share/opencode/auth.json.", last,
+}: KeyFieldProps) {
+  const config = store((s) => s.config);
+  const id = `${envName.toLowerCase()}-error`;
   const [editing, setEditing] = useState(false);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,9 +34,9 @@ export function LlmKeyField() {
     setBusy(true);
     setError(null);
     try {
-      await useLlm.getState().save(key);
+      await store.getState().save(key);
       close();
-      toast("OpenCode Go key saved");
+      toast(`${name} key saved`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save the key.");
     } finally {
@@ -30,8 +46,8 @@ export function LlmKeyField() {
   const remove = async () => {
     setBusy(true);
     try {
-      await useLlm.getState().remove();
-      toast("OpenCode Go key removed");
+      await store.getState().remove();
+      toast(`${name} key removed`);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Couldn't remove the key.");
     } finally {
@@ -40,20 +56,20 @@ export function LlmKeyField() {
   };
 
   return (
-    <div className="flex flex-col gap-3 border-b border-line px-4 py-3.5">
+    <div className={cn("flex flex-col gap-3 px-4 py-3.5", !last && "border-b border-line")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div>OpenCode Go API key</div>
+          <div>{name} API key</div>
           <div className="text-[13px] text-fg2">
             {config?.configured && !editing
-              ? `${config.source === "env" ? "Set on the server (LLM_API_KEY)" : "Saved on this server"} · ends in ${config.hint}`
-              : "From the OpenCode console, or “key” under “opencode-go” in ~/.local/share/opencode/auth.json. It’s stored on this ReadAloud server, not in the browser."}
+              ? `${config.source === "env" ? `Set on the server (${envName})` : "Saved on this server"} · ends in ${config.hint}`
+              : `${help} It’s stored on this ReadAloud server, not in the browser.`}
           </div>
         </div>
         {!showForm && (
           <div className="flex gap-2">
-            <Button onClick={() => setEditing(true)} disabled={busy} className="bg-bg">Replace</Button>
-            {config?.source === "saved" && <Button variant="danger" onClick={() => void remove()} loading={busy}>Remove</Button>}
+            <Button onClick={() => setEditing(true)} disabled={busy} className="bg-bg" aria-label={`Replace ${name} key`}>Replace</Button>
+            {config?.source === "saved" && <Button variant="danger" onClick={() => void remove()} loading={busy} aria-label={`Remove ${name} key`}>Remove</Button>}
           </div>
         )}
       </div>
@@ -61,19 +77,19 @@ export function LlmKeyField() {
         <form onSubmit={(event) => void save(event)} className="flex flex-wrap items-center gap-2">
           <Input
             type="password"
-            aria-label="OpenCode Go API key"
+            aria-label={`${name} API key`}
             placeholder="Paste your API key"
             autoComplete="off"
             spellCheck={false}
             value={key}
             onChange={(event) => setKey(event.target.value)}
             aria-invalid={!!error || undefined}
-            aria-describedby={error ? "llm-key-error" : undefined}
+            aria-describedby={error ? id : undefined}
             className="min-w-0 flex-1 bg-bg font-mono text-[13px]"
           />
           <Button type="submit" variant="primary" size="md" loading={busy} disabled={!key.trim()}>Save</Button>
           {editing && <Button size="md" variant="ghost" onClick={close} disabled={busy}>Cancel</Button>}
-          {error && <p id="llm-key-error" role="alert" className="m-0 w-full text-[13px] text-danger">{error}</p>}
+          {error && <p id={id} role="alert" className="m-0 w-full text-[13px] text-danger">{error}</p>}
         </form>
       )}
     </div>

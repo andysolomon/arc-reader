@@ -17,9 +17,9 @@ export function ArticleSummary({ record }: { record: DocRecord }) {
   const label = summaryModelLabel(ready && !pending ? record.summary!.model : model);
 
   return (
-    <section aria-label="Summary" aria-busy={pending || undefined} className="mb-10 rounded-card border border-line bg-bg2 px-5 pb-4 pt-3">
+    <section aria-label="Summary" aria-busy={pending || undefined} className="mb-10 animate-rise rounded-card border border-line bg-bg2 px-5 pb-4 pt-3">
       <div className="mb-2 flex items-center gap-2">
-        <Sparkles size={16} strokeWidth={1.5} className="text-fg2" aria-hidden />
+        <Sparkles size={16} strokeWidth={1.5} className={pending ? "animate-pulse text-fg2" : "text-fg2"} aria-hidden />
         <h2 className="m-0 flex-1 text-[13px] font-normal text-fg2">
           Summary · {label}
         </h2>
@@ -40,9 +40,11 @@ export function ArticleSummary({ record }: { record: DocRecord }) {
       <div aria-live="polite">
         {pending ? (
           <div className="flex flex-col gap-2.5 py-1">
-            <Skeleton width="100%" />
-            <Skeleton width="92%" />
-            <Skeleton width="70%" />
+            <div className="summary-draft flex flex-col gap-2.5">
+              <Skeleton width="100%" />
+              <Skeleton width="92%" />
+              <Skeleton width="70%" />
+            </div>
             <p className="m-0 mt-1 text-[13px] text-fg2">Summarizing with {label}… this can take up to a minute.</p>
           </div>
         ) : error ? (

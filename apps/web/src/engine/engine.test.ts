@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PlaybackEngine, SLOW_FACTOR, type EngineDoc } from "./engine";
 import { synthesize } from "./providers";
 import { ApiUnreachable, type Chunk } from "./types";
@@ -23,11 +23,12 @@ const chunk = (extra: Partial<Chunk> = {}): Chunk => ({ source: "api", audio: ne
 
 function make(onSlow = vi.fn(), onUnavailable = vi.fn(), engineId = "omnivoice", prepareAudio?: ConstructorParameters<typeof PlaybackEngine>[0]["prepareAudio"]) {
   const onPersist = vi.fn();
+  const onError = vi.fn();
   const e = new PlaybackEngine({
     engine: () => engineId, wordTimings: () => false, isProfileVoice: () => true, offline: () => false, prepareAudio,
-    onRejected: () => {}, onOffline: () => {}, onOnline: () => {}, onPersist, onError: () => {}, onSlow, onUnavailable,
+    onRejected: () => {}, onOffline: () => {}, onOnline: () => {}, onPersist, onError, onSlow, onUnavailable,
   });
-  return { e, onSlow, onUnavailable, onPersist };
+  return { e, onSlow, onUnavailable, onPersist, onError };
 }
 
 function deferred<T>() {
@@ -39,6 +40,125 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 // A block body: a function returned from beforeEach would run as a cleanup hook.
 beforeEach(() => { synth.mockReset(); });
+
+describe("prepared audio playback", () => {
+  let gesture = false;
+  let frames: FrameRequestCallback[];
+  let elements: TestAudio[];
+  class TestAudio {
+    src = "";
+    currentTime = 0;
+    duration = 10;
+    readyState = 2;
+    paused = true;
+    ended = false;
+    preload = "";
+    playbackRate = 1;
+    volume = 1;
+    onloadedmetadata: (() => void) | null = null;
+    onended: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    ontimeupdate: (() => void) | null = null;
+    private allowed = false;
+    constructor(src = "") { this.src = src; elements.push(this); }
+    play = vi.fn(async () => {
+      // Model browsers that grant playback permission to the element the user started.
+      if (gesture) this.allowed = true;
+      if (!this.allowed) throw new DOMException("User gesture required", "NotAllowedError");
+      this.paused = false;
+    });
+    pause() { this.paused = true; }
+    removeAttribute(name: string) { if (name === "src") this.src = ""; }
+    load() { this.currentTime = 0; this.ended = false; }
+    finish() { this.paused = true; this.ended = true; this.onended?.(); }
+  }
+
+  beforeEach(() => {
+    elements = [];
+    frames = [];
+    gesture = true;
+    vi.stubGlobal("Audio", TestAudio);
+    vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => frames.push(fn));
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    synth.mockResolvedValue(chunk({ source: "cache", duration: 10 }));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+  });
+
+  it("plays every prepared passage without requiring another gesture or animation frames", async () => {
+    const { e, onError } = make();
+    e.load(doc(3));
+    await e.prepare();
+    await e.play();
+    gesture = false;
+    for (let index = 1; index < 3; index++) {
+      elements.at(-1)!.finish();
+      await tick();
+      expect(e.getSnapshot()).toMatchObject({ playing: true, index, ended: false });
+    }
+    elements.at(-1)!.finish();
+    expect(e.getSnapshot()).toMatchObject({ playing: false, index: 2, ended: true, fraction: 1 });
+    expect(onError).not.toHaveBeenCalled();
+    expect(synth).toHaveBeenCalledTimes(3);
+    expect(elements).toHaveLength(1);
+    e.unload();
+  });
+
+  it("trims trailing silence and keeps sentence position in the background without animation frames", async () => {
+    synth.mockResolvedValueOnce(chunk({ source: "cache", duration: 10, starts: [0, 2], tail: 6 }))
+      .mockResolvedValue(chunk({ source: "cache", duration: 10 }));
+    const { e } = make();
+    e.load(paraDoc([2, 1]));
+    await e.prepare();
+    await e.play();
+    const audio = elements[0];
+    audio.currentTime = 3;
+    audio.ontimeupdate?.();
+    expect(e.getSnapshot()).toMatchObject({ index: 1, offset: 1 });
+    gesture = false;
+    audio.currentTime = 4.3;
+    audio.ontimeupdate?.();
+    await tick();
+    expect(e.getSnapshot()).toMatchObject({ index: 2, playing: true });
+    e.unload();
+  });
+
+  it("freezes progress while the audio element is buffering", async () => {
+    const { e } = make();
+    e.load(doc(1));
+    await e.play();
+    elements[0].readyState = 1;
+    frames.at(-1)!(performance.now() + 1000);
+    expect(e.getSnapshot().offset).toBe(0);
+    e.unload();
+  });
+
+  it("saves the actual audio position when paused between animation frames", async () => {
+    synth.mockResolvedValue(chunk({ source: "cache", duration: 10, starts: [0, 4] }));
+    const { e, onPersist } = make();
+    e.load(paraDoc([2]));
+    await e.play();
+    elements[0].currentTime = 6;
+    e.pause();
+    expect(onPersist).toHaveBeenLastCalledWith(expect.objectContaining({ index: 1, offset: 2, playing: false }));
+    e.unload();
+  });
+
+  it("stops at an unread passage on a media error instead of skipping it", async () => {
+    const { e, onError } = make();
+    e.load(doc(3));
+    await e.prepare();
+    await e.play();
+    elements[0].onerror?.();
+    await tick();
+    expect(e.getSnapshot()).toMatchObject({ index: 0, playing: false, ended: false });
+    expect(onError).toHaveBeenCalledWith("Audio playback failed. Tap play to retry.");
+    e.unload();
+  });
+});
 
 describe("prepare", () => {
   it("submits the entire document to the server before downloading its clips", async () => {

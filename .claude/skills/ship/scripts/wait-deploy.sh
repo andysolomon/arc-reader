@@ -1,5 +1,5 @@
 #!/bin/sh
-# Wait for the post-merge Docker rebuild of main's current commit, then check the live app.
+# Wait for the post-merge deploy (kind, or Docker Compose) of main's current commit, then check the live app.
 # Usage: wait-deploy.sh <main-checkout> [timeout-seconds]
 set -eu
 main=${1:?usage: wait-deploy.sh <main-checkout> [timeout-seconds]}
@@ -25,10 +25,15 @@ while [ -z "$result" ]; do
 done
 echo "rebuild of $sha: $result"
 
-inspect='docker inspect -f "{{.State.StartedAt}}" readaloud-web-1'
-started=$({ sh -c "$inspect" 2>/dev/null || echo "$inspect" | newgrp docker 2>/dev/null; } | grep -m1 . || echo unknown)
-echo "web container started: $started"
-# The container restarts after the build; give the preview server time to start listening.
+if [ -x "$main/deploy/kind/deploy.sh" ]; then
+  started=$(kubectl --context kind-readaloud -n readaloud get pods -l app=web -o jsonpath='{range .items[*]}{.spec.containers[0].image} started {.status.startTime}{"\n"}{end}' 2>/dev/null | grep -m1 . || echo unknown)
+  echo "web pod: $started"
+else
+  inspect='docker inspect -f "{{.State.StartedAt}}" readaloud-web-1'
+  started=$({ sh -c "$inspect" 2>/dev/null || echo "$inspect" | newgrp docker 2>/dev/null; } | grep -m1 . || echo unknown)
+  echo "web container started: $started"
+fi
+# The pod or container restarts after the build; give the preview server time to start listening.
 bundle=""
 while [ -z "$bundle" ]; do
   bundle=$(curl -s http://127.0.0.1:4179/ | grep -o 'assets/index-[^"]*\.js' | head -1 || true)

@@ -1,0 +1,97 @@
+#!/bin/bash
+# First boot of the ReadAloud host (host.tf). Logs to /var/log/readaloud-setup.log.
+set -euxo pipefail
+umask 077
+exec >>/var/log/readaloud-setup.log 2>&1
+
+# The data volume is attached after the instance starts; wait for it.
+device=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${data_volume_serial}
+for _ in $(seq 120); do [ -e "$device" ] && break; sleep 5; done
+[ -e "$device" ]
+blkid "$device" || mkfs.ext4 -L readaloud-data "$device"
+mkdir -p /data
+echo "LABEL=readaloud-data /data ext4 defaults,nofail 0 2" >>/etc/fstab
+mount /data
+
+# The web container runs as uid 1000 (node).
+install -d -o 1000 -g 1000 -m 700 /data/library /data/preparations
+install -d -m 700 /data/tailscale /data/k3s /data/rancher-node
+
+# Tailscale keeps its identity on the data volume, so a replaced instance rejoins as
+# the same machine without a new auth key.
+curl -fsSL https://tailscale.com/install.sh | sh
+install -d /etc/systemd/system/tailscaled.service.d /etc/systemd/system/k3s.service.d
+for service in tailscaled k3s; do
+  cat >"/etc/systemd/system/$service.service.d/data.conf" <<'EOF'
+[Unit]
+RequiresMountsFor=/data
+EOF
+done
+cat >/etc/default/tailscaled <<'EOF'
+PORT="41641"
+FLAGS="--state=/data/tailscale/tailscaled.state --statedir=/data/tailscale"
+EOF
+systemctl daemon-reload
+systemctl restart tailscaled
+sleep 5
+if ! tailscale status >/dev/null 2>&1; then
+  set +x # keep the auth key out of the log
+  key=$(printf '%s' '${tailscale_auth_key}' | base64 -d)
+  tailscale up --hostname=${hostname} --timeout=120s $${key:+--authkey="$key"}
+  unset key
+  set -x
+fi
+
+# Keep ordinary pod DNS on the VPC resolver; only the tailnet zone uses MagicDNS.
+# Otherwise Tailscale's host resolv.conf can send all pod lookups to its local stub.
+# AmazonProvidedDNS is available at this link-local address in every VPC.
+printf 'nameserver 169.254.169.253\n' >/etc/rancher-resolv.conf
+
+# Pods resolve tailnet names (the Mac mini's VoiceStudio) through Tailscale's resolver.
+# k3s applies manifests in this directory when it starts.
+install -d /data/k3s/server/manifests
+cat >/data/k3s/server/manifests/tailnet-dns.yaml <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  tailnet.server: |
+    ${tailnet}:53 {
+      forward . 100.100.100.100
+    }
+EOF
+
+# Kubelet pulls from ECR with the instance role.
+install -d /var/lib/rancher/credentialprovider/bin
+curl -fsSLo /var/lib/rancher/credentialprovider/bin/ecr-credential-provider \
+  https://artifacts.k8s.io/binaries/cloud-provider-aws/v1.37.0/linux/amd64/ecr-credential-provider-linux-amd64
+echo "842e0fd8159f5ed8df2f38e6521e1e4f0a1ee80cf1e1ac119bbf20bf9c20681c  /var/lib/rancher/credentialprovider/bin/ecr-credential-provider" | sha256sum -c
+chmod 755 /var/lib/rancher/credentialprovider/bin/ecr-credential-provider
+cat >/var/lib/rancher/credentialprovider/config.yaml <<'EOF'
+apiVersion: kubelet.config.k8s.io/v1
+kind: CredentialProviderConfig
+providers:
+  - name: ecr-credential-provider
+    matchImages: ["*.dkr.ecr.*.amazonaws.com"]
+    defaultCacheDuration: 12h
+    apiVersion: credentialprovider.kubelet.k8s.io/v1
+EOF
+
+# k3s with its state on the data volume. The node keeps its name and password across
+# replacements, so the cluster recognises it. Traefik and the load balancer come from
+# the readaloud module instead of k3s's bundled ones.
+install -d /etc/rancher
+ln -sfn /data/rancher-node /etc/rancher/node
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${k3s_version}' sh -s - server \
+  --data-dir /data/k3s \
+  --node-name ${hostname} \
+  --resolv-conf /etc/rancher-resolv.conf \
+  --kube-proxy-arg=proxy-mode=iptables \
+  --disable traefik --disable servicelb \
+  --tls-san ${hostname}.${tailnet} \
+  --write-kubeconfig-mode 0600
+
+# https://${hostname}.${tailnet} → Traefik's web NodePort.
+tailscale serve --bg --yes --https=443 "http://127.0.0.1:${web_node_port}"

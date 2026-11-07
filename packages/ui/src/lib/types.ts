@@ -17,6 +17,8 @@ export interface SentenceLike {
 }
 
 export interface ParagraphLike {
+  visual?: { kind: "image" | "diagram"; src: string; alt: string; caption: string; source: "description" | "caption" | "unavailable" };
+  code?: { text: string; language: string; summarized: boolean };
   sentences: SentenceLike[];
   /** flat index of first sentence in this paragraph */
   start: number;

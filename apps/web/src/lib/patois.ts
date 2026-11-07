@@ -1,3 +1,5 @@
+import { readingBlocks, fencedCode } from "./codeBlocks";
+import { visualBlock } from "./visuals";
 import type { DocRecord } from "./db";
 
 const BASE = ((import.meta.env.VITE_OPENAI_BASE as string | undefined) ?? "").replace(/\/$/, "");
@@ -33,10 +35,17 @@ export async function preparePatois(rec: DocRecord, signal: AbortSignal, progres
   signal.throwIfAborted();
   if (hasPatois(rec)) return rec;
   if (!BASE) throw new Error("Patois rewriting needs the OpenAI connection. Choose Jamaican English to read the original text.");
-  const chunks = patoisChunks(rec.text);
+  const blocks = readingBlocks(rec.text);
+  // Preserve visual metadata verbatim instead of asking the translator to rewrite image URLs or bytes.
+  const chunks = blocks.some((block) => block.kind === "visual")
+    ? blocks.flatMap((block) => block.kind === "visual" ? [{ text: visualBlock(block.visual), visual: true }]
+      : patoisChunks(block.kind === "code" ? fencedCode(block.text, block.language) : block.text).map((text) => ({ text, visual: false })))
+    : patoisChunks(rec.text).map((text) => ({ text, visual: false }));
   if (!chunks.length) throw new Error("There is no text to rewrite.");
   const translated: string[] = [];
-  for (const [index, text] of chunks.entries()) {
+  for (const [index, chunk] of chunks.entries()) {
+    const { text } = chunk;
+    if (chunk.visual) { translated.push(text); continue; }
     signal.throwIfAborted();
     progress(`Rewriting into Jamaican Patois… ${index + 1} of ${chunks.length}`);
     const response = await fetch(`${BASE}/v1/chat/completions`, {
