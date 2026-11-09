@@ -31,10 +31,16 @@ export default function App() {
   useEffect(() => {
     void useLibrary.getState().refresh();
     void useVoices.getState().load();
-    return startLibrarySync(() => {
+    // iOS aborts requests while the app is in the background, which can leave saved voices unnamed.
+    const reloadVoices = () => {
+      if (document.visibilityState === "visible" && !useVoices.getState().voices.some((v) => v.kind === "profile")) void useVoices.getState().loadServer();
+    };
+    document.addEventListener("visibilitychange", reloadVoices);
+    const stopSync = startLibrarySync(() => {
       void useLibrary.getState().refresh();
       void usePreparation.getState().refreshShared().then(() => useLibrary.getState().refresh());
     });
+    return () => { document.removeEventListener("visibilitychange", reloadVoices); stopSync(); };
   }, []);
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}>

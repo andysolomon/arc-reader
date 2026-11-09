@@ -1,10 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
+import { FXTWITTER_API, xPostHtml, xPostId, type FxTweet } from "./vite.xpost";
 
 /**
  * GET /api/fetch?url=… fetches a web page server-side and returns it as-is.
  * Most sites send no CORS headers, so the browser can't read them directly;
  * the dev and preview servers can. Only http(s) URLs, GET, and pages up to 5 MB.
+ * X posts come from FxTwitter's API as HTML, since x.com itself serves only a script shell.
  */
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -24,6 +26,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   } catch {
     return send(res, 400, JSON.stringify({ error: "bad_url" }));
   }
+  const postId = xPostId(url);
+  if (postId) return handleXPost(postId, res);
   try {
     const r = await fetch(url, {
       redirect: "follow",
@@ -37,6 +41,18 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const buf = Buffer.from(await r.arrayBuffer());
     if (buf.byteLength > MAX_BYTES) return send(res, 413, JSON.stringify({ error: "too_large" }));
     send(res, 200, buf.toString("utf8"), r.headers.get("content-type") ?? "text/plain");
+  } catch (e) {
+    send(res, 502, JSON.stringify({ error: "upstream_unreachable", message: (e as Error).message }));
+  }
+}
+
+async function handleXPost(id: string, res: ServerResponse) {
+  try {
+    const r = await fetch(`${FXTWITTER_API}/status/${id}`, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { "user-agent": "ReadAloud" } });
+    if (!r.ok) return send(res, 502, JSON.stringify({ error: "upstream_status", status: r.status }));
+    const { tweet } = await r.json() as { tweet?: FxTweet };
+    if (!tweet) return send(res, 502, JSON.stringify({ error: "upstream_status", status: r.status }));
+    send(res, 200, xPostHtml(tweet), "text/html; charset=utf-8");
   } catch (e) {
     send(res, 502, JSON.stringify({ error: "upstream_unreachable", message: (e as Error).message }));
   }
