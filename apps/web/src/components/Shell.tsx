@@ -1,6 +1,5 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Clipboard } from "lucide-react";
-import { Button, Toast } from "@readaloud/ui";
+import { Toast } from "@readaloud/ui";
 import { Rail } from "./Rail";
 import { TabBar } from "./TabBar";
 import { PlayerHost } from "./PlayerHost";
@@ -38,9 +37,6 @@ export function Shell() {
         {showRail && <Rail />}
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden" data-breakpoint={bp}>
           <OfflineBanner />
-          {showTabs && pathname !== "/" && <div className="flex shrink-0 justify-end border-b border-line px-4 py-2">
-            <Button leading={<Clipboard size={16} strokeWidth={1.5} aria-hidden />} loading={clipboard.busy} onClick={() => void clipboard.readClipboard()}>Read clipboard</Button>
-          </div>}
           {(preparing || preparationError) && <div role={preparationError ? "alert" : "status"} className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line bg-bg2 px-5 py-3 text-sm">
             <span className="flex-1">{preparing || preparationError}</span>
             {preparationError && <button className="text-accent underline" onClick={() => { void usePlayer.getState().retryPreparation().then((opened) => { if (opened) navigate(`/read/${usePlayer.getState().doc!.id}`); }); }}>Retry</button>}

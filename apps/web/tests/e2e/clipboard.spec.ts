@@ -153,10 +153,13 @@ test("repeated paste while fetching imports only one document", async ({ page })
   await expect(page.locator("li")).toHaveCount(1);
 });
 
-test("phone exposes Read clipboard without opening Compose", async ({ page }) => {
+test("phone reads clipboard through Compose without a clipboard header", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await clipboard(page, TEXT);
   await page.goto("/library");
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Read clipboard", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "Compose", exact: true }).click();
   await page.getByRole("button", { name: "Read clipboard", exact: true }).click();
   await expectReading(page);
 });
