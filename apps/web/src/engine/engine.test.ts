@@ -431,3 +431,33 @@ describe("prefetch", () => {
     expect(pending).toHaveLength(0);
   });
 });
+
+describe("replacing a document's wording", () => {
+  const withText = (d: EngineDoc, index: number, text: string): EngineDoc => ({
+    ...d, sentences: d.sentences.map((s) => s.index === index ? { ...s, text, words: text.split(" ") } : s),
+  });
+
+  it("keeps the place and generates only the passages whose wording changed", async () => {
+    const { e } = make();
+    synth.mockResolvedValue(chunk({ source: "estimate", audio: undefined, duration: 1 }));
+    const original = doc(3);
+    e.load(original, 2);
+    await e.collectAudio();
+    expect(synth).toHaveBeenCalledTimes(3);
+    synth.mockClear();
+
+    expect(e.replaceText(withText(original, 1, "A chart of scores by harness"))).toBe(true);
+    expect(e.getSnapshot().index).toBe(2);
+    await e.collectAudio();
+    expect(synth.mock.calls.map(([request]) => request.text)).toEqual(["A chart of scores by harness"]);
+  });
+
+  it("refuses wording that would move sentences or passages", () => {
+    const { e } = make();
+    const original = paraDoc([2, 1]);
+    e.load(original);
+    expect(e.replaceText(doc(3))).toBe(false);
+    expect(e.replaceText({ ...original, id: "other" })).toBe(false);
+    expect(e.replaceText(paraDoc([1, 1]))).toBe(false);
+  });
+});

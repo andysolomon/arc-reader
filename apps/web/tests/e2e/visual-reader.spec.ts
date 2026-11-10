@@ -72,3 +72,24 @@ test("uses alt text without vision and keeps a broken image from interrupting re
   await expect(card).toContainText("The original image is unavailable");
   await expect(page.locator("article")).toContainText("The article continues.");
 });
+
+test("opens the reading at once and fills in descriptions as they arrive", async ({ page }) => {
+  let release!: () => void;
+  const described = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("https://example.com/slow.png", (route) => route.fulfill({ contentType: "image/png", body: Buffer.from(png, "base64") }));
+  await page.route("**/api/llm/v1/responses", async (route) => {
+    await described;
+    return route.fulfill({ json: { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: photoDescription }] }] } });
+  });
+  await page.goto("/");
+  await composeText(page, "Before.\n\n![Team working](https://example.com/slow.png)\n\nThe article continues.");
+  await page.getByTestId("listen").click();
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+  const card = page.getByRole("region", { name: "Image explanation" });
+  await expect(card).toContainText("Image description from the article: Team working");
+  await expect(page.getByText(/Preparing image and diagram descriptions/)).toHaveCount(0);
+  release();
+  await expect(card).toContainText(photoDescription);
+  await page.reload();
+  await expect(card).toContainText(photoDescription);
+});

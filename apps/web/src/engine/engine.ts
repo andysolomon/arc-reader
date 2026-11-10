@@ -174,6 +174,32 @@ export class PlaybackEngine {
     this.emit();
   }
 
+  /**
+   * Swap in new wording for the loaded document without moving the playhead, such as image
+   * descriptions that arrived after reading began. Sentences and passages must line up with
+   * the loaded ones. Changed passages are generated again, except one already playing.
+   */
+  replaceText(doc: EngineDoc): boolean {
+    const old = this.doc;
+    if (!old || old.id !== doc.id || old.sentences.length !== doc.sentences.length
+      || old.sentences.some((s, i) => s.para !== doc.sentences[i].para)) return false;
+    const before = this.passageList;
+    const passages = planPassages(doc.sentences);
+    if (passages.length !== before.length || passages.some((p, i) => p.start !== before[i].start || p.end !== before[i].end)) return false;
+    const keep = this.playing ? this.passageOf[this.index] : -1;
+    this.doc = doc;
+    this.passageList = passages;
+    for (const p of passages) {
+      if (p.text === before[p.index].text) continue;
+      for (let s = p.start; s < p.end; s++) this.durations[s] = estimateDuration(doc.sentences[s].words);
+      if (p.index !== keep) this.chunks.delete(p.index);
+    }
+    this.resetPrefetch();
+    if (this.playing) this.prefetch();
+    this.emit();
+    return true;
+  }
+
   unload() {
     this.stopMedia();
     this.token++;

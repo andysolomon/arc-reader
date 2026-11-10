@@ -116,9 +116,24 @@ export function db(): Promise<IDBPDatabase<Schema>> {
         d.createObjectStore("meta");
       },
       blocking() { void dbp?.then((d) => d.close()); dbp = null; },
+      terminated() { dbp = null; },
     });
+    const opening = dbp;
+    opening.catch(() => { if (dbp === opening) dbp = null; });
   }
   return dbp;
+}
+
+// iOS can drop the IndexedDB connection while the app is in the background, sometimes without
+// closing it, and every later save then fails. Open a fresh connection on return, and close the
+// old one once whoever still holds it (a sync takes at most a minute) has finished with it.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !dbp) return;
+    const old = dbp;
+    dbp = null;
+    setTimeout(() => { old.then((d) => d.close(), () => {}); }, 60_000);
+  });
 }
 
 const libraryListeners = new Set<() => void>();
