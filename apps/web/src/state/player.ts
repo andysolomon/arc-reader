@@ -18,6 +18,8 @@ import { readingBlocks } from "../lib/codeBlocks";
 
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
+/** Image descriptions being written for the open reading after it started. */
+let describing: AbortController | null = null;
 let retryPreparation: (() => Promise<boolean>) | null = null;
 /** The end of the current reading has already been counted; cleared once playback leaves the end. */
 let endCounted = false;
@@ -118,6 +120,26 @@ export function clampSpeed(v: number) {
 
 export const usePlayer = create<PlayerState & Actions>()((set, get) => {
   engine.subscribe((snap) => set(snap));
+
+  /** Save descriptions for a reading's images and swap them into it, keeping the listener's place. */
+  async function describeVisuals(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal) {
+    try {
+      const described = await prepareVisualDescriptions(opened, readingText, signal, () => {});
+      if (signal.aborted || described.visualDescriptions === opened.visualDescriptions) return;
+      const latest = await docStore.get(id);
+      if (signal.aborted || !latest || latest.text !== opened.text) return;
+      const record = { ...latest, visualDescriptions: { ...latest.visualDescriptions, ...described.visualDescriptions } };
+      await docStore.put(record);
+      const { doc } = get();
+      if (signal.aborted || doc?.id !== id) return;
+      const next: EngineDoc = { ...doc, ...segment(readingText, record.codeSummaries, record.visualDescriptions) };
+      if (!engine.replaceText(next)) return;
+      set({ doc: next, record });
+      // Prepared audio follows the new wording.
+      if (autoPrepare || prerendering) { get().cancelPrerender(); void get().prerender(); }
+    } catch { /* Captions and alt text keep serving. */ }
+  }
+
   return {
     ...PlaybackEngine.empty(),
     doc: null,
@@ -135,6 +157,8 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
 
     async open(rec, opts = {}) {
       opening?.abort();
+      describing?.abort();
+      describing = null;
       get().cancelPrerender();
       const controller = new AbortController();
       opening = controller;
@@ -160,12 +184,6 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       if (readingBlocks(readingText).some((block) => block.kind === "code")) {
         engine.pause();
         prepared = await prepareCodeSummaries(prepared, readingText, useSettings.getState().summaryModel, signal,
-          (preparing) => { if (!signal.aborted) set({ preparing }); });
-      }
-      signal.throwIfAborted();
-      if (readingBlocks(readingText).some((block) => block.kind === "visual")) {
-        engine.pause();
-        prepared = await prepareVisualDescriptions(prepared, readingText, signal,
           (preparing) => { if (!signal.aborted) set({ preparing }); });
       }
       signal.throwIfAborted();
@@ -199,6 +217,11 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         && !isPaidEngine(voice.engine) && useSettings.getState().engine !== LOCAL_ENGINE && !get().offline;
       if (autoPrepare || hasActivePreparation(preparationRequests(requests))) void get().prerender();
       if (opts.autoplay) void engine.play();
+      // Reading starts with captions and alt text; descriptions replace them as they arrive.
+      if (readingBlocks(readingText).some((block) => block.kind === "visual")) {
+        describing = new AbortController();
+        void describeVisuals(rec.id, prepared, readingText, !!autoPrepare, describing.signal);
+      }
       retryPreparation = null;
       return true;
       } catch (error) {
@@ -258,6 +281,8 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       set({ prerendering: null });
     },
     close() {
+      describing?.abort();
+      describing = null;
       get().cancelPreparation();
       get().cancelPrerender();
       engine.unload();
