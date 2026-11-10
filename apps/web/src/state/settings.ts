@@ -6,6 +6,7 @@ import { LOCAL_ENGINE, type EngineId } from "../engine/types";
 import { DEFAULT_ENGINE, OPENAI_MODEL, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL } from "../engine/providers";
 import { DEFAULT_VOICE_ID } from "../data/voices";
 import { setSpeechEndpoint } from "../lib/speechServer";
+import { DEFAULT_LIBRARY_SERVER, setLibraryServer } from "../lib/libraryServer";
 import { DEFAULT_SUMMARY_MODEL, isSummaryModel, type SummaryModel } from "../lib/summary";
 
 export type PlayerStyle = "capsule" | "bar";
@@ -43,6 +44,8 @@ export interface Settings {
   speechServer: string;
   /** VoiceStudio key sent only with an absolute speech-server URL. */
   speechServerKey: string;
+  /** Absolute Arc Reader website root for native library sync; web stays same-origin. */
+  libraryServer: string;
 }
 
 interface Actions {
@@ -82,6 +85,7 @@ export const useSettings = create<Settings & Actions>()(
       email: null,
       speechServer: "",
       speechServerKey: "",
+      libraryServer: DEFAULT_LIBRARY_SERVER,
       set: (k, v) => set({ [k]: v } as Partial<Settings>),
       patch: (p) => set(p),
     }),
@@ -116,9 +120,10 @@ export function useThemeId(): ThemeId {
   return useSettings((s) => s.theme) ?? systemTheme();
 }
 
-function publishSpeechEndpoint(state: { speechServer?: string; speechServerKey?: string }) {
+function publishEndpoints(state: { speechServer?: string; speechServerKey?: string; libraryServer?: string }) {
   setSpeechEndpoint({ override: state.speechServer ?? "", key: state.speechServerKey ?? "" });
+  setLibraryServer(state.libraryServer ?? DEFAULT_LIBRARY_SERVER);
 }
 
-publishSpeechEndpoint(useSettings.getState());
-useSettings.subscribe((state) => publishSpeechEndpoint(state));
+publishEndpoints(useSettings.getState());
+useSettings.subscribe((state) => publishEndpoints(state));

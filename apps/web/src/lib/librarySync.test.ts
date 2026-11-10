@@ -4,8 +4,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { db, docs, positions, type DocRecord, type PositionRecord } from "./db";
-import { syncLibrary, useLibrarySync } from "./librarySync";
+import { reconnectLibrary, syncLibrary, useLibrarySync } from "./librarySync";
 import { LibraryService } from "../../vite.library";
+import { CapacitorHttp } from "@capacitor/core";
+import { isNativeApp } from "./native";
+import { DEFAULT_LIBRARY_SERVER, setLibraryServer } from "./libraryServer";
+
+vi.mock("./native", () => ({ isNativeApp: vi.fn(() => false) }));
+vi.mock("@capacitor/core", () => ({ CapacitorHttp: { post: vi.fn() } }));
 
 const doc = (id: string, updatedAt = 1): DocRecord => ({ id, title: id, text: "Hello.", source: "paste", domain: "Pasted text", voice: null, chars: 6, createdAt: 1, updatedAt });
 const position = (docId: string, updatedAt = 1): PositionRecord => ({ docId, index: 1, offset: 0, fraction: 0.5, total: 2, updatedAt });
@@ -14,8 +20,14 @@ describe("offline library synchronization", () => {
   let directory: string, service: LibraryService;
   const network = vi.fn<typeof fetch>();
   beforeEach(async () => {
+    vi.mocked(isNativeApp).mockReturnValue(false);
+    setLibraryServer(DEFAULT_LIBRARY_SERVER);
+    vi.mocked(CapacitorHttp.post).mockReset();
     directory = await mkdtemp(join(tmpdir(), "readaloud-sync-"));
     service = new LibraryService(directory);
+    vi.mocked(CapacitorHttp.post).mockImplementation(async (options) => ({
+      status: 200, data: await service.sync(options.data), headers: {}, url: options.url,
+    }));
     const d = await db();
     await Promise.all([d.clear("docs"), d.clear("positions"), d.clear("outbox"), d.clear("meta"), d.clear("audio")]);
     network.mockReset();
@@ -36,6 +48,91 @@ describe("offline library synchronization", () => {
     expect(await d.count("audio")).toBe(1);
     await syncLibrary();
     expect(JSON.parse(network.mock.calls[1][1]!.body as string).changes).toEqual([]);
+  });
+
+  it("keeps browser sync on its own server even when a native library address is saved", async () => {
+    setLibraryServer("https://another.example:8449");
+    expect(await syncLibrary()).toBe(true);
+    expect(network.mock.calls[0][0]).toBe("/api/library/sync");
+    expect(CapacitorHttp.post).not.toHaveBeenCalled();
+  });
+
+  it("pulls the shared library and uploads phone edits through absolute native HTTP", async () => {
+    vi.mocked(isNativeApp).mockReturnValue(true);
+    setLibraryServer("https://reader.example:8449/");
+    await service.sync({ changes: [{ kind: "doc", record: doc("desktop") }, { kind: "position", record: position("desktop") }] });
+    await docs.put(doc("phone"));
+    expect(await syncLibrary()).toBe(true);
+    expect(CapacitorHttp.post).toHaveBeenCalledWith(expect.objectContaining({
+      url: "https://reader.example:8449/api/library/sync",
+      headers: { "content-type": "application/json" },
+      data: { changes: [{ kind: "doc", record: await docs.get("phone") }] },
+      responseType: "json", connectTimeout: 20_000, readTimeout: 20_000,
+    }));
+    expect(network).not.toHaveBeenCalled();
+    expect((await docs.all()).map((r) => r.id).sort()).toEqual(["desktop", "phone"]);
+    expect((await positions.get("desktop"))?.fraction).toBe(0.5);
+    expect(useLibrarySync.getState()).toMatchObject({ status: "synced", documents: 2, pending: 0 });
+  });
+
+  it("explains native setup and preserves offline documents when no server is configured", async () => {
+    vi.mocked(isNativeApp).mockReturnValue(true);
+    setLibraryServer("");
+    await docs.put(doc("phone"));
+    expect(await syncLibrary()).toBe(false);
+    expect(useLibrarySync.getState()).toMatchObject({ status: "offline", pending: 1, error: expect.stringContaining("Settings → Library server") });
+    expect(CapacitorHttp.post).not.toHaveBeenCalled();
+    expect(network).not.toHaveBeenCalled();
+    expect(await docs.get("phone")).toBeDefined();
+  });
+
+  it.each([
+    { status: 503, data: { error: "Server busy" } },
+    { status: 200, data: "<!DOCTYPE html>not a library" },
+    { status: 200, data: null },
+  ])("keeps native writes queued after a bad response ($status, $data)", async ({ status, data }) => {
+    vi.mocked(isNativeApp).mockReturnValue(true);
+    await docs.put(doc("phone"));
+    vi.mocked(CapacitorHttp.post).mockResolvedValueOnce({ status, data, headers: {}, url: "" });
+    expect(await syncLibrary()).toBe(false);
+    expect(await (await db()).count("outbox")).toBe(1);
+    expect(await docs.get("phone")).toBeDefined();
+    expect(await syncLibrary()).toBe(true);
+  });
+
+  it("retries native network failures without losing edits", async () => {
+    vi.mocked(isNativeApp).mockReturnValue(true);
+    await docs.put(doc("phone"));
+    vi.mocked(CapacitorHttp.post).mockRejectedValueOnce(new Error("Network unavailable"));
+    expect(await syncLibrary()).toBe(false);
+    expect(useLibrarySync.getState()).toMatchObject({ status: "offline", pending: 1 });
+    expect(await syncLibrary()).toBe(true);
+    expect((await service.sync({ changes: [] })).docs[0].id).toBe("phone");
+  });
+
+  it("ignores a stale native response and reconnects to the newly saved address", async () => {
+    vi.mocked(isNativeApp).mockReturnValue(true);
+    setLibraryServer("https://old.example");
+    await docs.put(doc("phone"));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let received!: () => void;
+    const receiving = new Promise<void>((resolve) => { received = resolve; });
+    vi.mocked(CapacitorHttp.post).mockImplementationOnce(async () => {
+      received();
+      await gate;
+      return { status: 200, data: { docs: [doc("old-server")], positions: [], deleted: ["phone"] }, headers: {}, url: "" };
+    });
+    const oldSync = syncLibrary();
+    await receiving;
+    setLibraryServer("https://new.example");
+    const newSync = reconnectLibrary();
+    release();
+    expect(await oldSync).toBe(false);
+    expect(await newSync).toBe(true);
+    expect(CapacitorHttp.post).toHaveBeenLastCalledWith(expect.objectContaining({ url: "https://new.example/api/library/sync" }));
+    expect(await docs.get("phone")).toBeDefined();
+    expect(await docs.get("old-server")).toBeUndefined();
   });
 
   it("retains offline writes and deletes across reloads, then drains them on reconnect", async () => {

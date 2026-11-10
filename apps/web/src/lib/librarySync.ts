@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { db, pendingChange, subscribeLibraryWrites } from "./db";
 import type { LibrarySnapshot, PendingChange } from "./libraryProtocol";
+import { librarySyncUrl, requestLibrarySync } from "./libraryServer";
 
 interface SyncState {
   status: "syncing" | "synced" | "offline";
@@ -87,6 +88,7 @@ export function syncLibrary(): Promise<boolean> {
     try {
       await migrate();
       const d = await db();
+      const url = librarySyncUrl();
       let snapshot: LibrarySnapshot | undefined;
       // A second round immediately uploads any local records recovered during reconciliation.
       for (let round = 0; round < 2; round++) {
@@ -102,14 +104,10 @@ export function syncLibrary(): Promise<boolean> {
           size += bytes;
         }
         for (const sent of batches) {
-          const response = await fetch("/api/library/sync", {
-            method: "POST", headers: { "content-type": "application/json" },
-            body: JSON.stringify({ changes: sent.map((item) => item.change) }),
-            signal: AbortSignal.timeout(20_000), cache: "no-store",
-          });
-          if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Library server unavailable.");
-          snapshot = await response.json() as LibrarySnapshot;
-          if (!Array.isArray(snapshot.docs) || !Array.isArray(snapshot.positions) || !Array.isArray(snapshot.deleted)) throw new Error("Library server unavailable.");
+          if (url !== librarySyncUrl()) throw new Error("Library server changed. Sync again to connect.");
+          snapshot = await requestLibrarySync(url, sent.map((item) => item.change));
+          // A response from the previous address must not acknowledge queued edits.
+          if (url !== librarySyncUrl()) throw new Error("Library server changed. Sync again to connect.");
           await apply(snapshot, sent);
         }
         if (!await d.count("outbox")) break;
@@ -127,6 +125,12 @@ export function syncLibrary(): Promise<boolean> {
     }
   })().finally(() => { inflight = null; });
   return inflight;
+}
+
+/** Settings changed the address: finish any old request before syncing the new one. */
+export async function reconnectLibrary(): Promise<boolean> {
+  await inflight;
+  return syncLibrary();
 }
 
 /** Pull other clients' changes, retry offline writes, and refresh promptly on reconnect/focus. */

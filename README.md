@@ -58,7 +58,13 @@ To use VoiceStudio or a ReadAloud server instead, open Settings → Speech serve
 - VoiceStudio itself: `https://<mac>.<tailnet>.ts.net:3900`, plus the API key if the server requires one. The key is stored on the device and sent only to that absolute URL.
 - A ReadAloud server that already proxies VoiceStudio and holds the key: `https://<host>.<tailnet>.ts.net:8449/api/vs`. Leave the key empty.
 
-Those requests use Capacitor's native HTTP stack, so the server does not need to allow the `capacitor://` origin. `localhost` is the phone, not the Mac. Background preparation, the shared library, and OpenAI/Fish proxies stay on the web server; they are not part of the bundled shell. Cached clips still play offline.
+Those requests use Capacitor's native HTTP stack, so the server does not need to allow the `capacitor://` origin. `localhost` is the phone, not the Mac. Background preparation and OpenAI/Fish proxies stay on the web server; they are not part of the bundled shell. Cached clips still play offline.
+
+### Shared library on iOS
+
+The iOS app syncs documents and listening progress with `https://omarchy.tail1b9428.ts.net:8449` by default, using native HTTP. Keep Tailscale connected on the phone. **Settings → Library server** lets you change the website root and **Save and sync** immediately connects; this is separate from the speech-server setting, so the iPhone's own voice still works. Local documents merge into the selected shared library. Failed requests retain local readings and queued changes for retry.
+
+Set `VITE_LIBRARY_SERVER` before `pnpm ios:sync` to bake in a different default (an empty value requires setup). Existing installations without this setting inherit the default on update; a saved address takes precedence. Browser builds continue to sync with their own origin. Library errors link to Settings instead of leaving you with only a retry button. Rebuild and install the iOS app after code changes; updating the website alone does not update the bundled app.
 
 The audio session is playback, and the app declares the audio background mode, so the current passage keeps playing when the screen locks. There is no lock-screen play/pause button. iOS can suspend the app in a gap between sentences, and the orange background-audio indicator is the cost of letting a reader continue while locked. The browser PWA is unchanged.
 

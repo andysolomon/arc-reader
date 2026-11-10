@@ -18,6 +18,7 @@ import { syncLibrary, useLibrarySync } from "../lib/librarySync";
 import { PreparationQueue, PrepareDialog, PreparedStatus } from "../components/LibraryPreparation";
 import { useCategories } from "../state/categories";
 import { useJev } from "../state/llm";
+import { isNativeApp } from "../lib/native";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
@@ -137,6 +138,7 @@ export function LibraryPage() {
           {sync.status === "synced" && <span aria-label="Synced document count">· {sync.documents} {sync.documents === 1 ? "document" : "documents"}</span>}
           <button type="button" disabled={sync.status === "syncing"} className="ml-1.5 text-accent hover:text-fg disabled:opacity-50" onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}>{sync.status === "offline" ? "Retry sync" : "Sync now"}</button>
           {sync.status === "offline" && sync.error && <span className="basis-full">{sync.error}</span>}
+          {sync.status === "offline" && isNativeApp() && <Link to="/settings" className="text-accent hover:text-fg">Library server settings</Link>}
         </div>
         {items.length > 0 && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by voice">

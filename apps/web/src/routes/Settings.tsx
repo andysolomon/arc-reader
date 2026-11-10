@@ -20,6 +20,7 @@ import { SUMMARY_MODELS } from "../lib/summary";
 import { useJev, useLlm } from "../state/llm";
 import { CATEGORIES } from "../lib/category";
 import { LlmKeyField } from "../components/LlmKeyField";
+import { LibraryServerSettings } from "../components/LibraryServerSettings";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -84,6 +85,12 @@ export function SettingsPage() {
     <section data-screen="settings" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[720px] flex-col gap-9">
         <h1 className="m-0 font-serif text-[26px] font-medium">Settings</h1>
+
+        {native && (
+          <Section title="Library server">
+            <LibraryServerSettings />
+          </Section>
+        )}
 
         <Section title="Appearance">
           <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">

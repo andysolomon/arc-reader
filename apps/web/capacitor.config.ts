@@ -5,7 +5,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * bundle, and `server.url` is intentionally unset so the web view loads those
  * files from the app. It does not load a remote page at startup.
  *
- * Absolute speech-server requests (Settings → Speech server) go through the
+ * Absolute library and speech-server requests (Settings) go through the
  * native HTTP stack so a tailnet VoiceStudio does not need CORS headers.
  */
 const config: CapacitorConfig = {
