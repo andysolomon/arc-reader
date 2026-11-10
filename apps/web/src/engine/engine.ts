@@ -1,4 +1,7 @@
+import type { PluginListenerHandle } from "@capacitor/core";
 import type { WordTiming } from "../lib/db";
+import { listenDeviceSpeech, speakOnDevice, stopDeviceSpeech } from "../lib/deviceSpeech";
+import { isNativeApp } from "../lib/native";
 import { estimateDuration, planPassages, type Passage, type Segmented, type Sentence } from "../lib/segment";
 import { isPaidEngine, synthesize, type SynthOptions } from "./providers";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type EngineId } from "./types";
@@ -119,6 +122,10 @@ export class PlaybackEngine {
   private audioUrl: string | null = null;
   private utter: SpeechSynthesisUtterance | null = null;
   private utterWordBase = 0;
+  /** On-device utterance in flight (iOS). The estimate clock highlights words; the native callback advances. */
+  private nativeSpeech = false;
+  private deviceGen = 0;
+  private boundaryHandle: PluginListenerHandle | null = null;
   private raf = 0;
   private last = 0;
   private token = 0;
@@ -211,8 +218,8 @@ export class PlaybackEngine {
   setSpeed(v: number) {
     this.speed = v;
     if (this.audio) this.audio.playbackRate = v;
-    if (this.utter && this.playing) {
-      // Web Speech cannot change rate mid-utterance: restart from the current word.
+    if ((this.utter || this.nativeSpeech) && this.playing) {
+      // Neither Web Speech nor AVSpeech can change rate mid-utterance: restart from the current word.
       this.startLocal(this.current!, this.token);
     }
     this.emit();
@@ -561,6 +568,64 @@ export class PlaybackEngine {
   }
 
   private startLocal(_chunk: Chunk, token: number) {
+    if (isNativeApp()) {
+      this.startDeviceVoice(token);
+      return;
+    }
+    this.startWebSpeech(token);
+  }
+
+  /** AVSpeechSynthesizer. Word ranges drive the highlight; the promise advances the sentence. */
+  private startDeviceVoice(token: number) {
+    const doc = this.doc;
+    if (!doc) return;
+    const s = doc.sentences[this.index];
+    const startWord = Math.max(0, Math.min(s.words.length - 1, this.wordFromOffset(this.offset, s.words.length, undefined)));
+    const words = s.words.slice(startWord);
+    const text = words.join(" ");
+    const starts: number[] = [];
+    let acc = 0;
+    for (const w of words) {
+      starts.push(acc);
+      acc += w.length + 1;
+    }
+    this.nativeSpeech = true;
+    this.utterWordBase = startWord;
+    this.offset = (startWord / Math.max(1, s.words.length)) * this.durations[this.index];
+    const gen = ++this.deviceGen;
+    void this.bindDeviceSpeech(text, doc.lang || "en-US", starts, token, gen);
+  }
+
+  private async bindDeviceSpeech(text: string, lang: string, starts: number[], token: number, gen: number) {
+    const alive = () => gen === this.deviceGen && token === this.token && this.nativeSpeech;
+    try {
+      // A speed change stops the previous utterance before the next one starts, so the two cannot overlap.
+      await stopDeviceSpeech().catch(() => undefined);
+      if (!alive()) return;
+      this.boundaryHandle = await listenDeviceSpeech((charIndex) => {
+        if (!alive() || !this.doc) return;
+        let wi = 0;
+        while (wi < starts.length - 1 && starts[wi + 1] <= charIndex) wi++;
+        const abs = this.utterWordBase + wi;
+        const n = this.doc.sentences[this.index]?.words.length ?? 1;
+        this.offset = Math.max(this.offset, (abs / n) * this.durations[this.index]);
+        this.wordIndex = abs;
+        this.emit();
+      });
+      if (!alive()) return;
+      if (text.trim()) await speakOnDevice(text, lang, Math.max(0.1, Math.min(10, this.speed)));
+      if (!alive()) return;
+      this.nativeSpeech = false;
+      this.advance();
+    } catch {
+      if (!alive()) return;
+      this.nativeSpeech = false;
+      // WKWebView's Web Speech API can stay silent and never end the utterance.
+      // The estimate clock finishes this sentence instead.
+    }
+  }
+
+  private startWebSpeech(token: number) {
     const s = this.doc!.sentences[this.index];
     const synth = window.speechSynthesis;
     synth.cancel();
@@ -628,6 +693,14 @@ export class PlaybackEngine {
       this.utter = null;
       window.speechSynthesis?.cancel();
     }
+    if (this.nativeSpeech || this.boundaryHandle) {
+      this.nativeSpeech = false;
+      this.deviceGen++;
+      const handle = this.boundaryHandle;
+      this.boundaryHandle = null;
+      void handle?.remove();
+      void stopDeviceSpeech();
+    }
   }
 
   /** Read the media clock even when the UI has not received an animation frame. */
@@ -665,20 +738,20 @@ export class PlaybackEngine {
     if (this.audio) {
       // A paused or buffering element must never advance on an estimated clock.
       if (this.updateAudio()) return;
-    } else if (!this.utter) {
+    } else if (!this.utter && !this.nativeSpeech) {
       this.offset += dt * this.speed;
     } else {
-      // Web Speech: the estimate clock keeps the word underline moving between boundary events,
-      // but never runs past the end; onend advances.
+      // Spoken locally: the estimate clock keeps the word underline moving between boundary
+      // events, but never runs past the end. The utterance ending advances the sentence.
       this.offset = Math.min(this.offset + dt * this.speed, dur - 0.001);
     }
-    if (!this.audio && !this.utter && this.offset >= dur) {
+    if (!this.audio && !this.utter && !this.nativeSpeech && this.offset >= dur) {
       this.advance();
       return;
     }
     const s = this.doc.sentences[this.index];
     const w = this.wordFromOffset(this.offset, s.words.length, this.sentenceTimings());
-    if (!this.utter || w > this.wordIndex) this.wordIndex = w;
+    if ((!this.utter && !this.nativeSpeech) || w > this.wordIndex) this.wordIndex = w;
     this.emit();
     this.raf = requestAnimationFrame(this.loop);
   };

@@ -10,13 +10,14 @@ import { fmtTime } from "../lib/format";
 import { VoiceAvatar } from "./VoiceAvatar";
 
 /** Full-width bar, 72px tall. `compact` renders the one-handed mobile layout (scrubber above controls). */
-export function PlayerBar(p: PlayerProps) {
+export function PlayerBar({ safeBottom = true, ...p }: PlayerProps & { safeBottom?: boolean }) {
+  const bottomPad = safeBottom ? "pb-[max(env(safe-area-inset-bottom),8px)]" : "pb-2";
   if (p.compact) {
     return (
       <div
         role="region"
         aria-label="Player"
-        className={cn("absolute inset-x-0 bottom-0 z-10 flex flex-col border-t border-line bg-bg2 backdrop-blur-xl px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-1 animate-rise-slow shadow-[0_-8px_30px_-16px_rgba(0,0,0,.4)]", p.className)}
+        className={cn("absolute inset-x-0 bottom-0 z-10 flex flex-col border-t border-line bg-bg2 backdrop-blur-xl px-3 pt-1 animate-rise-slow shadow-[0_-8px_30px_-16px_rgba(0,0,0,.4)]", bottomPad, p.className)}
       >
         {p.title && <div className="flex min-w-0 items-center gap-3 px-1 pb-1 pt-2 text-[11px] text-fg2">
           <span className="min-w-0 flex-1 truncate text-fg">{p.title}</span>
@@ -53,7 +54,7 @@ export function PlayerBar(p: PlayerProps) {
       role="region"
       aria-label="Player"
       className={cn(
-        "absolute inset-x-0 bottom-0 z-10 flex h-bar items-center gap-1.5 border-t border-line bg-bg2 backdrop-blur-xl px-6 shadow-[0_-8px_30px_-16px_rgba(0,0,0,.4)] animate-rise-slow",
+        "absolute inset-x-0 bottom-0 z-10 flex h-[calc(72px+env(safe-area-inset-bottom))] items-center gap-1.5 border-t border-line bg-bg2 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl px-6 shadow-[0_-8px_30px_-16px_rgba(0,0,0,.4)] animate-rise-slow",
         p.className,
       )}
     >

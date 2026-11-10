@@ -14,3 +14,15 @@ blob-report
 .terraform/
 *.tfstate
 *.tfstate.*
+
+# Capacitor copies the web bundle here on ios:sync. The Xcode project stays.
+apps/web/ios/App/build
+apps/web/ios/App/Pods
+apps/web/ios/App/output
+apps/web/ios/App/App/public
+apps/web/ios/App/App/capacitor.config.json
+apps/web/ios/App/App/config.xml
+apps/web/ios/DerivedData
+apps/web/ios/**/xcuserdata
+apps/web/ios/capacitor-cordova-ios-plugins
+apps/web/resources

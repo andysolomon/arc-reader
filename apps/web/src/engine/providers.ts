@@ -7,6 +7,8 @@ import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
 import { OPENAI_ACCENTS, STEADY_NARRATION } from "../data/voices";
+import { isNativeApp } from "../lib/native";
+import { resolveApiBase, speechEndpoint, withSpeechAuth } from "../lib/speechServer";
 import { hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest, type PreparationStatus } from "./preparation";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
@@ -18,9 +20,15 @@ export const OPENAI_ENGINE = "openai";
 export const FISH_ENGINE = "fish";
 export const FISH_BASE = ((import.meta.env.VITE_FISH_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const FISH_MODEL = (import.meta.env.VITE_FISH_TTS_MODEL as string | undefined) || "s2.1-pro";
-export const hasApi = () => API_BASE.length > 0;
-export const hasOpenAI = () => OPENAI_BASE.length > 0;
-export const hasFish = () => FISH_BASE.length > 0;
+/** Base actually called. On iOS a relative proxy is dropped unless Settings has an absolute server. */
+export const activeApiBase = () => resolveApiBase(API_BASE, isNativeApp(), speechEndpoint().override);
+export const activeOpenAIBase = () => resolveApiBase(OPENAI_BASE, isNativeApp());
+export const activeFishBase = () => resolveApiBase(FISH_BASE, isNativeApp());
+/** The Vite server on this origin. It also serves preparation, library, and auth routes. The iOS bundle does not. */
+export const usesBuiltInProxy = () => API_BASE === "/api/vs" && !isNativeApp();
+export const hasApi = () => activeApiBase().length > 0;
+export const hasOpenAI = () => activeOpenAIBase().length > 0;
+export const hasFish = () => activeFishBase().length > 0;
 export const hasSpeechApi = () => hasApi() || hasOpenAI() || hasFish();
 /** Cloud engines that bill per request; nothing is generated for them ahead of need. */
 export const isPaidEngine = (engine: string) => engine === OPENAI_ENGINE || engine === FISH_ENGINE;
@@ -32,7 +40,7 @@ export const OPENAI_STANDARD_MODEL = "tts-1";
 export const openaiModelFor = (req: Pick<TtsRequest, "voice" | "openaiModel">) =>
   OPENAI_ACCENTS[req.voice] ? OPENAI_STEADY_MODEL : req.openaiModel || OPENAI_MODEL;
 /** Which server an engine lives on. */
-export const baseFor = (engine: string) => engine === FISH_ENGINE ? FISH_BASE : engine === OPENAI_ENGINE ? OPENAI_BASE : API_BASE;
+export const baseFor = (engine: string) => engine === FISH_ENGINE ? activeFishBase() : engine === OPENAI_ENGINE ? activeOpenAIBase() : activeApiBase();
 
 /** OpenAI-style voice ids that VoiceStudio maps to the active engine's default voice. */
 const OPENAI_ALIAS = /^(alloy|ash|ballad|cedar|coral|echo|fable|marin|nova|onyx|sage|shimmer|verse)$/;
@@ -53,9 +61,10 @@ function parseWords(raw: unknown): Chunk["words"] | undefined {
 }
 
 async function doFetch(url: string, init: RequestInit): Promise<Response> {
+  const authed = withSpeechAuth(url, init);
   let r: Response;
   try {
-    r = await fetch(url, init);
+    r = await fetch(url, authed);
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
     throw new ApiUnreachable();
@@ -123,7 +132,7 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
  */
 export async function readaloudSynthesize(req: TtsRequest): Promise<Chunk> {
   if (!hasApi()) throw new ApiUnreachable("No API configured");
-  const r = await doFetch(`${API_BASE}/tts`, {
+  const r = await doFetch(`${activeApiBase()}/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "audio/mpeg, application/json" },
     body: JSON.stringify({ text: req.text, voice: req.voice, provider: req.engine, format: "mp3" }),
@@ -151,7 +160,7 @@ export async function fishSynthesize(req: TtsRequest): Promise<Chunk> {
   if (!hasFish()) throw new ApiUnreachable("Fish Audio is not configured");
   const reference = req.voice.replace(/^fish:/, "");
   if (!reference) throw new ApiRejected(400, "Choose a Fish Audio voice");
-  const r = await doFetch(`${FISH_BASE}/v1/tts`, {
+  const r = await doFetch(`${activeFishBase()}/v1/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "audio/mpeg", model: FISH_MODEL },
     body: JSON.stringify({ text: req.text, reference_id: reference, format: "mp3", prosody: { speed: 1 } }),
@@ -174,7 +183,7 @@ export interface FishVoice {
 
 export async function fetchFishVoices(signal?: AbortSignal): Promise<FishVoice[]> {
   if (!hasFish()) return [];
-  const r = await doFetch(`${FISH_BASE}/model?page_size=12&language=en&licensed=true&sort_by=score`, {
+  const r = await doFetch(`${activeFishBase()}/model?page_size=12&language=en&licensed=true&sort_by=score`, {
     signal, headers: { Accept: "application/json" },
   });
   const j = await r.json() as { items?: FishVoice[] };
@@ -271,7 +280,9 @@ export async function toCache(req: TtsRequest, chunk: Chunk) {
 
 /** Local voice: the browser's speech engine (or pure timing when there is none). Spoken sentence by sentence, so each part keeps its own estimate. */
 export function localChunk(text: string, parts?: string[][]): Chunk {
-  const supported = typeof window !== "undefined" && "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
+  const webSpeech = typeof window !== "undefined" && "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
+  // The iOS shell speaks with AVSpeechSynthesizer even when WKWebView has no Web Speech API.
+  const supported = webSpeech || isNativeApp();
   const source = supported ? "local" : "estimate";
   if (!parts || parts.length <= 1) return { source, duration: estimateDuration(splitWords(text)) };
   const starts: number[] = [];
@@ -344,7 +355,7 @@ export interface SynthOptions extends TtsRequest {
 export const preparationRequests = (requests: SynthOptions[]): PreparationRequest[] => requests.map((r) => ({ key: cacheKey(r), text: r.text, voice: r.voice, engine: r.engine, profile: r.profile, protocol: API_KIND }));
 
 export async function prepareInBackground(requests: SynthOptions[], start: number, progress?: (done: number, total: number, status?: PreparationStatus) => void, signal?: AbortSignal) {
-  if (API_BASE !== "/api/vs") throw new Error("Background preparation needs the built-in /api/vs connection.");
+  if (!usesBuiltInProxy()) throw new Error("Background preparation needs the built-in /api/vs connection.");
   const items = preparationRequests(requests);
   await Promise.all(items.map(async (item, index) => { item.cached = !!await fromCache(requests[index]); }));
   signal?.throwIfAborted();
@@ -385,7 +396,7 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
   const reused = await fromSentenceClips(opts);
   if (reused) return reused;
   try {
-    const prepared = !isPaidEngine(opts.engine) && API_BASE === "/api/vs" ? await preparedAudio(cacheKey(opts), opts.signal) : null;
+    const prepared = !isPaidEngine(opts.engine) && usesBuiltInProxy() ? await preparedAudio(cacheKey(opts), opts.signal) : null;
     let chunk: Chunk;
     if (prepared) {
       // Feed stored responses through the same parsers as fresh speech, including
@@ -440,7 +451,7 @@ export async function fetchWordTimings(audio: Blob, words: string[], signal?: Ab
   form.append("model", "whisper-1");
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "word");
-  const r = await doFetch(`${API_BASE}/v1/audio/transcriptions`, { method: "POST", body: form, signal, headers: { "x-stub-text": encodeURIComponent(words.join(" ")) } });
+  const r = await doFetch(`${activeApiBase()}/v1/audio/transcriptions`, { method: "POST", body: form, signal, headers: { "x-stub-text": encodeURIComponent(words.join(" ")) } });
   const j = (await r.json()) as { words?: { word: string; start: number; end: number }[] };
   const got = (j.words ?? []).filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end));
   return alignWords(got, words);
@@ -490,7 +501,7 @@ export interface ServerEngine {
 
 export async function fetchServerVoices(signal?: AbortSignal): Promise<{ voices: ServerVoice[]; engines: ServerEngine[] }> {
   if (!hasApi() || API_KIND !== "openai") return { voices: [], engines: [] };
-  const r = await doFetch(`${API_BASE}/v1/audio/voices`, { signal, headers: { Accept: "application/json" } });
+  const r = await doFetch(`${activeApiBase()}/v1/audio/voices`, { signal, headers: { Accept: "application/json" } });
   const j = (await r.json()) as { voices?: ServerVoice[]; engines?: ServerEngine[] };
   return { voices: (j.voices ?? []).map((v) => ({ ...v, id: v.id ?? (v as { voice_id?: string }).voice_id ?? "" })).filter((v) => v.id), engines: j.engines ?? [] };
 }
