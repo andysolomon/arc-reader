@@ -26,6 +26,14 @@ export function hostOf(url: string): string {
   }
 }
 
+/** A single web address, with or without its scheme, as opposed to prose that happens to mention one. */
+export function looksLikeUrl(input: string): boolean {
+  const t = input.trim();
+  if (!t || /\s/.test(t)) return false;
+  if (/^https?:\/\//i.test(t)) return true;
+  return /^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?([/?#]\S*)?$/i.test(t);
+}
+
 export function normalizeUrl(input: string): string {
   const t = input.trim();
   if (!/^https?:\/\//i.test(t)) return `https://${t}`;

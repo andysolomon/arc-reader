@@ -15,10 +15,17 @@ export async function setTheme(page: Page, theme: Theme) {
   }, theme);
 }
 
+/** Open the collapsible text box on Compose (the link field comes first) and fill it. */
+export async function composeText(page: Page, text: string) {
+  const toggle = page.getByRole("button", { name: "Type or paste text" });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await page.getByLabel("Text to read").fill(text);
+}
+
 /** Compose → Listen with real text. Returns once the Reader is showing. */
 export async function composeAndListen(page: Page) {
   await page.goto("/");
-  await page.getByLabel("Text to read").fill(TEXT);
+  await composeText(page, TEXT);
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   await page.getByRole("region", { name: "Player" }).waitFor();

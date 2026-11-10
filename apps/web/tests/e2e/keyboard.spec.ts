@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { composeAndListen, TEXT } from "./helpers";
+import { composeAndListen, TEXT, composeText } from "./helpers";
 
 test.describe("keyboard flow", () => {
   test("Compose → Listen → Space → → → [ → Esc", async ({ page }) => {
@@ -7,7 +7,7 @@ test.describe("keyboard flow", () => {
     await expect(page.getByRole("heading", { name: "What should I read to you?" })).toBeVisible();
 
     // Listen via ⌘/Ctrl+Enter from inside the text area
-    await page.getByLabel("Text to read").fill(TEXT);
+    await composeText(page, TEXT);
     await page.keyboard.press("ControlOrMeta+Enter");
     await page.waitForURL(/\/read\//);
 

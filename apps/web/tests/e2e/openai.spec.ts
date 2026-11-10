@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { TEXT } from "./helpers";
+import { TEXT, composeText } from "./helpers";
 
 test.describe("OpenAI voices (stub server)", () => {
   test("selecting an OpenAI voice routes to the OpenAI proxy with the OpenAI model", async ({ page }) => {
@@ -9,7 +9,7 @@ test.describe("OpenAI voices (stub server)", () => {
     await expect(nova).toBeVisible();
     await nova.getByRole("button", { name: "Use" }).click();
     await page.goto("/");
-    await page.getByLabel("Text to read").fill(TEXT);
+    await composeText(page, TEXT);
     const first = page.waitForResponse((r) => r.url().includes("/api/oa/v1/audio/speech") && r.request().method() === "POST");
     const auth: string[] = [];
     page.on("request", (q) => { if (q.headers()["authorization"]) auth.push(q.url()); });
@@ -26,7 +26,7 @@ test.describe("OpenAI voices (stub server)", () => {
     await page.locator('[data-voice="sage"]').getByRole("button", { name: "Use" }).click();
     await page.goto("/");
     // Three paragraphs → three passages: the current one, then a single prefetch
-    await page.getByLabel("Text to read").fill(`${TEXT}\n\nA third paragraph makes a third passage.`);
+    await composeText(page, `${TEXT}\n\nA third paragraph makes a third passage.`);
     let requests = 0;
     let preparations = 0;
     page.on("request", (q) => { if (q.url().includes("/api/oa/v1/audio/speech")) requests++; });
@@ -46,7 +46,7 @@ test.describe("OpenAI voices (stub server)", () => {
     await page.goto("/voices");
     await page.locator('[data-voice="alloy"]').getByRole("button", { name: "Use" }).click();
     await page.goto("/");
-    await page.getByLabel("Text to read").fill(TEXT);
+    await composeText(page, TEXT);
     await page.getByTestId("listen").click();
     await page.waitForURL(/\/read\//);
     await page.waitForResponse((r) => r.url().includes("/api/oa/v1/audio/speech"));
