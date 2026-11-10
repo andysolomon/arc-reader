@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "./fixtures";
+import { composeText } from "./helpers";
 
 const explanation = "The diagram shows a request moving from a client to a server, then to a database.";
 const photoDescription = "The photograph shows a team working together around a table.";
@@ -62,7 +63,7 @@ test("uses alt text without vision and keeps a broken image from interrupting re
   await page.route("**/api/llm/config", (route) => route.fulfill({ json: { configured: false } }));
   await page.route("https://example.com/missing.png", (route) => route.fulfill({ status: 404, body: "missing" }));
   await page.goto("/");
-  await page.getByLabel("Text to read").fill("Before.\n\n![A red fox in a field](https://example.com/missing.png)\n\nThe article continues.");
+  await composeText(page, "Before.\n\n![A red fox in a field](https://example.com/missing.png)\n\nThe article continues.");
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   const card = page.getByRole("region", { name: "Image explanation" });

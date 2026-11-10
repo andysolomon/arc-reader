@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "./fixtures";
+import { composeText } from "./helpers";
 
 const source = 'A useful example.\n\n```javascript\nconst active = users.filter(user => user.active);\nconsole.log(active);\n```\n\nThe article continues here.';
 const explanation = "This example selects active users and prints the resulting list.";
@@ -20,7 +21,7 @@ for (const width of [390, 1440]) {
       if (request.url().endsWith("/api/preparations")) spoken.push(...request.postDataJSON().requests.map((r: { text: string }) => r.text));
     });
     await page.goto("/");
-    await page.getByLabel("Text to read").fill(source);
+    await composeText(page, source);
     await page.getByTestId("listen").click();
     await page.waitForURL(/\/read\/[a-z0-9-]+$/);
     const card = page.getByRole("region", { name: "Code example" });
@@ -51,7 +52,7 @@ test("unavailable explanations skip code without sending it to speech", async ({
       if (request.url().endsWith("/api/preparations")) spoken.push(...request.postDataJSON().requests.map((r: { text: string }) => r.text));
   });
   await page.goto("/");
-  await page.getByLabel("Text to read").fill(source);
+  await composeText(page, source);
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   const card = page.getByRole("region", { name: "Code example" });

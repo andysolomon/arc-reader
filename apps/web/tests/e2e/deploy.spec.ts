@@ -8,7 +8,7 @@ test("a page whose bundle is gone after a deploy reloads itself instead of stayi
     await route.fallback();
   });
   await page.goto("/");
-  await expect(page.getByLabel("Text to read")).toBeVisible();
+  await expect(page.getByLabel("Link to read")).toBeVisible();
   expect(missing).toBeGreaterThan(1);
 });
 
@@ -30,7 +30,7 @@ test("an old bundle served the HTML fallback also recovers", async ({ page }) =>
     await route.fallback();
   });
   await page.goto("/");
-  await expect(page.getByLabel("Text to read")).toBeVisible();
+  await expect(page.getByLabel("Link to read")).toBeVisible();
   expect(requests).toBeGreaterThan(1);
 });
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { htmlToText, markdownToText, publishedDate } from "./fetchUrl";
+import { htmlToText, looksLikeUrl, markdownToText, publishedDate } from "./fetchUrl";
 import { segment } from "./segment";
 
 describe("importing code examples", () => {
@@ -94,5 +94,21 @@ describe("htmlToText", () => {
       { url: "https://example.com/guide", text: "the guide" },
       { url: "https://other.org/x", text: "another site" },
     ]);
+  });
+});
+
+describe("telling a pasted link from pasted text", () => {
+  it("accepts addresses with or without a scheme", () => {
+    expect(looksLikeUrl("https://example.com/story?id=1#top")).toBe(true);
+    expect(looksLikeUrl("  example.com/story ")).toBe(true);
+    expect(looksLikeUrl("x.com/someone/status/123")).toBe(true);
+    expect(looksLikeUrl("localhost:5181/read")).toBe(true);
+  });
+  it("rejects prose, blank input, and bare words", () => {
+    expect(looksLikeUrl("")).toBe(false);
+    expect(looksLikeUrl("Read https://example.com later")).toBe(false);
+    expect(looksLikeUrl("A sentence. Another one.")).toBe(false);
+    expect(looksLikeUrl("hello")).toBe(false);
+    expect(looksLikeUrl("one\ntwo")).toBe(false);
   });
 });

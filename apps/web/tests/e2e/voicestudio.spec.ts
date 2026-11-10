@@ -1,10 +1,10 @@
 import { test, expect } from "./fixtures";
-import { composeAndListen, TEXT } from "./helpers";
+import { composeAndListen, TEXT, composeText } from "./helpers";
 
 test.describe("VoiceStudio provider (stub server)", () => {
   test("Listen synthesizes through the proxy and plays real audio", async ({ page }) => {
     await page.goto("/");
-    await page.getByLabel("Text to read").fill(TEXT);
+    await composeText(page, TEXT);
     const first = page.waitForResponse((r) => r.url().includes("/api/vs/v1/audio/speech") && r.request().method() === "POST");
     await page.getByTestId("listen").click();
     const r = await first;
@@ -117,7 +117,7 @@ test.describe("VoiceStudio provider (stub server)", () => {
     await page.goto("/settings");
     await page.getByRole("switch", { name: "Browser voice only" }).click();
     await page.goto("/");
-    await page.getByLabel("Text to read").fill(TEXT);
+    await composeText(page, TEXT);
     let calls = 0;
     page.on("request", (q) => { if (q.url().includes("/v1/audio/speech")) calls++; });
     page.on("request", (q) => { if (q.url().endsWith("/api/preparations") && q.method() === "POST") calls++; });

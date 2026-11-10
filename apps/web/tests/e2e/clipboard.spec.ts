@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./fixtures";
-import { TEXT } from "./helpers";
+import { TEXT, composeText } from "./helpers";
 
 async function clipboard(page: Page, text: string, mode: "ok" | "denied" | "unavailable" = "ok") {
   await page.addInitScript(({ text, mode }) => {
@@ -41,7 +41,7 @@ test("read clipboard from the library without opening the composer", async ({ pa
 test("the composer clipboard action reads immediately and preserves an existing draft", async ({ page }) => {
   await clipboard(page, TEXT);
   await page.goto("/");
-  await page.getByLabel("Text to read").fill("Keep this unfinished draft.");
+  await composeText(page, "Keep this unfinished draft.");
   await page.locator('[data-screen="compose"]').getByRole("button", { name: "Read clipboard", exact: true }).click();
   await expectReading(page);
   await page.getByRole("link", { name: "Compose", exact: true }).click();
@@ -67,7 +67,7 @@ test("Ctrl/Cmd+V reads the browser clipboard without focusing an input", async (
 
 test("pasting in text fields and editable content leaves normal editing alone", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Text to read").fill("Existing draft");
+  await composeText(page, "Existing draft");
   await paste(page, TEXT, "textarea");
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByLabel("Text to read")).toHaveValue("Existing draft");

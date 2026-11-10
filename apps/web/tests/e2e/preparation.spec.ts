@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { composeText } from "./helpers";
 
 test("prepared audio plays through every passage offline without animation frames", async ({ page, context }) => {
   await page.addInitScript(() => {
@@ -11,7 +12,7 @@ test("prepared audio plays through every passage offline without animation frame
     };
   });
   await page.goto("/");
-  await page.getByLabel("Text to read").fill("The first prepared passage plays.\n\nThe second prepared passage follows.\n\nThe third prepared passage finishes.");
+  await composeText(page, "The first prepared passage plays.\n\nThe second prepared passage follows.\n\nThe third prepared passage finishes.");
   await page.getByTestId("listen").click();
   await expect(page.getByText("Audio prepared — playback no longer waits on the server", { exact: true })).toBeVisible();
   await page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Pause/ }).click();
@@ -36,7 +37,7 @@ test("composing automatically prepares all passages, continues with the page clo
   const unique = Date.now().toString(36);
   const text = Array.from({ length: 12 }, (_, i) => `Passage ${i + 1} of reading ${unique} continues to render when the phone switches apps.`).join("\n\n");
   await page.goto("/");
-  await page.getByLabel("Text to read").fill(text);
+  await composeText(page, text);
   // Stop the first page from observing the job or downloading its results.
   // Rendering must continue independently of these browser requests.
   await page.route(/\/api\/preparations\/[a-f0-9-]+$/, (route) => route.abort("internetdisconnected"));
@@ -73,7 +74,7 @@ test("automatic preparation can be stopped from the player", async ({ page }) =>
   await page.route("**/api/preparations", (route) => route.fulfill({ status: 202, json: job }));
   await page.route(`**/api/preparations/${job.id}`, (route) => route.fulfill({ json: job }));
   await page.goto("/");
-  await page.getByLabel("Text to read").fill("First paragraph.\n\nSecond paragraph.\n\nThird paragraph.");
+  await composeText(page, "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.");
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   await expect(page.getByRole("region", { name: "Player" })).toContainText("Preparing 0/3");

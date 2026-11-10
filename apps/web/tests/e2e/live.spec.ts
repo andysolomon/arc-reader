@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import { readFileSync } from "node:fs";
-import { TEXT } from "./helpers";
+import { TEXT, composeText } from "./helpers";
 
 /**
  * Runs only with LIVE=1 against a real VoiceStudio. Measures the real first-sentence
@@ -10,7 +10,7 @@ test.describe("@live VoiceStudio", () => {
   test("first sentence arrives, plays, and prefetch keeps up", async ({ page }) => {
     test.setTimeout(120_000);
     await page.goto("/");
-    await page.getByLabel("Text to read").fill(TEXT);
+    await composeText(page, TEXT);
     const responses: { url: string; ms: number; bytes: number; type: string }[] = [];
     const t0 = Date.now();
     page.on("response", async (r) => {
@@ -35,7 +35,7 @@ test.describe("@live VoiceStudio", () => {
     await page.goto("/voices");
     await page.locator('[data-voice="nova"]').getByRole("button", { name: "Use" }).click();
     await page.goto("/");
-    await page.getByLabel("Text to read").fill("Short test. One more sentence.");
+    await composeText(page, "Short test. One more sentence.");
     const t0 = Date.now();
     const first = page.waitForResponse((r) => r.url().includes("/api/oa/v1/audio/speech"));
     await page.getByTestId("listen").click();
