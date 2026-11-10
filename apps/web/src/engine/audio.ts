@@ -1,3 +1,5 @@
+import { voicedShare } from "./voicing";
+
 let ctx: AudioContext | null = null;
 
 function audioContext(): AudioContext | null {
@@ -155,6 +157,13 @@ export async function analyzeClip(blob: Blob, fallbackDuration: number, partWord
     return { duration: fallbackDuration, starts: proportionalStarts(fallbackDuration, partWords), lead: 0, tail: 0 };
   }
   return analyzePcm(mono(buf), buf.sampleRate, partWords);
+}
+
+/** Decode a clip and measure how much of it is voiced speech (see voicing.ts); undefined when it cannot be decoded or judged. */
+export async function clipVoicedShare(blob: Blob): Promise<number | undefined> {
+  const buf = await decode(blob);
+  if (!buf || !buf.length) return undefined;
+  return voicedShare(mono(buf), buf.sampleRate);
 }
 
 /** Silence kept before a joined sentence's first voiced frame, and after its last (as between passages). */

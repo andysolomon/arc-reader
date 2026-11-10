@@ -2,7 +2,8 @@ import { audioCache } from "../lib/db";
 import { hash } from "../lib/hash";
 import { estimateDuration, splitWords } from "../lib/segment";
 import { addUsage, isTokenSpeechModel } from "../lib/usage";
-import { analyzeClip, joinClips, measureDuration, proportionalStarts } from "./audio";
+import { analyzeClip, clipVoicedShare, joinClips, measureDuration, proportionalStarts } from "./audio";
+import { GARBLED_BELOW, GARBLED_RETRIES } from "./voicing";
 import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
@@ -221,9 +222,16 @@ export const BUSY_RETRIES = 4;
  */
 export const BUSY_RETRY_CAP_MS = 5000;
 
+/** Whether a clip from this engine is checked for garbled speech; paid engines have not shown the failure. */
+const checksVoicing = (engine: string) => engine !== OPENAI_ENGINE && engine !== FISH_ENGINE;
+
+/** True when a clip's measured voicing marks it as a failed render; unmeasured clips pass. */
+export const garbled = (voiced: number | undefined) => voiced !== undefined && voiced < GARBLED_BELOW;
+
 export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<Chunk> {
   const run = async () => {
-    for (let attempt = 0; ; attempt++) {
+    let best: Chunk | undefined;
+    for (let busy = 0, retakes = 0; ;) {
       if (req.signal?.aborted) throw new DOMException("Aborted", "AbortError");
       try {
         const started = Date.now();
@@ -232,10 +240,17 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
         chunk.renderSeconds = (Date.now() - started) / 1000;
         await addUsage({ engine: req.engine, model: req.engine === OPENAI_ENGINE ? openaiModelFor(req) : req.engine === FISH_ENGINE ? FISH_MODEL : req.engine,
           text: req.text, audioSeconds: chunk.duration, tokens: chunk.tokens });
-        return chunk;
+        if (!checksVoicing(req.engine)) return chunk;
+        chunk.voiced = await clipVoicedShare(chunk.audio);
+        if (!garbled(chunk.voiced)) return chunk;
+        if (!best || chunk.voiced! > best.voiced!) best = chunk;
+        if (retakes >= GARBLED_RETRIES) return best;
+        retakes++;
+        console.warn(`Speech came back garbled (voiced ${chunk.voiced!.toFixed(2)}); asking again: ${req.text.slice(0, 60)}`);
       } catch (e) {
-        if (!(e instanceof ApiBusy) || attempt >= BUSY_RETRIES) throw e;
-        await sleep(Math.min(e.retryAfterMs || 400 * 2 ** attempt, BUSY_RETRY_CAP_MS), req.signal);
+        if (!(e instanceof ApiBusy) || busy >= BUSY_RETRIES) throw e;
+        await sleep(Math.min(e.retryAfterMs || 400 * 2 ** busy, BUSY_RETRY_CAP_MS), req.signal);
+        busy++;
       }
     }
   };
@@ -260,7 +275,7 @@ export async function fromCache(req: TtsRequest): Promise<Chunk | null> {
   try {
     const rec = await audioCache.get(cacheKey(req));
     if (!rec) return null;
-    return { source: "cache", audio: rec.blob, mime: rec.mime, duration: rec.duration, words: rec.words, starts: rec.starts, lead: rec.lead, tail: rec.tail, loudness: rec.loudness };
+    return { source: "cache", audio: rec.blob, mime: rec.mime, duration: rec.duration, words: rec.words, starts: rec.starts, lead: rec.lead, tail: rec.tail, loudness: rec.loudness, voiced: rec.voiced };
   } catch {
     return null;
   }
@@ -271,7 +286,7 @@ export async function toCache(req: TtsRequest, chunk: Chunk) {
   try {
     await audioCache.put({
       key: cacheKey(req), blob: chunk.audio, mime: chunk.mime ?? "audio/mpeg", duration: chunk.duration, words: chunk.words,
-      starts: chunk.starts, lead: chunk.lead, tail: chunk.tail, loudness: chunk.loudness, createdAt: Date.now(),
+      starts: chunk.starts, lead: chunk.lead, tail: chunk.tail, loudness: chunk.loudness, voiced: chunk.voiced, createdAt: Date.now(),
     });
   } catch {
     /* quota or private mode: ignore */
@@ -392,7 +407,15 @@ export async function fromSentenceClips(opts: SynthOptions): Promise<Chunk | nul
 export async function synthesize(opts: SynthOptions): Promise<Chunk> {
   if (opts.forceLocal || opts.engine === LOCAL_ENGINE) return localChunk(opts.text, opts.parts);
   const cached = await fromCache(opts);
-  if (cached) return locateSentences(cached, opts.parts);
+  // Clips stored before voicing was checked are judged once on the way out; a garbled one is generated again.
+  if (cached && checksVoicing(opts.engine) && cached.voiced === undefined && cached.audio) {
+    cached.voiced = await clipVoicedShare(cached.audio);
+    if (!garbled(cached.voiced)) {
+      await locateSentences(cached, opts.parts);
+      if (cached.voiced !== undefined) await toCache(opts, cached);
+      return cached;
+    }
+  } else if (cached) return locateSentences(cached, opts.parts);
   const reused = await fromSentenceClips(opts);
   if (reused) return reused;
   try {
@@ -402,6 +425,11 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
       // Feed stored responses through the same parsers as fresh speech, including
       // the legacy JSON contract, without issuing another synthesis request.
       chunk = await preparedChunk(prepared, opts);
+      // The web server checks what it prepares; this catches clips it stored before it did.
+      if (checksVoicing(opts.engine) && chunk.audio) {
+        chunk.voiced = await clipVoicedShare(chunk.audio);
+        if (garbled(chunk.voiced)) chunk = await apiSynthesize(opts);
+      }
     } else {
       chunk = await apiSynthesize(opts);
     }
