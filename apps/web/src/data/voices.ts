@@ -121,7 +121,11 @@ export const LOCAL_VOICE: Voice = { id: LOCAL_VOICE_ID, name: "Browser voice", l
 /** The list shown before (or without) a speech server. */
 export const DEFAULT_VOICES: Voice[] = [...PRESET_VOICES, LOCAL_VOICE];
 
+/** Fallback default until the speech server lists the Librarian, or when it is missing. */
 export const DEFAULT_VOICE_ID = "expr-voice-2-f";
+
+/** The preferred default: the voice added from the Studio gallery's Librarian recipe (its profile id is assigned by VoiceStudio). */
+export const isDefaultArchetype = (archetype: string | undefined) => !!archetype && /(^|_)librarian$/.test(archetype);
 
 /** BCP-47 tag for the Web Speech fallback. */
 export function voiceLang(v: Pick<Voice, "lang">): string {
