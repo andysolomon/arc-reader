@@ -1,6 +1,7 @@
-import { API_BASE } from "../engine/providers";
+import { activeApiBase } from "../engine/providers";
+import { withSpeechAuth } from "./speechServer";
 
-export const studioUrl = (path: string) => `${API_BASE || "/api/vs"}${path}`;
+export const studioUrl = (path: string) => `${activeApiBase() || "/api/vs"}${path}`;
 export const idPath = encodeURIComponent;
 
 export function errorMessage(value: unknown): string {
@@ -16,7 +17,8 @@ export function errorMessage(value: unknown): string {
 }
 
 export async function studioFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const response = await fetch(studioUrl(path), init);
+  const url = studioUrl(path);
+  const response = await fetch(url, withSpeechAuth(url, init));
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body ? errorMessage(body) : `VoiceStudio returned HTTP ${response.status}`);

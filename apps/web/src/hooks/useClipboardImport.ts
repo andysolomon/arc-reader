@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { readClipboardText } from "../lib/clipboard";
 import { fetchReadable, hostOf } from "../lib/fetchUrl";
+import { isNativeApp } from "../lib/native";
 import { openDocument } from "../lib/openDoc";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
@@ -56,11 +58,11 @@ export function useClipboardImportController(enabled: boolean): ClipboardImport 
   }, [navigate]);
 
   const readClipboard = useCallback(async () => {
-    if (!navigator.clipboard?.readText) {
+    if (!isNativeApp() && !navigator.clipboard?.readText) {
       toast("Clipboard unavailable — paste outside a text field");
       return;
     }
-    await importText(() => navigator.clipboard.readText());
+    await importText(() => readClipboardText());
   }, [importText]);
 
   useEffect(() => {

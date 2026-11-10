@@ -4,7 +4,7 @@ import { PlayerControls, type PlayerProps } from "./PlayerControls";
 /** Floating listening dock with a quiet title row above the controls. */
 export function PlayerPill(p: PlayerProps) {
   return (
-    <div className={cn("pointer-events-none absolute inset-x-0 bottom-6 z-10 flex justify-center px-6 animate-rise-slow", p.className)}>
+    <div className={cn("pointer-events-none absolute inset-x-0 bottom-[max(1.5rem,env(safe-area-inset-bottom))] z-10 flex justify-center px-6 animate-rise-slow", p.className)}>
       <div
         role="region"
         aria-label="Player"

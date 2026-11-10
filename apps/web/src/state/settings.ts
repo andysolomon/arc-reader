@@ -5,6 +5,7 @@ import type { HighlightMode } from "@readaloud/ui";
 import { LOCAL_ENGINE, type EngineId } from "../engine/types";
 import { DEFAULT_ENGINE, OPENAI_MODEL, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL } from "../engine/providers";
 import { DEFAULT_VOICE_ID } from "../data/voices";
+import { setSpeechEndpoint } from "../lib/speechServer";
 import { DEFAULT_SUMMARY_MODEL, isSummaryModel, type SummaryModel } from "../lib/summary";
 
 export type PlayerStyle = "capsule" | "bar";
@@ -35,6 +36,13 @@ export interface Settings {
   libView: "list" | "grid";
   apiKey: string;
   email: string | null;
+  /**
+   * Absolute speech-server URL for the iOS app. Empty uses the build-time base
+   * on the web, and the on-device voice in the iOS shell.
+   */
+  speechServer: string;
+  /** VoiceStudio key sent only with an absolute speech-server URL. */
+  speechServerKey: string;
 }
 
 interface Actions {
@@ -72,6 +80,8 @@ export const useSettings = create<Settings & Actions>()(
       libView: "list",
       apiKey: typeof crypto !== "undefined" ? genKey() : "ra_live_unavailable",
       email: null,
+      speechServer: "",
+      speechServerKey: "",
       set: (k, v) => set({ [k]: v } as Partial<Settings>),
       patch: (p) => set(p),
     }),
@@ -105,3 +115,10 @@ export const useSettings = create<Settings & Actions>()(
 export function useThemeId(): ThemeId {
   return useSettings((s) => s.theme) ?? systemTheme();
 }
+
+function publishSpeechEndpoint(state: { speechServer?: string; speechServerKey?: string }) {
+  setSpeechEndpoint({ override: state.speechServer ?? "", key: state.speechServerKey ?? "" });
+}
+
+publishSpeechEndpoint(useSettings.getState());
+useSettings.subscribe((state) => publishSpeechEndpoint(state));

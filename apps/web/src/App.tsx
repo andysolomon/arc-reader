@@ -12,6 +12,7 @@ import { VoicesPage } from "./routes/Voices";
 import { SettingsPage } from "./routes/Settings";
 import { LinuxPage } from "./routes/Linux";
 import { AuthPage } from "./routes/Auth";
+import { syncStatusBar } from "./lib/native";
 import { useThemeId } from "./state/settings";
 import { useLibrary } from "./state/library";
 import { useVoices } from "./state/voices";
@@ -21,8 +22,10 @@ import { usePreparation } from "./state/preparation";
 function ThemeSync() {
   const id = useThemeId();
   useEffect(() => {
+    const theme = getTheme(id);
     applyTheme(id);
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", getTheme(id).colors.bg);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.colors.bg);
+    void syncStatusBar(theme.scheme, theme.colors.bg);
   }, [id]);
   return null;
 }
