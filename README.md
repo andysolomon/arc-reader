@@ -34,6 +34,60 @@ docker compose up -d  # VoiceStudio + the built app on :4179 (see Voices below)
 
 Copy `apps/web/.env.example` to `.env` to point the app at a TTS backend.
 
+## iOS app
+
+Capacitor 8 wraps the Vite production build in a native app. The Xcode project is `apps/web/ios/App/App.xcodeproj` and uses Swift Package Manager (no CocoaPods). `webDir` is `apps/web/dist`. After `ios:sync`, the web view loads those bundled files on the device. It does not open a remote URL.
+
+| | |
+|---|---|
+| Bundle id | `dev.andrewsolomon.arcreader` |
+| Home-screen name | ReadAloud |
+| Deployment target | iOS 15.0 |
+| Signing | Automatic, team `7RRX4APJYW` |
+
+ReadAloud is the name on the web app's home screen and window title. The bundle id stays `arcreader`. iOS 15.0 is Capacitor 8's minimum, so Xcode 27.2 can build it.
+
+The shell pads `env(safe-area-inset-*)`: the status bar overlays the web view, the top of every screen clears the notch, and the home indicator is owned by the tab bar (or by the player, when focus mode hides the tab bar). The status-bar text follows the theme.
+
+### Voices on device
+
+The browser build sends speech to the Vite proxy at `/api/vs`, which holds the VoiceStudio key. That proxy is not in the iOS bundle, so a relative `/api/vs` is ignored and passages are read with **AVSpeechSynthesizer** (the iPhone's installed voices) through a small plugin in the app target. WKWebView's Web Speech API is not used for this: it often stays silent, and it stops when the app leaves the foreground. Word highlighting follows the synthesizer's word ranges, with the same estimated clock the browser voice uses between ranges.
+
+To use VoiceStudio or a ReadAloud server instead, open Settings → Speech server and paste an absolute URL:
+
+- VoiceStudio itself: `https://<mac>.<tailnet>.ts.net:3900`, plus the API key if the server requires one. The key is stored on the device and sent only to that absolute URL.
+- A ReadAloud server that already proxies VoiceStudio and holds the key: `https://<host>.<tailnet>.ts.net:8449/api/vs`. Leave the key empty.
+
+Those requests use Capacitor's native HTTP stack, so the server does not need to allow the `capacitor://` origin. `localhost` is the phone, not the Mac. Background preparation, the shared library, and OpenAI/Fish proxies stay on the web server; they are not part of the bundled shell. Cached clips still play offline.
+
+The audio session is playback, and the app declares the audio background mode, so the current passage keeps playing when the screen locks. There is no lock-screen play/pause button. iOS can suspend the app in a gap between sentences, and the orange background-audio indicator is the cost of letting a reader continue while locked. The browser PWA is unchanged.
+
+The service worker is registered only in the browser. The native shell unregisters any worker so a cached PWA shell cannot intercept the bundled files.
+
+Paste into the composer works as a normal text paste. **Read clipboard** uses the system pasteboard, which asks for permission on iOS 16 and later.
+
+### Build on a Mac
+
+Xcode 27 and this repo. From the repository root:
+
+```sh
+pnpm install
+pnpm ios:sync     # production web build, then copy dist/ into the Xcode project
+pnpm ios:open     # opens apps/web/ios/App/App.xcodeproj
+```
+
+`pnpm --filter @readaloud/web ios:sync` and `ios:open` do the same thing. Run `ios:sync` before the first Xcode build, and again after any web change. The copied web bundle (`apps/web/ios/App/App/public`) and the generated `capacitor.config.json` are gitignored.
+
+The first Xcode build downloads the Capacitor Swift package from `https://github.com/ionic-team/capacitor-swift-pm.git`. That needs a network connection once. Swift packages resolve through the pnpm symlinks in `apps/web/node_modules`.
+
+Then in Xcode:
+
+1. The App target is already set to team `7RRX4APJYW` with automatic signing. If that Apple ID is not signed in yet, add it under Xcode → Settings → Accounts, then confirm the team under the App target → Signing & Capabilities. Xcode creates the provisioning profile.
+2. Simulator: choose an iPhone or iPad simulator and press Run.
+3. A device: connect the iPhone or iPad, choose it, and press Run. On the device, turn on Developer Mode (Settings → Privacy & Security) and trust the certificate (Settings → General → VPN & Device Management). A free personal-team profile expires after 7 days; press Run again to refresh it.
+
+Version in Xcode is 1.0 (build 1), separate from the web app's package version. The icon and launch screen come from `apps/web/public/icons`.
+
 For parallel worktrees, give each Playwright run separate ports, for example `E2E_PORT=4184 E2E_VOICE_PORT=3987 E2E_OPENAI_PORT=3986 pnpm test:e2e`. Each run uses temporary server library storage; UI tests isolate their libraries while the shared-library test uses independent browsers against the real HTTP API.
 
 ## Shared library

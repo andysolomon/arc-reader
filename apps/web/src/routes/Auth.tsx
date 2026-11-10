@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button, Input } from "@readaloud/ui";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
-import { API_BASE, hasApi } from "../engine/providers";
+import { API_BASE, usesBuiltInProxy } from "../engine/providers";
 
 export function AuthPage() {
   const navigate = useNavigate();
@@ -15,7 +15,7 @@ export function AuthPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      if (hasApi()) {
+      if (usesBuiltInProxy()) {
         const r = await fetch(`${API_BASE}/auth/magic-link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
       }
@@ -28,7 +28,7 @@ export function AuthPage() {
   };
 
   const google = () => {
-    if (hasApi()) {
+    if (usesBuiltInProxy()) {
       location.assign(`${API_BASE}/auth/google?redirect=${encodeURIComponent(location.origin)}`);
       return;
     }
@@ -65,7 +65,7 @@ export function AuthPage() {
             <div className="text-fg2">
               We sent a sign-in link to {email}. It expires in 15 minutes.
             </div>
-            {!hasApi() && (
+            {!usesBuiltInProxy() && (
               <button
                 type="button"
                 onClick={() => {

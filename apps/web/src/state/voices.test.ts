@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchFishVoices, fetchServerVoices } from "../engine/providers";
 import { getVoice, useVoices } from "./voices";
 import { DEFAULT_VOICE_ID, LOCAL_VOICE, voiceSource } from "../data/voices";
+import { useSettings } from "./settings";
 
 vi.mock("../engine/providers", async (original) => ({
   ...await original<typeof import("../engine/providers")>(),
@@ -108,6 +109,22 @@ describe("voice providers", () => {
     expect(studioFetch).toHaveBeenCalledWith("/profiles/lib", { method: "DELETE" });
     expect(useVoices.getState().voices.some((v) => v.id === "lib")).toBe(false);
     expect(getVoice("mine").id).toBe("mine");
+  });
+  it("makes the Librarian the default voice unless the user picked one", async () => {
+    profiles.push({ id: "e43fa21f", name: "The Librarian", kind: "design", language: "English", personality: "archetype:feat_00_the_librarian" });
+    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "e43fa21f", name: "The Librarian", type: "profile" }, { id: "mine", name: "My voice", type: "profile" }], engines: [] });
+    useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
+    await useVoices.getState().loadServer();
+    expect(useSettings.getState().voice).toBe("e43fa21f");
+    expect(getVoice(null).name).toBe("The Librarian");
+
+    useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: true });
+    await useVoices.getState().loadServer();
+    expect(useSettings.getState().voice).toBe(DEFAULT_VOICE_ID);
+
+    useSettings.getState().patch({ voice: "mine", voiceChosen: false });
+    await useVoices.getState().loadServer();
+    expect(useSettings.getState().voice).toBe("mine");
   });
   it("keeps a voice when VoiceStudio refuses to delete it", async () => {
     profiles.push({ id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" });

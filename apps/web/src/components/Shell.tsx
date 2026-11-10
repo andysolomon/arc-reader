@@ -32,7 +32,7 @@ export function Shell() {
 
   return (
     <ClipboardImportContext.Provider value={clipboard}>
-    <div className="flex h-full flex-col overflow-hidden bg-bg text-fg">
+    <div className="flex h-full flex-col overflow-hidden bg-bg pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-fg">
       <LiveRegion />
       <div className="flex min-h-0 flex-1">
         {showRail && <Rail />}

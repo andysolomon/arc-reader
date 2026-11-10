@@ -93,7 +93,7 @@ test("Voices sends a gallery voice back to Studio but never offers that for clon
   const librarian = page.locator('[data-voice="voice-3"]');
   await expect(librarian.getByText("designed", { exact: true })).toBeVisible();
   await expect(page.locator('[data-voice="voice-1"]').getByRole("button", { name: /back to Studio/ })).toHaveCount(0);
-  await librarian.getByRole("button", { name: "Use", exact: true }).click();
+  // The Librarian is the default voice once VoiceStudio lists it.
   await expect(librarian.getByRole("button", { name: "Selected" })).toBeVisible();
   await librarian.getByRole("button", { name: "Send The Librarian back to Studio" }).click();
   await expect(page.getByText("The Librarian sent back to the Studio gallery")).toBeVisible();

@@ -1,8 +1,9 @@
 import { create } from "zustand";
-import { DEFAULT_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
+import { DEFAULT_VOICE_ID, isDefaultArchetype, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
 import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
 import { archetypeOf, idPath, studioFetch, studioJson, type Profile } from "../lib/studio";
 import { LOCAL_ENGINE } from "../engine/types";
+import { useSettings } from "./settings";
 
 export interface EngineOption {
   id: string;
@@ -106,6 +107,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false, cloning: e.supports_cloning === true }));
       const clouds = get().voices.filter((v) => v.engine === OPENAI_ENGINE || v.engine === FISH_ENGINE);
       set({ voices: [...profiles, ...presets, ...clouds, LOCAL_VOICE], engines: engineOpts.length ? engineOpts : get().engines, activeEngine: activeEngine ?? get().activeEngine });
+      adoptDefaultVoice(profiles);
     } catch {
       // Keep available voices if the local speech server is offline.
     }
@@ -116,6 +118,14 @@ export const useVoices = create<VoicesState>()((set, get) => ({
     await get().loadServer();
   },
 }));
+
+/** Make the Librarian the default voice unless the user has picked one. */
+function adoptDefaultVoice(profiles: Voice[]) {
+  const settings = useSettings.getState();
+  if (settings.voiceChosen || settings.voice !== DEFAULT_VOICE_ID) return;
+  const librarian = profiles.find((v) => isDefaultArchetype(v.archetype));
+  if (librarian) settings.set("voice", librarian.id);
+}
 
 export function getVoice(id: string | null | undefined): Voice {
   const list = useVoices.getState().voices;
@@ -128,7 +138,7 @@ export function getVoice(id: string | null | undefined): Voice {
     return { ...FISH_DEFAULT_VOICE, id, name: "Fish Audio voice", hue: hueFor(id) };
   }
   if (id) return { id, name: "Saved VoiceStudio voice", engine: useVoices.getState().activeEngine ?? "omnivoice", kind: "profile", lang: "", tags: [], hue: hueFor(id) };
-  return list.find((v) => v.id === DEFAULT_VOICE_ID) ?? PRESET_VOICES[0];
+  return list.find((v) => isDefaultArchetype(v.archetype)) ?? list.find((v) => v.id === DEFAULT_VOICE_ID) ?? PRESET_VOICES[0];
 }
 
 export const isLocalVoice = (id: string | null | undefined) => id === LOCAL_VOICE_ID;

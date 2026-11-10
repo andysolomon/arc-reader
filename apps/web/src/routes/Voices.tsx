@@ -171,7 +171,7 @@ export function VoicesPage() {
       navigate(-1);
       return;
     }
-    set("voice", id);
+    useSettings.getState().patch({ voice: id, voiceChosen: true });
     toast(`${v.name} selected`);
   };
 
@@ -186,7 +186,7 @@ export function VoicesPage() {
       toast(error instanceof Error ? error.message : `Could not send ${v.name} back to Studio`);
       return;
     }
-    if (useSettings.getState().voice === id) set("voice", DEFAULT_VOICE_ID);
+    if (useSettings.getState().voice === id) useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
     toast(`${v.name} sent back to the Studio gallery`);
   };
 

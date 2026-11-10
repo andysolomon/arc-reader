@@ -10,7 +10,9 @@
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @readaloud/web test:e2e",
     "storybook": "pnpm --filter @readaloud/ui storybook",
-    "contrast": "pnpm --filter @readaloud/tokens contrast"
+    "contrast": "pnpm --filter @readaloud/tokens contrast",
+    "ios:sync": "pnpm --filter @readaloud/web ios:sync",
+    "ios:open": "pnpm --filter @readaloud/web ios:open"
   },
   "devDependencies": {
     "typescript": "~5.9.3"

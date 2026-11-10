@@ -11,6 +11,7 @@ import { unavailableMessage } from "../engine/engine";
 import { isPaidEngine } from "../engine/providers";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
+import { writeClipboardText } from "../lib/clipboard";
 import { useBreakpoint } from "../hooks/useMedia";
 
 function safeName(s: string) {
@@ -24,6 +25,7 @@ export function PlayerHost() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const p = usePlayer();
+  const focus = usePlayer((s) => s.focus);
   const voice = getVoice(p.voiceId);
 
   const onDownload = useCallback(async () => {
@@ -63,7 +65,7 @@ export function PlayerHost() {
       }
     }
     try {
-      await navigator.clipboard.writeText(url);
+      await writeClipboardText(url);
       toast("Link copied");
     } catch {
       toast("Couldn't copy the link");
@@ -116,7 +118,8 @@ export function PlayerHost() {
     extraMenu,
   };
 
-  if (bp === "sm") return <PlayerBar {...props} compact />;
+  // The tab bar owns the home-indicator inset. In focus it is hidden, so the player takes it.
+  if (bp === "sm") return <PlayerBar {...props} compact safeBottom={focus || pathname === "/auth"} />;
   if (style === "bar") return <PlayerBar {...props} />;
   return <PlayerPill {...props} />;
 }

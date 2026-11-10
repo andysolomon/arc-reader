@@ -3,6 +3,7 @@ import { Copy, ExternalLink, Library, Sparkles, X } from "lucide-react";
 import { Button, IconButton, Input, cn } from "@readaloud/ui";
 import type { DocMeta, DocRecord } from "../lib/db";
 import { categoryNames, citation } from "../lib/category";
+import { writeClipboardText } from "../lib/clipboard";
 import { hasSummary, summaryModelLabel } from "../lib/summary";
 import { dateLabel } from "../lib/dates";
 import { useLibrary } from "../state/library";
@@ -38,7 +39,7 @@ export function DocumentDetails({ record, summaryAvailable, onShowSummary, onClo
   const category = record.category;
   const copyCitation = async () => {
     try {
-      await navigator.clipboard.writeText(citation(record));
+      await writeClipboardText(citation(record));
       toast("Citation copied");
     } catch {
       toast("Couldn't copy the citation");

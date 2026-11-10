@@ -5,7 +5,7 @@ import type { Voice } from "../data/voices";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { unavailableMessage } from "../engine/engine";
 import { isTransientPreparationError, refreshPreparationCatalog, sharedAudioRemaining } from "../engine/preparation";
-import { API_BASE, baseFor, cacheKey, isPaidEngine, prepareInBackground, synthesize } from "../engine/providers";
+import { baseFor, cacheKey, isPaidEngine, prepareInBackground, synthesize, usesBuiltInProxy } from "../engine/providers";
 import { ApiBusy, ApiUnreachable, LOCAL_ENGINE } from "../engine/types";
 import { audioCache, docs } from "../lib/db";
 import { prepareCodeSummaries } from "../lib/codeSummaries";
@@ -64,7 +64,7 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   sharedError: null,
   sharing: 0,
   async refreshShared() {
-    if (API_BASE !== "/api/vs") return;
+    if (!usesBuiltInProxy()) return;
     if (sharedRefresh) return sharedRefresh;
     sharedRefresh = (async () => {
       try {
@@ -144,7 +144,7 @@ function drain() {
   for (const job of usePreparation.getState().jobs) {
     if (job.remote) continue;
     const provider = providerFor(job);
-    const background = provider === "voicestudio" && API_BASE === "/api/vs";
+    const background = provider === "voicestudio" && usesBuiltInProxy();
     const limit = background ? PREPARATION_QUEUE_LIMIT : provider === "voicestudio" ? 1 : PREPARATION_CONCURRENCY;
     if (job.status !== "queued" || active.has(job.id) || (counts.get(provider) || 0) >= limit) continue;
     const controller = new AbortController();
@@ -188,7 +188,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     const passages = planPassages(sentences);
     if (!passages.length) throw new Error("There is no text to prepare.");
     update(job.id, { total: passages.length, message: undefined });
-    if (API_BASE === "/api/vs" && !isPaidEngine(job.voice.engine)) {
+    if (usesBuiltInProxy() && !isPaidEngine(job.voice.engine)) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {

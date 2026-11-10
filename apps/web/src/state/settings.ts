@@ -5,6 +5,7 @@ import type { HighlightMode } from "@readaloud/ui";
 import { LOCAL_ENGINE, type EngineId } from "../engine/types";
 import { DEFAULT_ENGINE, OPENAI_MODEL, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL } from "../engine/providers";
 import { DEFAULT_VOICE_ID } from "../data/voices";
+import { setSpeechEndpoint } from "../lib/speechServer";
 import { DEFAULT_SUMMARY_MODEL, isSummaryModel, type SummaryModel } from "../lib/summary";
 
 export type PlayerStyle = "capsule" | "bar";
@@ -17,6 +18,8 @@ export interface Settings {
   highlightStyle: HighlightMode;
   composeLayout: ComposeLayout;
   voice: string;
+  /** The user picked the default voice; until then the Librarian replaces the fallback once it loads. */
+  voiceChosen: boolean;
   defaultSpeed: number;
   autoplayShare: boolean;
   /** TTS engine id from the speech server, or "local" for the browser voice */
@@ -35,6 +38,13 @@ export interface Settings {
   libView: "list" | "grid";
   apiKey: string;
   email: string | null;
+  /**
+   * Absolute speech-server URL for the iOS app. Empty uses the build-time base
+   * on the web, and the on-device voice in the iOS shell.
+   */
+  speechServer: string;
+  /** VoiceStudio key sent only with an absolute speech-server URL. */
+  speechServerKey: string;
 }
 
 interface Actions {
@@ -59,6 +69,7 @@ export const useSettings = create<Settings & Actions>()(
       highlightStyle: "block",
       composeLayout: "centered",
       voice: DEFAULT_VOICE_ID,
+      voiceChosen: false,
       defaultSpeed: 1,
       autoplayShare: true,
       engine: DEFAULT_ENGINE,
@@ -72,18 +83,25 @@ export const useSettings = create<Settings & Actions>()(
       libView: "list",
       apiKey: typeof crypto !== "undefined" ? genKey() : "ra_live_unavailable",
       email: null,
+      speechServer: "",
+      speechServerKey: "",
       set: (k, v) => set({ [k]: v } as Partial<Settings>),
       patch: (p) => set(p),
     }),
     {
       name: "readaloud:settings",
-      version: 2,
+      version: 3,
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Partial<Settings> & { provider?: string };
         if (version < 2) {
           p.engine = p.provider === "piper" ? LOCAL_ENGINE : DEFAULT_ENGINE;
           delete p.provider;
           if (p.voice && !/^(expr-voice-|[MF][1-5]$|local$)/.test(p.voice)) p.voice = DEFAULT_VOICE_ID;
+        }
+        if (version < 3) {
+          // The Librarian became the default voice: let it take over once, then respect the next pick.
+          p.voice = DEFAULT_VOICE_ID;
+          p.voiceChosen = false;
         }
         return p as Settings;
       },
@@ -105,3 +123,10 @@ export const useSettings = create<Settings & Actions>()(
 export function useThemeId(): ThemeId {
   return useSettings((s) => s.theme) ?? systemTheme();
 }
+
+function publishSpeechEndpoint(state: { speechServer?: string; speechServerKey?: string }) {
+  setSpeechEndpoint({ override: state.speechServer ?? "", key: state.speechServerKey ?? "" });
+}
+
+publishSpeechEndpoint(useSettings.getState());
+useSettings.subscribe((state) => publishSpeechEndpoint(state));

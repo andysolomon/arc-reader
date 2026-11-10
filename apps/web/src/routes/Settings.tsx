@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Copy, Check } from "lucide-react";
 import { THEMES } from "@readaloud/tokens";
-import { Chip, SectionLabel, Segmented, Switch, ThemeSwatch, VoiceAvatar, VoiceSourceBadge, Button } from "@readaloud/ui";
+import { Chip, SectionLabel, Segmented, Switch, ThemeSwatch, VoiceAvatar, VoiceSourceBadge, Button, Input } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
 import { useSettings, useThemeId } from "../state/settings";
@@ -12,6 +12,9 @@ import { ApiUsage } from "../components/ApiUsage";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
 import { studioJson, jsonBody } from "../lib/studio";
 import { DEFAULT_ENGINE, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL, hasApi, hasOpenAI } from "../engine/providers";
+import { writeClipboardText } from "../lib/clipboard";
+import { isNativeApp } from "../lib/native";
+import { normalizeSpeechServer } from "../lib/speechServer";
 import { LOCAL_ENGINE } from "../engine/types";
 import { SUMMARY_MODELS } from "../lib/summary";
 import { useJev, useLlm } from "../state/llm";
@@ -53,6 +56,13 @@ export function SettingsPage() {
   const browserOnly = s.engine === LOCAL_ENGINE;
   const [engineBusy, setEngineBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [speechServer, setSpeechServer] = useState(s.speechServer);
+  const [speechKey, setSpeechKey] = useState(s.speechServerKey);
+  const native = isNativeApp();
+  useEffect(() => {
+    setSpeechServer(s.speechServer);
+    setSpeechKey(s.speechServerKey);
+  }, [s.speechServer, s.speechServerKey]);
   // Hidden on static hosting, where the server has no /api/llm.
   const llmAvailable = useLlm((st) => st.config !== null);
   const jevAvailable = useJev((st) => st.config !== null);
@@ -60,7 +70,7 @@ export function SettingsPage() {
 
   const copyKey = async () => {
     try {
-      await navigator.clipboard.writeText(s.apiKey);
+      await writeClipboardText(s.apiKey);
       setCopied(true);
       toast("API key copied");
       setTimeout(() => setCopied(false), 1800);
@@ -154,6 +164,54 @@ export function SettingsPage() {
             </p>
             <div className="flex flex-col rounded-panel border border-line bg-bg2">
               <LlmKeyField store={useJev} name="TypeSafe" envName="TYPESAFE_API_KEY" help="From the TypeSafe console (console.typesafe.ai/keys)." last />
+            </div>
+          </Section>
+        )}
+
+        {native && (
+          <Section title="Speech server">
+            <p className="m-0 text-[13px] text-fg2">
+              Leave this empty to read with the iPhone’s own voice. To use VoiceStudio, paste its address, for example <span className="font-mono">https://mac.tailnet.ts.net:3900</span>. To use a ReadAloud server that already holds the key, paste its proxy, for example <span className="font-mono">https://host.ts.net:8449/api/vs</span>. A key is sent only to an absolute address, and only from this device.
+            </p>
+            <div className="flex flex-col gap-2">
+              <Input
+                value={speechServer}
+                onChange={(e) => setSpeechServer(e.target.value)}
+                onBlur={() => {
+                  const next = normalizeSpeechServer(speechServer);
+                  if (speechServer.trim() && !next) {
+                    toast("Use an http or https address");
+                    setSpeechServer(s.speechServer);
+                    return;
+                  }
+                  setSpeechServer(next);
+                  if (next !== s.speechServer) {
+                    s.set("speechServer", next);
+                    void useVoices.getState().load();
+                  }
+                }}
+                placeholder="https://mac.tailnet.ts.net:3900"
+                aria-label="Speech server address"
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <Input
+                type="password"
+                value={speechKey}
+                onChange={(e) => setSpeechKey(e.target.value)}
+                onBlur={() => {
+                  const next = speechKey.trim();
+                  setSpeechKey(next);
+                  if (next !== s.speechServerKey) s.set("speechServerKey", next);
+                }}
+                placeholder="VoiceStudio API key, if the server asks for one"
+                aria-label="Speech server API key"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
             </div>
           </Section>
         )}
