@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { NavLink, useParams } from "react-router-dom";
+import { NavLink, useParams, useSearchParams } from "react-router-dom";
 import { Button, cn } from "@readaloud/ui";
 import { VoiceWorkshop } from "../components/studio/VoiceWorkshop";
+import { RerecordVoice } from "../components/studio/RerecordVoice";
 import { VoiceGallery } from "../components/studio/VoiceGallery";
 import { Transcription } from "../components/studio/Transcription";
 import { Dubbing } from "../components/studio/Dubbing";
@@ -31,11 +32,14 @@ function Readiness() {
 export function StudioPage() {
   const { tool = "gallery" } = useParams();
   const selected = TABS.some(([id]) => id === tool) ? tool : "gallery";
+  // Voices links "Re-record" here with the clone's id.
+  const [params] = useSearchParams();
+  const rerecording = selected === "clone" ? params.get("voice") : null;
   return <section data-screen="studio" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 pb-40 sm:px-10 sm:pt-10 animate-fadein"><div className="mx-auto flex max-w-[960px] flex-col gap-6">
     <header><h1 className="font-serif text-[28px] font-medium">Studio</h1><p className="mt-2 text-fg2">Create a voice. Turn speech into text. Give your video a new voice.</p></header>
     <nav aria-label="Studio tools" className="flex flex-wrap gap-2">{TABS.map(([id, label]) => <NavLink key={id} to={`/studio/${id}`} className={cn("rounded-control border px-3 py-2 text-sm", selected === id ? "border-accent bg-accent text-accent-fg" : "border-line bg-bg2 text-fg2 hover:bg-bg3")}>{label}</NavLink>)}</nav>
     <Readiness />
     <ModelTerms />
-    {selected === "gallery" ? <VoiceGallery /> : selected === "clone" || selected === "design" ? <VoiceWorkshop key={selected} mode={selected} /> : selected === "dub" ? <Dubbing /> : <Transcription key={selected} dictate={selected === "dictate"} />}
+    {selected === "gallery" ? <VoiceGallery /> : rerecording ? <RerecordVoice key={rerecording} id={rerecording} /> : selected === "clone" || selected === "design" ? <VoiceWorkshop key={selected} mode={selected} /> : selected === "dub" ? <Dubbing /> : <Transcription key={selected} dictate={selected === "dictate"} />}
   </div></section>;
 }

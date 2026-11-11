@@ -29,7 +29,16 @@ export async function studioJson<T>(path: string, init?: RequestInit): Promise<T
   return (await studioFetch(path, init)).json() as Promise<T>;
 }
 export const jsonBody = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-export interface Profile { id: string; name: string; kind: "clone" | "design"; language: string; instruct?: string; personality?: string | null }
+export interface Profile { id: string; name: string; kind: "clone" | "design"; language: string; instruct?: string; personality?: string | null; ref_audio_path?: string | null; ref_text?: string | null }
+/**
+ * Which recording a clone speaks with. Replacing a clone's reference saves it as
+ * `<id>-<token>.<ext>`; the first recording (`<id>.wav`) has no revision.
+ */
+export function recordingRevision(profile: Pick<Profile, "id" | "ref_audio_path"> | undefined): string | undefined {
+  const file = profile?.ref_audio_path?.split(/[\\/]/).pop();
+  const prefix = `${profile?.id}-`;
+  return file?.startsWith(prefix) ? file.slice(prefix.length).replace(/\.[^.]*$/, "") || undefined : undefined;
+}
 /** Gallery recipe a saved profile was added from (VoiceStudio tags it `archetype:<id>`); undefined for clones and designs made in Studio. */
 export const archetypeOf = (profile: Pick<Profile, "personality"> | undefined) => profile?.personality?.startsWith("archetype:") ? profile.personality.slice("archetype:".length) : undefined;
 export interface ArchetypeFacets { gender?: string | null; age?: string | null; pitch?: string | null; accent?: string | null; whisper?: boolean; lang?: string }
