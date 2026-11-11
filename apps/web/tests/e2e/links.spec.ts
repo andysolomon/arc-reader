@@ -74,6 +74,13 @@ test("lists links in a sheet on a phone and can turn the toasts off", async ({ p
   await expect(sheet.getByRole("table").locator("tbody tr")).toHaveCount(1);
   await sheet.getByRole("radio", { name: "All 2" }).click();
   await expect(sheet.getByRole("table").locator("tbody tr")).toHaveCount(2);
+  // The text behind the sheet overflows a phone screen: its scroll area must take keyboard focus.
+  await axe(page);
   await sheet.getByRole("button", { name: "Done" }).click();
   await expect(sheet).toBeHidden();
+  const text = page.getByRole("region", { name: "Document text" });
+  await text.focus();
+  await expect(text).toBeFocused();
+  await page.keyboard.press("PageDown");
+  await expect.poll(() => text.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 });

@@ -178,7 +178,8 @@ export function Reader() {
         </div>
       )}
       <div className="flex min-h-0 flex-1">
-      <div ref={scrollRef} className={cn("relative min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pb-[200px]", focus ? "pt-16" : "pt-12")}>
+      {/* Focusable so the text can be scrolled from the keyboard. */}
+      <div ref={scrollRef} role="region" aria-label="Document text" tabIndex={0} className={cn("relative min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pb-[200px] focus-visible:-outline-offset-2", focus ? "pt-16" : "pt-12")}>
         {focus && (
           <IconButton label="Exit focus mode" title="Exit focus (Esc)" onClick={() => setFocus(false)} className="fixed right-3 top-3 z-20">
             <Minimize2 size={20} strokeWidth={1.5} />
