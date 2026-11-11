@@ -9,8 +9,14 @@ import type { Plugin } from "vite";
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+/** A small file every build of the web app serves. The page loads it to learn that the app is up. */
+export const PROBE_IMAGE = "/icons/icon-192.png";
+
+/** How often the page checks for the server, and how long one attempt may take. */
+const TIMING = { retryMs: 4000, giveUpMs: 10000 };
+
 /** Colors are the dark theme's (packages/tokens): the shell paints that behind the web view. */
-export function unreachablePage(serverUrl: string): string {
+export function unreachablePage(serverUrl: string, timing = TIMING): string {
   const host = escapeHtml(new URL(serverUrl).host);
   return `<!doctype html>
 <html lang="en">
@@ -39,20 +45,61 @@ export function unreachablePage(serverUrl: string): string {
 </head>
 <body>
 <h1>Can’t reach ReadAloud</h1>
-<p>The app loads from <span class="host">${host}</span>. Check that Tailscale is connected on this iPhone.</p>
+<p>The app loads from <span class="host">${host}</span>. Check that Tailscale is connected on this iPhone. It opens by itself once the server answers.</p>
 <button type="button" id="retry">Try again</button>
 <script>
   var server = ${JSON.stringify(serverUrl).replace(/</g, "\\u003c")};
   var button = document.getElementById("retry");
-  function retry() {
+  var leaving = false, checking = false, next = 0;
+
+  // Open the app. A stale connection can hang for a minute before the web view
+  // gives up, so stop waiting after a while and offer the button again.
+  function openApp() {
+    if (leaving) return;
+    leaving = true;
     button.disabled = true;
     button.textContent = "Connecting…";
     location.replace(server);
+    setTimeout(function () {
+      window.stop();
+      leaving = false;
+      button.disabled = false;
+      button.textContent = "Try again";
+      schedule();
+    }, ${timing.giveUpMs});
   }
-  button.addEventListener("click", retry);
+  button.addEventListener("click", openApp);
+
+  // Keep checking in the background, so reconnecting Tailscale is enough. The
+  // image loads only when the app itself is being served, which a server that
+  // is restarting for a deploy does not do.
+  function check() {
+    if (leaving || checking || document.hidden) return;
+    checking = true;
+    var image = new Image(), settled = false;
+    var settle = function (reachable) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(limit);
+      checking = false;
+      if (leaving) return;
+      if (reachable) openApp();
+      else schedule();
+    };
+    var limit = setTimeout(function () { settle(false); image.src = ""; }, ${timing.giveUpMs});
+    image.onload = function () { settle(true); };
+    image.onerror = function () { settle(false); };
+    image.src = server + ${JSON.stringify(PROBE_IMAGE)} + "?" + Date.now();
+  }
+  function schedule() {
+    clearTimeout(next);
+    next = setTimeout(check, ${timing.retryMs});
+  }
+
   // Coming back from Settings or the Tailscale app, or regaining a network.
-  document.addEventListener("visibilitychange", function () { if (!document.hidden) retry(); });
-  window.addEventListener("online", retry);
+  document.addEventListener("visibilitychange", check);
+  window.addEventListener("online", check);
+  check();
 </script>
 </body>
 </html>

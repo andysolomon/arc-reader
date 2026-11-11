@@ -1,0 +1,1755 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReadAloud — how it works (BPMN)</title>
+<style>
+  :root{
+    --bg:#161412; --fg:#ece6dc; --muted:#a39a8e; --faint:#6f675d;
+    --card:#1d1a17; --card2:#272320; --line:#342e29; --lane:#1a1715; --strip:#211e1b;
+    --accent:#d9955a; --accent-fg:#1c120a; --accent-soft:rgba(217,149,90,.16);
+    --start:#3fa77a; --end:#d0614f; --gw:#c9a043; --msg:#6fa0e0; --data:#8f8577;
+    --task:#211e1b; --task-stroke:#5b5249; --shape-fill:#1d1a17;
+    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:ui-monospace,Menlo,Consolas,monospace;
+    --serif:Literata,Georgia,serif;
+    color-scheme:dark;
+  }
+  :root[data-theme="light"]{
+    --bg:#f7f3ec; --fg:#2a241f; --muted:#6c6258; --faint:#9c9286;
+    --card:#fffdf9; --card2:#efe9df; --line:#ddd4c7; --lane:#fbf8f3; --strip:#f1ebe2;
+    --accent:#b8692b; --accent-fg:#fff; --accent-soft:rgba(184,105,43,.13);
+    --start:#2a8a5f; --end:#b8473a; --gw:#a07c1f; --msg:#3a6fb5; --data:#857a6c;
+    --task:#fffdf9; --task-stroke:#a99d8f; --shape-fill:#fffdf9;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--fg);font:14px/1.5 var(--sans);display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+  button,select{font:inherit;color:inherit}
+  header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:12px 16px 10px;border-bottom:1px solid var(--line)}
+  header h1{font:500 19px/1.2 var(--serif);margin:0;letter-spacing:-.01em}
+  header h1 small{display:block;font:12px var(--sans);color:var(--muted);letter-spacing:0;margin-top:2px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap}
+  .tabs button,.btn{background:transparent;border:1px solid transparent;border-radius:999px;padding:5px 12px;cursor:pointer;color:var(--muted);font-size:13px;white-space:nowrap}
+  .tabs button:hover,.btn:hover{color:var(--fg);background:var(--card2)}
+  .tabs button[aria-selected="true"]{color:var(--fg);background:var(--card2);border-color:var(--line)}
+  .tabs button .n{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--line);font-size:11px;margin-right:6px;color:var(--fg)}
+  .tabs button[aria-selected="true"] .n{background:var(--accent);color:var(--accent-fg)}
+  .tools{margin-left:auto;display:flex;gap:4px;align-items:center}
+  .btn.solid{border-color:var(--line);color:var(--fg)}
+  main{display:grid;grid-template-columns:1fr 360px;min-height:0}
+  #stage{position:relative;min-width:0;min-height:0;overflow:hidden;background:
+    radial-gradient(circle at 1px 1px,var(--line) 1px,transparent 0) 0 0/22px 22px}
+  #svg{width:100%;height:100%;display:block;touch-action:none;cursor:grab;font-family:var(--sans)}
+  #svg.drag{cursor:grabbing}
+  .crumb{position:absolute;left:14px;top:12px;display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--muted);background:color-mix(in srgb,var(--bg) 82%,transparent);border:1px solid var(--line);border-radius:999px;padding:4px 12px;backdrop-filter:blur(6px);max-width:calc(100% - 28px)}
+  .crumb button{background:none;border:0;padding:0;color:var(--accent);cursor:pointer}
+  .crumb b{color:var(--fg);font-weight:600}
+  .zoom{position:absolute;right:14px;bottom:14px;display:flex;flex-direction:column;gap:4px}
+  .zoom button{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-size:16px;line-height:1}
+  .zoom button:hover{border-color:var(--accent)}
+  aside{border-left:1px solid var(--line);overflow:auto;padding:16px 18px 24px;background:var(--card)}
+  aside h2{font:500 20px/1.25 var(--serif);margin:2px 0 8px}
+  aside h3{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 0 6px;font-weight:600}
+  aside p{margin:0 0 10px}
+  aside ul{margin:0;padding-left:18px}
+  aside li{margin:3px 0}
+  .kind{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+  .kind i{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .code{display:flex;flex-direction:column;gap:4px}
+  .code button{all:unset;cursor:pointer;font:12px var(--mono);background:var(--card2);border-radius:6px;padding:4px 8px;word-break:break-all}
+  .code button:hover{outline:1px solid var(--accent)}
+  .code button.ok::after{content:"  copied";color:var(--accent)}
+  .links{display:flex;flex-wrap:wrap;gap:6px}
+  .links button{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:12.5px;cursor:pointer;text-align:left}
+  .links button:hover{border-color:var(--accent)}
+  .links button small{color:var(--muted)}
+  .drill{margin-top:12px;width:100%;background:var(--accent);color:var(--accent-fg);border:0;border-radius:10px;padding:9px 12px;font-weight:600;cursor:pointer}
+  .hint{color:var(--muted);font-size:13px}
+  .hint kbd{font:11.5px var(--mono);background:var(--card2);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+  .legend{display:grid;grid-template-columns:44px 1fr;gap:6px 10px;align-items:center;font-size:12.5px}
+  .legend svg{width:44px;height:30px;overflow:visible}
+  footer{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:9px 14px;border-top:1px solid var(--line);background:var(--card)}
+  footer label{font-size:12.5px;color:var(--muted);display:flex;gap:6px;align-items:center}
+  footer select{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:5px 8px;max-width:300px}
+  footer .btn{border-color:var(--line);color:var(--fg)}
+  footer .btn.play{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+  #say{flex:1 1 320px;min-width:220px;font-size:13.5px;display:flex;gap:10px;align-items:baseline}
+  #say .k{font:12px var(--mono);color:var(--muted);white-space:nowrap}
+  @media (max-width:900px){
+    body{overflow:auto;grid-template-rows:auto auto auto}
+    main{grid-template-columns:1fr;grid-template-rows:62vh auto}
+    aside{border-left:0;border-top:1px solid var(--line)}
+  }
+
+  /* ---- diagram ---- */
+  .pool-rect{fill:var(--lane);stroke:var(--task-stroke);stroke-width:1.2}
+  .pool-strip,.lane-strip{fill:var(--strip);stroke:var(--task-stroke);stroke-width:1}
+  .lane-rect{fill:transparent;stroke:var(--line);stroke-width:1}
+  .bb .pool-rect{fill:var(--card2)}
+  .pool-label{fill:var(--fg);font-weight:600}
+  .lane-label{fill:var(--muted);font-weight:500}
+  .pool-hit{cursor:pointer}
+  .pool-hit:hover .pool-strip,.pool-hit:hover .lane-strip,.bb.pool-hit:hover .pool-rect{fill:var(--accent-soft)}
+  .esp{fill:none;stroke:var(--task-stroke);stroke-width:1.3;stroke-dasharray:6 4}
+  .esp-label{fill:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+  .flow{fill:none;stroke:var(--faint);stroke-width:1.5}
+  .flow.msg{stroke:var(--msg);stroke-dasharray:7 5;stroke-width:1.3}
+  .flow.data{stroke:var(--data);stroke-dasharray:2 4;stroke-width:1.4}
+  .flow-hit{fill:none;stroke:transparent;stroke-width:12;cursor:pointer}
+  .flow-label{font-size:11px;fill:var(--muted);paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+  .flow.msg + .flow-label,.flow-label.msg{fill:var(--msg)}
+  .mk-seq{fill:var(--faint)} .mk-msg{fill:var(--lane);stroke:var(--msg);stroke-width:1.2} .mk-data{fill:none;stroke:var(--data);stroke-width:1.4}
+  .mk-hi{fill:var(--accent)}
+  .el{cursor:pointer}
+  .el .shape{fill:var(--shape-fill);stroke:var(--task-stroke);stroke-width:1.5;transition:stroke .15s,fill .15s}
+  .el.task .shape{fill:var(--task)}
+  .el.call .shape{stroke-width:3.2}
+  .el.start .shape{stroke:var(--start);stroke-width:2}
+  .el.end .shape{stroke:var(--end);stroke-width:3.6}
+  .el.catch .shape,.el.boundary .shape{stroke:var(--gw);stroke-width:1.4}
+  .el.gw .shape{stroke:var(--gw);stroke-width:1.6}
+  .el.store .shape{stroke:var(--data);stroke-width:1.4}
+  .el.ni .shape{stroke-dasharray:4 3}
+  .icon{fill:none;stroke:var(--muted);stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}
+  .icon.fill{fill:var(--muted)}
+  .el.end .icon.fill{fill:var(--end);stroke:var(--end)}
+  .el.gw .icon{stroke:var(--gw);stroke-width:3}
+  .marker{fill:none;stroke:var(--fg);stroke-width:1.4;stroke-linecap:round}
+  .label{fill:var(--fg)}
+  .sublabel{fill:var(--muted)}
+  .el:hover .shape{stroke:var(--accent)}
+  .sel .shape,.sel .pool-rect{stroke:var(--accent)!important;stroke-width:3!important}
+  .flow.sel{stroke:var(--accent)!important;stroke-width:2.6}
+  .flow.near{stroke:var(--accent);opacity:.85}
+  .visited .shape{fill:var(--accent-soft)!important}
+  .flow.visited{stroke:var(--accent);opacity:.75}
+  .active .shape{stroke:var(--accent)!important;stroke-width:3.2!important;filter:drop-shadow(0 0 7px var(--accent))}
+  .bb.active .pool-rect{stroke:var(--accent);stroke-width:2.5;fill:var(--accent-soft)}
+  .token{fill:var(--accent);stroke:var(--bg);stroke-width:2;filter:drop-shadow(0 0 6px var(--accent))}
+  .token.msg{fill:var(--msg);filter:drop-shadow(0 0 6px var(--msg))}
+  .dim .el:not(.visited):not(.active),.dim .flow:not(.visited){opacity:.38}
+</style>
+</head>
+<body>
+<header>
+  <h1>ReadAloud — how it works<small>BPMN 2.0 process model of the arc-reader app · click anything for details · <a href="readaloud-sequence.html" style="color:var(--accent)">sequence diagrams</a></small></h1>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <div class="tools">
+    <button class="btn" id="legendBtn" title="BPMN notation used here">Legend</button>
+    <button class="btn solid" id="dl" title="Download this diagram as BPMN 2.0 XML (opens in Camunda Modeler or bpmn.io)">Download .bpmn</button>
+    <button class="btn" id="theme" title="Toggle light / dark">◐</button>
+  </div>
+</header>
+<main>
+  <div id="stage">
+    <svg id="svg" aria-label="BPMN diagram" role="img">
+      <defs>
+        <marker id="m-seq" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path class="mk-seq" d="M0,1 L10,5 L0,9 z"/></marker>
+        <marker id="m-seq-hi" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path class="mk-hi" d="M0,1 L10,5 L0,9 z"/></marker>
+        <marker id="m-msg-end" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="10" markerHeight="10" orient="auto"><path class="mk-msg" d="M1,1.5 L11,6 L1,10.5 z"/></marker>
+        <marker id="m-msg-start" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="8" markerHeight="8" orient="auto"><circle class="mk-msg" cx="5" cy="5" r="3.6"/></marker>
+        <marker id="m-data" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="10" markerHeight="10" orient="auto"><path class="mk-data" d="M1,1.5 L11,6 L1,10.5"/></marker>
+      </defs>
+      <g id="root"></g>
+    </svg>
+    <div class="crumb" id="crumb"></div>
+    <div class="zoom">
+      <button id="zin" title="Zoom in (+)">+</button>
+      <button id="zout" title="Zoom out (−)">−</button>
+      <button id="zfit" title="Fit to screen (0)">⤢</button>
+    </div>
+  </div>
+  <aside id="panel" aria-live="polite"></aside>
+</main>
+<footer>
+  <label>Walk through <select id="scen"></select></label>
+  <button class="btn play" id="play">▶ Play</button>
+  <button class="btn" id="step" title="One step (→)">Step ›</button>
+  <button class="btn" id="reset">Reset</button>
+  <label title="When a step calls another process, open it and walk through it too"><input type="checkbox" id="follow" checked> follow into sub-processes</label>
+  <div id="say"><span class="k" id="sayk"></span><span id="sayt" class="hint">Pick a walkthrough and press Play, or click any shape.</span></div>
+</footer>
+
+<!-- Model, geometry and BPMN export: no DOM access, so it can be checked outside a browser. -->
+<script id="core">
+const SRC = "apps/web/src/";
+const SIZE = { task: [136, 78], call: [148, 80], start: [36, 36], end: [36, 36], catch: [36, 36], boundary: [36, 36], gw: [48, 48], store: [50, 46] };
+
+const DIAGRAMS = {
+  /* ------------------------------------------------------------------ 1 */
+  main: {
+    title: "Read a document",
+    sub: "From pasted text, a file or a shared link to a voice reading it — passage by passage, highlighted sentence by sentence, with the place remembered.",
+    overview: [
+      "ReadAloud is a React + Vite PWA. Everything the listener sees runs in the browser; the Vite dev/preview server (also the Docker image) fetches web pages for it, proxies speech APIs with the keys kept server-side, and runs background preparation jobs.",
+      "Text is planned into passages (≤ ~60 words, never across a paragraph). Each passage is one speech request and one audio clip; the reader still moves sentence by sentence inside the clip.",
+      "Code blocks and images are read as narration: an LLM writes a short spoken explanation of each code block before the reading opens, and describes images in the background while it plays.",
+      "The two thick-bordered boxes are call activities: open them to see how a passage gets audio, and how a whole reading is prepared ahead of time. Two more tabs show library sync and article summaries.",
+    ],
+    pools: [
+      { id: "P_app", n: "ReadAloud web app (browser PWA)", x: 0, y: 0, w: 3030, lanes: [
+        { id: "L_user", n: "Listener", h: 150, d: "The person using the app: pastes, shares, presses play, picks voices." },
+        { id: "L_ui", n: "Screens", h: 170, d: "React Router routes: Compose (/), ReadNew (/read/new, the share target) and Reader (/read/:id).", code: [SRC + "App.tsx:48"] },
+        { id: "L_player", n: "Player · usePlayer + PlaybackEngine", h: 430, d: "The Zustand player store (state/player.ts) wraps one PlaybackEngine instance (engine/engine.ts), which owns segmentation, passage planning, audio elements, the clock and prefetch.", code: [SRC + "state/player.ts:76", SRC + "engine/engine.ts:92"] },
+      ], d: "Single-page app; state in Zustand stores, persistence in IndexedDB (idb) and localStorage, offline via a Workbox service worker." , code: [SRC + "main.tsx", "apps/web/vite.config.ts:25"] },
+      { id: "X_server", bb: true, n: "App server (Vite) — /api/fetch page fetch · /api/vs /api/oa /api/fish speech proxy · /api/llm explanations & summaries · /api/library/sync · /api/preparations jobs", x: 0, y: 890, w: 3030, h: 70,
+        d: "Node-side plugins of the Vite dev and preview servers (production runs vite preview in the kind cluster). API keys come from server-side env or a key saved on the server, so they never reach the bundle; the speech proxy drops Origin/Referer/Cookie and adds the Bearer key.",
+        code: ["apps/web/vite.config.ts:9", "apps/web/vite.proxy.ts:42", "apps/web/vite.fetch.ts:20", "apps/web/vite.llm.ts:98", "apps/web/vite.library.ts:85", "apps/web/vite.prepare.ts:424"] },
+      { id: "X_web", bb: true, n: "Web pages · FxTwitter (X posts)", x: 380, y: 1010, w: 220, h: 60, d: "Any http(s) page the listener asked for. Links to X posts are read through the FxTwitter API instead.", code: ["apps/web/vite.xpost.ts:11"] },
+      { id: "X_openai", bb: true, n: "OpenAI — chat (Patois), speech for OpenAI voices", x: 840, y: 1010, w: 320, h: 60, d: "Reached only through /api/oa when OPENAI_API_KEY is set. Speech uses gpt-4o-mini-tts (or tts-1 for accent voices); the Patois rewrite uses VITE_PATOIS_MODEL (default gpt-4.1-mini)." },
+      { id: "X_llm", bb: true, n: "LLM — OpenCode Go (explanations, summaries) · TypeSafe Jev (shelves)", x: 1200, y: 1010, w: 480, h: 60, d: "Reached through /api/llm (LLM_URL, default https://opencode.ai/zen/go) and /api/jev. Keys are set in Settings and saved on the server, or come from LLM_API_KEY / TYPESAFE_API_KEY.", code: ["apps/web/vite.llm.ts:22", "apps/web/vite.jev.ts:32"] },
+      { id: "X_vs", bb: true, n: "VoiceStudio — primary machine (Mac mini, GPU) · local container as overflow", x: 1770, y: 1010, w: 640, h: 60, d: "Self-hosted TTS server with an OpenAI-compatible API (/v1/audio/speech, /v1/audio/voices, /v1/audio/transcriptions). KittenTTS is fast on CPU; OmniVoice clones and designed voices are ~10× slower than real time on CPU, so the Mac (MPS) is preferred.", code: ["compose.yaml:41", "README.md"] },
+      { id: "X_fish", bb: true, n: "Fish Audio", x: 2510, y: 1010, w: 240, h: 60, d: "Cloud TTS reached through /api/fish when FISH_API_KEY is set; only the voice catalogue and /v1/tts are exposed." },
+    ],
+    esps: [
+      { id: "ESP_ctrl", n: "Listener controls", lane: "L_player", x: 75, y: 395, w: 380, h: 190, d: "An event sub-process: at any time while a reading is open, keyboard or touch controls act on the engine without ending the reading (non-interrupting)." },
+    ],
+    nodes: [
+      { id: "S_start", t: "start", n: "Wants to listen", lw: 84, x: 100, y: 75, lane: "L_user", d: "Someone opens ReadAloud (the Compose screen is the home route) with something they want to hear." },
+      { id: "T_input", t: "task", k: "user", n: "Paste a link or text, upload, or read the clipboard", x: 215, y: 75, lane: "L_user",
+        d: "Compose puts the link field first; pasting a web address there reads it at once, and anything else opens the folded-away text box. The listener can also upload a .txt/.md file, read the clipboard, or try the sample. The draft survives a reload (sessionStorage).",
+        code: [SRC + "routes/Compose.tsx:67", SRC + "routes/Compose.tsx:97", SRC + "routes/Compose.tsx:113"] },
+      { id: "S_share", t: "start", ev: "message", n: "Shared from another app", lw: 84, x: 100, y: 235, lane: "L_ui",
+        d: "The installed PWA is a Web Share Target: sharing a page or text from another app opens /read/new?title=&text=&url=.",
+        code: ["apps/web/vite.config.ts:52", SRC + "routes/ReadNew.tsx:13"] },
+      { id: "T_shareParse", t: "task", n: "Read the shared title, text and link", x: 215, y: 235, lane: "L_ui",
+        d: "ReadNew reads the query parameters once. A bare http(s) link in the text field is treated as the URL.", code: [SRC + "routes/ReadNew.tsx:17"] },
+      { id: "G_url", t: "gw", g: "x", n: "Web address?", lp: "tl", x: 350, y: 235, lane: "L_ui", d: "Is there a URL to fetch, or is the text already here?" },
+      { id: "T_fetch", t: "task", k: "service", n: "Fetch the page, keep the readable text", x: 480, y: 235, lane: "L_ui",
+        d: "fetchReadable tries a direct fetch, then the app server’s /api/fetch (most sites send no CORS headers), then an optional reader proxy. Links to X posts go to FxTwitter and come back as HTML. htmlToText walks the article: headings, paragraphs, lists and quotes, code kept as fenced blocks, images and SVGs turned into visual blocks with their captions, plus the page’s links and metadata (author, published date, site, description).",
+        facts: ["/api/fetch: GET only, http(s) only, pages ≤ 5 MB, 20 s timeout", "inline images ≤ 1 MB in total"],
+        code: [SRC + "lib/fetchUrl.ts:184", SRC + "lib/fetchUrl.ts:95", SRC + "lib/fetchUrl.ts:77", "apps/web/vite.fetch.ts:29", "apps/web/vite.xpost.ts:122"] },
+      { id: "G_merge", t: "gw", g: "x", n: "", x: 610, y: 235, lane: "L_ui", d: "Merge: text from Compose, a share, or a fetched page continues the same way." },
+      { id: "T_create", t: "task", n: "Save the document to the Library", x: 735, y: 235, lane: "L_ui",
+        d: "useLibrary.create stores a DocRecord — title, text, source, domain, page metadata, hyperlinks and an optional per-document voice — and the same transaction queues it in the outbox for library sync. If a TypeSafe key is set, Jev quietly suggests a shelf in the background. openDocument then hands it to the player and navigates to /read/:id.",
+        code: [SRC + "state/library.ts:66", SRC + "lib/db.ts:173", SRC + "state/categories.ts:28", SRC + "lib/openDoc.ts:7"] },
+      { id: "G_patois", t: "gw", g: "x", n: "Patois voice?", lp: "l", x: 860, y: 400, lane: "L_player",
+        d: "player.open resolves the effective voice (the document’s own, else the default — the Librarian once the server’s voices load). The Jamaican Patois voice reads a rewritten text. A summary opened from the Reader is read as written and skips this, the code step and resume.", code: [SRC + "state/player.ts:158", SRC + "state/player.ts:172"] },
+      { id: "T_patois", t: "task", k: "service", n: "Rewrite into Jamaican Patois", x: 980, y: 400, lane: "L_player",
+        d: "preparePatois rewrites the text in bounded chunks with an OpenAI chat model via /api/oa and stores the adaptation on the document (the original stays intact). Positions are kept separately for the original and the Patois variant.",
+        code: [SRC + "lib/patois.ts:34", SRC + "state/player.ts:173"] },
+      { id: "G_patmerge", t: "gw", g: "x", n: "", x: 1100, y: 400, lane: "L_player", d: "Merge." },
+      { id: "G_code", t: "gw", g: "x", n: "Code blocks?", lp: "t", x: 1225, y: 400, lane: "L_player",
+        d: "Does the reading contain code blocks that have no spoken explanation yet? Opening waits for them, because each code block becomes a sentence of narration.", code: [SRC + "state/player.ts:184"] },
+      { id: "T_code", t: "task", k: "service", n: "Explain each code block", x: 1345, y: 400, lane: "L_player",
+        d: "prepareCodeSummaries asks the LLM (through /api/llm, with the summary model) for one short spoken explanation per block, as a JSON map. An explanation over 700 characters or 100 words is replaced by a fixed skip notice. Saved on the document; concurrent readers share one request.",
+        facts: ["≤ 30 blocks, ≤ 20,000 characters each, ≤ 60,000 in total", "60 s timeout"],
+        code: [SRC + "lib/codeSummaries.ts:41", SRC + "lib/codeBlocks.ts:66"] },
+      { id: "G_codemerge", t: "gw", g: "x", n: "", x: 1465, y: 400, lane: "L_player", d: "Merge." },
+      { id: "T_segment", t: "task", k: "script", n: "Split into reading blocks, sentences and words", x: 1595, y: 400, lane: "L_player",
+        d: "segment() first splits the text into prose, code and visual blocks. Prose becomes paragraphs, sentences and words; each code block becomes one sentence — its explanation — and each image one sentence: its description, or its caption or alt text until a description exists. Until real audio arrives, a sentence’s duration is estimated at 2.83 words/s.",
+        code: [SRC + "state/player.ts:190", SRC + "lib/segment.ts:42", SRC + "lib/codeBlocks.ts:13"] },
+      { id: "T_load", t: "task", n: "Restore the position, plan passages, load the engine", x: 1740, y: 400, lane: "L_player",
+        d: "open() restores the saved position (same variant, less than 99.5 % read, and the narration hasn’t changed since — a position saved before code or image narration is ignored). It re-reads the record and stops if the text changed meanwhile. engine.load() plans passages: runs of sentences up to ~60 words (≈ 20 s), never across a paragraph. Passages are a pure function of the text, so cache keys stay stable across sessions.",
+        code: [SRC + "state/player.ts:194", SRC + "engine/engine.ts:164", SRC + "lib/segment.ts:105"] },
+      { id: "G_open", t: "gw", g: "o", n: "", x: 1865, y: 400, lane: "L_player",
+        d: "Inclusive split. Playback always continues. Background preparation also starts when the reading was opened from Compose with a VoiceStudio voice, or an identical preparation job is still running. Images without descriptions are described in the background, so the reading opens at once.",
+        code: [SRC + "state/player.ts:216", SRC + "state/player.ts:223"] },
+      { id: "CA_prepare", t: "call", ref: "prepare", n: "Prepare whole reading", x: 1865, y: 535, lane: "L_player",
+        d: "Renders every passage ahead of playback as a server-owned job, so a voice slower than real time never stalls. Also offered in the player menu and the Library. Not offered for paid cloud voices (it would bill the whole document up front).",
+        code: [SRC + "state/player.ts:256", SRC + "engine/engine.ts:385"] },
+      { id: "E_prepared", t: "end", n: "Audio prepared", x: 2000, y: 535, lane: "L_player", d: "Toast: “Audio prepared — playback no longer waits on the server”." },
+      { id: "T_describe", t: "task", k: "service", n: "Describe the images in the background", x: 1990, y: 665, lane: "L_player",
+        d: "describeVisuals sends each image (SVGs rasterized first) to the vision model through /api/llm/v1/responses and saves the descriptions on the document. A description over 1000 characters or 150 words is rejected and the caption stays.",
+        facts: ["≤ 8 images, 2 at a time", "45 s per image, 60 s overall"],
+        code: [SRC + "state/player.ts:125", SRC + "lib/visualDescriptions.ts:93"] },
+      { id: "T_replace", t: "task", n: "Swap the descriptions into the reading", x: 2120, y: 665, lane: "L_player",
+        d: "engine.replaceText takes the re-segmented text only if sentence and passage boundaries are unchanged, so the listener doesn’t move. It drops cached chunks of passages whose text changed — except the one playing — and refills prefetch. A running preparation restarts so its audio matches.",
+        code: [SRC + "engine/engine.ts:193", SRC + "state/player.ts:139"] },
+      { id: "E_described", t: "end", n: "Images described", x: 2225, y: 665, lane: "L_player", d: "Later passages read the descriptions instead of the captions." },
+      { id: "G_autoplay", t: "gw", g: "x", n: "Autoplay?", lp: "b", x: 1980, y: 400, lane: "L_player",
+        d: "Autoplay only follows a user gesture (Listen, Fetch, a Library tap). Shared readings follow the “Auto-play on share” setting (on by default).", code: [SRC + "lib/openDoc.ts:7", SRC + "routes/ReadNew.tsx:20"] },
+      { id: "T_press", t: "task", k: "user", n: "Press play, or tap a sentence", x: 2090, y: 75, lane: "L_user",
+        d: "Space or the play button calls engine.play(); clicking a sentence means “read from here” (engine.seek).", code: [SRC + "engine/engine.ts:258", SRC + "engine/engine.ts:331"] },
+      { id: "G_playmerge", t: "gw", g: "x", n: "", x: 2170, y: 400, lane: "L_player", d: "Merge: the start of every passage." },
+      { id: "CA_synth", t: "call", ref: "synth", n: "Synthesize passage", x: 2310, y: 400, lane: "L_player",
+        d: "ensureChunk(passage) returns the audio for the passage holding the current sentence, creating at most one request per passage. While it is pending, the player shows loading and the clock is frozen, so waiting is not counted as listening.",
+        code: [SRC + "engine/engine.ts:258", SRC + "engine/engine.ts:443", SRC + "engine/providers.ts:407"] },
+      { id: "B_synth", t: "boundary", ev: "error", on: "CA_synth", side: "top", dx: 30, n: "Voice unavailable", lp: "r",
+        d: "The chosen voice could not be generated: server unreachable, still busy after retries, or the request was rejected. Playback stops instead of quietly switching to another voice.",
+        code: [SRC + "engine/engine.ts:281", SRC + "state/player.ts:108"] },
+      { id: "T_speechErr", t: "task", n: "Show “voice unavailable” with Retry / Use browser voice", x: 2340, y: 235, lane: "L_ui",
+        d: "The Reader shows the error message (speechError) with two actions.", code: [SRC + "state/player.ts:247", SRC + "state/player.ts:251"] },
+      { id: "T_choose", t: "task", k: "user", n: "Retry, or switch to the browser voice", x: 2340, y: 75, lane: "L_user",
+        d: "Retry calls play() again for the same passage. Use browser voice marks the player offline, so synthesize() takes the local Web Speech path until the server is back." },
+      { id: "G_par", t: "gw", g: "+", n: "", x: 2450, y: 400, lane: "L_player", d: "Parallel split: play this passage while the next ones are generated." },
+      { id: "T_play", t: "task", n: "Play the clip at the listener’s speed", x: 2570, y: 400, lane: "L_player",
+        d: "One reused <audio> element plays every passage, so the browser keeps its permission to play across passages. Clips are always generated at 1×, so speed (0.5–3×) is just playbackRate and cached clips work at any speed. Leading silence is skipped and volume brought down to the quietest passage so far (never below −6 dB). If the element fails, playback pauses with “Audio playback failed. Tap play to retry.” Without audio, the browser voice speaks sentence by sentence — in the iOS app, the iPhone’s own voice (AVSpeechSynthesizer).",
+        code: [SRC + "engine/engine.ts:564", SRC + "engine/engine.ts:594", SRC + "engine/engine.ts:605", SRC + "engine/engine.ts:614", "apps/web/ios/App/App/AppDelegate.swift:58"] },
+      { id: "T_track", t: "task", m: "loop", n: "Follow the voice: highlight, save the position", x: 2715, y: 400, lane: "L_player",
+        d: "Each animation frame — or each timeupdate, when a background tab suspends frames — audio.currentTime is the clock. Crossing a sentence start inside the clip moves the highlight without touching the audio. The position is saved 800 ms after a change and at once on pause, through the outbox, so other devices pick it up; reaching the end counts one read.",
+        code: [SRC + "engine/engine.ts:768", SRC + "engine/engine.ts:586", SRC + "engine/engine.ts:831", SRC + "state/player.ts:99", SRC + "lib/db.ts:200"] },
+      { id: "G_more", t: "gw", g: "x", n: "Last passage?", lp: "t", x: 2850, y: 400, lane: "L_player",
+        d: "When the clip ends — or its trailing silence passes 0.25 s — the reader advances to the next sentence and plays the next passage. After the last sentence, the reading ends.",
+        code: [SRC + "engine/engine.ts:806", SRC + "engine/engine.ts:812"] },
+      { id: "E_end", t: "end", n: "Reading finished", x: 2960, y: 400, lane: "L_player", d: "Progress is saved (fraction 1), which the Library’s progress ring shows. The clips stay cached, so the document replays offline." },
+      { id: "T_prefetch", t: "task", k: "service", m: "par", n: "Prefetch about a minute ahead", x: 2570, y: 535, lane: "L_player",
+        d: "Keeps ~60 s of listening (at the current speed) generated past the current passage: at least 2 passages, at most 2 requests in flight. Long paragraphs bank time for runs of short headings. OpenAI and Fish voices prefetch only the next passage — they keep up, and bill for audio a pause or skip never plays. A failure stops the refill; the next passage start tries again.",
+        code: [SRC + "engine/engine.ts:530"] },
+      { id: "E_prefetch", t: "end", n: "Buffer topped up", x: 2690, y: 535, lane: "L_player", d: "Refills each time a clip arrives." },
+      { id: "S_ctrl", t: "start", ev: "message", ni: true, parent: "ESP_ctrl", n: "Pause, seek, skip, speed or voice", x: 125, y: 490, lane: "L_player",
+        d: "Play/pause, previous/next sentence, the seek bar, speed, or a voice change — any time a reading is open." },
+      { id: "T_ctrl", t: "task", n: "Update the engine", x: 270, y: 490, lane: "L_player", parent: "ESP_ctrl",
+        d: "pause() bumps a token so a passage still being generated is discarded. seek() moves to a sentence and replays. setSpeed changes playbackRate (Web Speech restarts at the current word). A voice change clears prepared chunks, or reopens the document when switching to or from the Patois variant.",
+        code: [SRC + "engine/engine.ts:303", SRC + "engine/engine.ts:331", SRC + "engine/engine.ts:248", SRC + "state/player.ts:307"] },
+      { id: "E_ctrl", t: "end", n: "", x: 405, y: 490, lane: "L_player", parent: "ESP_ctrl", d: "Control handled; the reading continues in its new state." },
+      { id: "DS_docs", t: "store", pool: "P_app", n: "IndexedDB · docs", x: 735, y: 820, d: "Library documents (readaloud DB, store “docs”, indexed by updatedAt).", code: [SRC + "lib/db.ts:121"] },
+      { id: "DS_pos", t: "store", pool: "P_app", n: "IndexedDB · positions", x: 1740, y: 820, d: "One position per document: sentence index, offset, fraction, variant. Drives resume and the Library progress rings.", code: [SRC + "lib/db.ts:74"] },
+      { id: "DS_audio", t: "store", pool: "P_app", n: "IndexedDB · audio cache", x: 2340, y: 820, d: "Clips keyed by engine + voice + text, with duration, word timings, sentence starts, edge silences and loudness. Up to 2000 clips; the oldest are evicted.", code: [SRC + "lib/db.ts:95", SRC + "lib/db.ts:220"] },
+      { id: "DS_pos2", t: "store", pool: "P_app", n: "IndexedDB · positions", x: 2745, y: 820, d: "Same store as the one read on open.", code: [SRC + "lib/db.ts:74"] },
+    ],
+    flows: [
+      { f: "S_start", to: "T_input" },
+      { f: "T_input", to: "G_url", r: "hv" },
+      { f: "S_share", to: "T_shareParse" },
+      { f: "T_shareParse", to: "G_url" },
+      { f: "G_url", to: "T_fetch", n: "yes" },
+      { f: "G_url", to: "G_merge", n: "no", def: true, r: ["vhv", 298] },
+      { f: "T_fetch", to: "G_merge" },
+      { f: "G_merge", to: "T_create" },
+      { f: "T_create", to: "G_patois", r: "hv" },
+      { f: "G_patois", to: "T_patois", n: "yes" },
+      { f: "G_patois", to: "G_patmerge", n: "no", def: true, r: ["vhv", 470] },
+      { f: "T_patois", to: "G_patmerge" },
+      { f: "G_patmerge", to: "G_code" },
+      { f: "G_code", to: "T_code", n: "yes" },
+      { f: "G_code", to: "G_codemerge", n: "no", def: true, r: ["vhv", 470] },
+      { f: "T_code", to: "G_codemerge" },
+      { f: "G_codemerge", to: "T_segment" },
+      { f: "T_segment", to: "T_load" },
+      { f: "T_load", to: "G_open" },
+      { f: "G_open", to: "CA_prepare", n: "prepare in background" },
+      { f: "G_open", to: "G_autoplay", n: "always", def: true },
+      { f: "CA_prepare", to: "E_prepared" },
+      { f: "G_open", to: "T_describe", n: "images to describe", wp: [[1865, 455], [1770, 455], [1770, 665]], lx: 1700, ly: 600 },
+      { f: "T_describe", to: "T_replace" },
+      { f: "T_replace", to: "E_described" },
+      { f: "G_autoplay", to: "G_playmerge", n: "yes" },
+      { f: "G_autoplay", to: "T_press", n: "no", def: true, r: "vh" },
+      { f: "T_press", to: "G_playmerge", r: "hv" },
+      { f: "G_playmerge", to: "CA_synth" },
+      { f: "B_synth", to: "T_speechErr" },
+      { f: "T_speechErr", to: "T_choose" },
+      { f: "T_choose", to: "G_playmerge", wp: [[2230, 75], [2230, 345], [2170, 345]] },
+      { f: "CA_synth", to: "G_par" },
+      { f: "G_par", to: "T_play" },
+      { f: "G_par", to: "T_prefetch", r: "vh" },
+      { f: "T_prefetch", to: "E_prefetch" },
+      { f: "T_play", to: "T_track" },
+      { f: "T_track", to: "G_more" },
+      { f: "G_more", to: "E_end", n: "yes" },
+      { f: "G_more", to: "G_playmerge", n: "no: next passage", def: true, r: ["vhv", 468], lx: 2670, ly: 462 },
+      { f: "S_ctrl", to: "T_ctrl" },
+      { f: "T_ctrl", to: "E_ctrl" },
+      { f: "T_create", to: "DS_docs", k: "data" },
+      { f: "DS_pos", to: "T_load", k: "data" },
+      { f: "CA_synth", to: "DS_audio", k: "data", fp: [2340, 440], n: "read / write" },
+      { f: "T_track", to: "DS_pos2", k: "data", fp: [2745, 439] },
+      { f: "T_fetch", to: "X_server", k: "msg", n: "GET /api/fetch?url=" },
+      { f: "X_server", to: "X_web", k: "msg", fp: [480, 960], n: "GET page · FxTwitter" },
+      { f: "T_create", to: "X_server", k: "msg", fp: [790, 274], n: "outbox → /api/library/sync", lx: 875, ly: 800 },
+      { f: "T_code", to: "X_server", k: "msg", n: "POST /api/llm chat", lx: 1345, ly: 760 },
+      { f: "T_describe", to: "X_server", k: "msg", n: "POST /api/llm responses", lx: 2070, ly: 790 },
+      { f: "X_server", to: "X_llm", k: "msg", fp: [1440, 960], n: "explanations · descriptions" },
+      { f: "T_patois", to: "X_server", k: "msg", n: "POST /api/oa chat" },
+      { f: "X_server", to: "X_openai", k: "msg", fp: [980, 960], n: "chat · speech" },
+      { f: "CA_prepare", to: "X_server", k: "msg", n: "/api/preparations" },
+      { f: "CA_synth", to: "X_server", k: "msg", fp: [2280, 440], n: "speech via /api/vs · /api/oa · /api/fish" },
+      { f: "X_server", to: "X_vs", k: "msg", fp: [1870, 960], n: "render jobs" },
+      { f: "X_server", to: "X_vs", k: "msg", fp: [2280, 960], n: "speech" },
+      { f: "X_server", to: "X_fish", k: "msg", fp: [2630, 960], n: "speech" },
+    ],
+    scenarios: [
+      { id: "paste", n: "Paste text and listen (first time)", steps: [
+        { at: "S_start", say: "The listener opens ReadAloud wanting to hear an article." },
+        { at: "T_input", say: "They paste it on Compose and press Listen." },
+        { at: "G_url", say: "No web address: the text is already here." },
+        { at: "G_merge" },
+        { at: "T_create", say: "The text becomes a Library document in IndexedDB." },
+        { at: "G_patois", say: "The default voice is an ordinary voice, not Jamaican Patois." },
+        { at: "G_patmerge" },
+        { at: "G_code" }, { at: "G_codemerge" },
+        { at: "T_segment", say: "The text is split into paragraphs, sentences and words." },
+        { at: "T_load", say: "It’s new, so there’s no saved position. Passages of up to ~60 words are planned and the engine is loaded." },
+        { at: "G_open", say: "Opened from Compose with a VoiceStudio voice (the Librarian, by default), so background preparation starts too — the “Slow cloned voice” walkthrough follows that. This one follows playback." },
+        { at: "G_autoplay", say: "Listen was a user gesture, so the browser lets audio start." },
+        { at: "G_playmerge" },
+        { at: "CA_synth", call: "synth", sc: "miss", say: "The first passage has no audio yet, so it is generated." },
+        { at: "G_par", say: "Audio is ready: play it, and prefetch what comes next at the same time." },
+        { at: "T_prefetch", say: "Upcoming passages are generated in the background, about a minute ahead." },
+        { at: "T_play", say: "Meanwhile the first clip plays at the listener’s speed." },
+        { at: "T_track", say: "Every frame the highlight follows the voice; the position is saved as it goes." },
+        { at: "G_more", say: "Not the last passage, so it loops back for the next one." },
+        { at: "G_playmerge" },
+        { at: "CA_synth", call: "synth", sc: "hit", say: "The next passage was prefetched, so it comes straight from the cache." },
+        { at: "G_par" }, { at: "T_play" }, { at: "T_track" },
+        { at: "G_more", say: "This time it was the last passage." },
+        { at: "E_end", say: "Reading finished. The clips stay cached, so it replays offline." },
+      ] },
+      { id: "share", n: "Share a link from another app", steps: [
+        { at: "S_share", say: "On a phone, the listener shares a web page to ReadAloud." },
+        { at: "T_shareParse", say: "/read/new receives the title and link." },
+        { at: "G_url", say: "There is a URL to fetch." },
+        { at: "T_fetch", say: "The browser can’t read most sites directly (no CORS headers)…" },
+        { at: "X_server", say: "…so the app server’s /api/fetch fetches the page for it." },
+        { at: "X_web", say: "The page is downloaded (http(s) only, up to 5 MB, 20 s timeout)." },
+        { at: "G_merge", say: "Only the article’s headings, paragraphs, list items and quotes are kept." },
+        { at: "T_create", say: "Saved to the Library with the site’s hostname." },
+        { at: "G_patois" }, { at: "G_patmerge" }, { at: "G_code" }, { at: "G_codemerge" }, { at: "T_segment" }, { at: "T_load" }, { at: "G_open" },
+        { at: "G_autoplay", say: "This listener turned off “Auto-play on share”, so the Reader opens paused." },
+        { at: "T_press", say: "They tap the third paragraph: read from here." },
+        { at: "G_playmerge" },
+        { at: "CA_synth", say: "That passage is generated…" },
+        { at: "G_par" }, { at: "T_play" },
+        { at: "T_track", say: "…and reading continues from there to the end." },
+      ] },
+      { id: "down", n: "The speech server goes down", steps: [
+        { at: "G_playmerge", say: "Mid-reading, playback reaches a passage that isn’t cached yet." },
+        { at: "CA_synth", call: "synth", sc: "down", say: "The request fails." },
+        { at: "B_synth", say: "Voice unavailable. Playback stops rather than switching voices without asking." },
+        { at: "T_speechErr", say: "The Reader explains and offers Retry or Use browser voice." },
+        { at: "T_choose", say: "The listener picks Use browser voice." },
+        { at: "G_playmerge" },
+        { at: "CA_synth", call: "synth", sc: "local", say: "The player is now offline, so the browser’s own speech engine reads." },
+        { at: "G_par" },
+        { at: "T_play", say: "Web Speech speaks sentence by sentence; boundary events move the word highlight." },
+        { at: "T_track", say: "Reading continues. Choosing the server voice again clears offline mode." },
+      ] },
+      { id: "prepare", n: "Slow cloned voice: prepare in the background", steps: [
+        { at: "T_create", say: "A long article is saved; the default voice is a cloned OmniVoice profile on VoiceStudio." },
+        { at: "G_patois" }, { at: "G_patmerge" }, { at: "G_code" }, { at: "G_codemerge" }, { at: "T_segment" },
+        { at: "T_load", say: "Passages are planned as usual." },
+        { at: "G_open", say: "Opened from Compose with a VoiceStudio voice: start background preparation and playback together." },
+        { at: "CA_prepare", call: "prepare", sc: "happy", say: "The whole reading becomes one durable server job." },
+        { at: "E_prepared", say: "Every passage is now in the device cache." },
+        { at: "G_autoplay", say: "Meanwhile, playback had already started." },
+        { at: "G_playmerge" },
+        { at: "CA_synth", call: "synth", sc: "prepared", say: "Playback asks for a passage the job already rendered: no second render." },
+        { at: "G_par" }, { at: "T_play" }, { at: "T_track" },
+      ] },
+      { id: "code", n: "An article with code and images", steps: [
+        { at: "T_create", say: "A programming article is saved: it has two code blocks and a diagram." },
+        { at: "G_patois" }, { at: "G_patmerge" },
+        { at: "G_code", say: "It has code blocks with no spoken explanation yet, so opening waits for them." },
+        { at: "T_code", say: "One short explanation per block is requested…" },
+        { at: "X_server", say: "…through the app server’s /api/llm proxy, which adds the key…" },
+        { at: "X_llm", say: "…from the LLM (OpenCode Go)." },
+        { at: "G_codemerge", say: "The explanations are saved on the document." },
+        { at: "T_segment", say: "Each code block becomes one sentence: its explanation. The diagram reads its caption for now." },
+        { at: "T_load" },
+        { at: "G_open", say: "Playback starts at once; the diagram is described in the background." },
+        { at: "T_describe", say: "The image goes to the vision model…" },
+        { at: "X_server" }, { at: "X_llm" },
+        { at: "T_replace", say: "The description is swapped into the reading without moving the listener." },
+        { at: "E_described", say: "When playback reaches the diagram, it reads the description." },
+        { at: "G_autoplay", say: "Meanwhile the reading had started straight away." },
+        { at: "G_playmerge" },
+        { at: "CA_synth", call: "synth", sc: "miss", say: "Passages are generated as usual." },
+        { at: "G_par" }, { at: "T_play" }, { at: "T_track" },
+      ] },
+      { id: "patois", n: "Read it in Jamaican Patois", steps: [
+        { at: "T_create", say: "The document’s voice is set to Jamaican Patois." },
+        { at: "G_patois", say: "This voice reads a rewritten text." },
+        { at: "T_patois", say: "The text is rewritten in bounded chunks…" },
+        { at: "X_server", say: "…through the key-injecting /api/oa proxy…" },
+        { at: "X_openai", say: "…by an OpenAI chat model." },
+        { at: "G_patmerge", say: "The adaptation is saved on the document; the original stays intact." },
+        { at: "G_code" }, { at: "G_codemerge" },
+        { at: "T_segment", say: "The Patois text is segmented; its position is tracked separately from the original’s." },
+        { at: "T_load" }, { at: "G_open" }, { at: "G_autoplay" }, { at: "G_playmerge" },
+        { at: "CA_synth", say: "Then it plays like any other reading." },
+      ] },
+    ],
+  },
+
+  /* ------------------------------------------------------------------ 2 */
+  synth: {
+    title: "Synthesize passage",
+    parent: "main",
+    sub: "How one passage gets its audio, cheapest source first: the device cache, older sentence clips, a server-prepared clip, then live generation — or the browser’s own voice.",
+    overview: [
+      "synthesize() in engine/providers.ts is called for every passage — by playback, by prefetch and by preparation. It returns a Chunk: audio (or none, for the browser voice), duration, sentence starts inside the clip, edge silences, loudness and optional word timings.",
+      "Clips are always requested at 1× and cached by engine + voice + text, so they replay offline and at any speed, and switching engines never replays another engine’s audio.",
+    ],
+    pools: [
+      { id: "P_syn", n: "Browser · synthesize() in providers.ts", x: 0, y: 0, w: 2010, lanes: [
+        { id: "L_cache", n: "Cache & reuse", h: 210, d: "Everything that avoids a new generation." },
+        { id: "L_net", n: "Speech server", h: 200, d: "Network requests, all through same-origin /api/* paths." },
+        { id: "L_fb", n: "Fallback & errors", h: 140, d: "The browser voice, and errors returned to the caller." },
+      ], d: "providers.ts — the provider chain: cache → older sentence clips → server-prepared clip → speech API → browser voice.", code: [SRC + "engine/providers.ts:406"] },
+      { id: "X_server", bb: true, n: "App server — key-injecting proxy (/api/vs · /api/oa · /api/fish) and prepared-clip store (/api/preparations)", x: 0, y: 620, w: 2010, h: 60,
+        d: "Adds the Bearer key from server-side env, drops Origin/Referer/Cookie (VoiceStudio’s CSRF guard would reject a browser origin), 30-minute timeouts; an unreachable upstream becomes 502 {error: “upstream_unreachable”}. Live speech requests are marked so background preparation yields to them. The iOS app built to load from the deployed server uses this proxy like the browser; the bundled iOS app instead sends requests straight to a speech server set in Settings, with a key held on the device.", code: ["apps/web/vite.proxy.ts:11", "apps/web/vite.speech-activity.ts:8", SRC + "lib/speechServer.ts:56", "apps/web/vite.prepare.ts:280"] },
+      { id: "X_vs", bb: true, n: "VoiceStudio — /v1/audio/speech · /v1/audio/transcriptions", x: 700, y: 740, w: 820, h: 60, d: "One worker, which queues at most one more request; a third concurrent request gets 429." },
+      { id: "X_cloud", bb: true, n: "OpenAI · Fish Audio", x: 1600, y: 740, w: 380, h: 60, d: "Paid cloud voices. They handle concurrency themselves, so requests are not serialized." },
+    ],
+    esps: [],
+    nodes: [
+      { id: "S_syn", t: "start", n: "Passage needed", x: 90, y: 150, lane: "L_cache", d: "A request: passage text, voice, engine, the words of each sentence, and flags (word timings, profile voice, force local, fallback allowed).", code: [SRC + "engine/providers.ts:347", SRC + "engine/engine.ts:463"] },
+      { id: "G_local", t: "gw", g: "x", n: "Browser voice, or offline?", lp: "t", x: 190, y: 150, lane: "L_cache",
+        d: "forceLocal is set when the voice is the browser voice, the engine is “local”, Settings chose the local engine, or the player is offline — which includes the bundled iOS app after its first passage found no speech server.", code: [SRC + "engine/engine.ts:463", SRC + "engine/providers.ts:408"] },
+      { id: "T_lookup", t: "task", n: "Look up the clip by engine, voice and text", x: 320, y: 150, lane: "L_cache",
+        d: "fromCache reads the IndexedDB audio store. The key is engine + voice + text (plus the OpenAI model when it isn’t the standard one).", code: [SRC + "engine/providers.ts:268", SRC + "engine/providers.ts:274"] },
+      { id: "G_hit", t: "gw", g: "x", n: "Cached?", lp: "b", x: 450, y: 150, lane: "L_cache", d: "Is this exact passage already on the device?" },
+      { id: "T_analyzeCache", t: "task", k: "script", n: "Check older clips: noise, sentence starts, loudness", x: 870, y: 55, lane: "L_cache",
+        d: "A VoiceStudio clip cached before the noise check existed is measured once: if less than 20 % of it is voiced speech, it is treated as garbled and generated again. Clips saved before passages existed are also measured for sentence starts, loudness and edge silences by decoding the audio (locateSentences), then re-cached.",
+        code: [SRC + "engine/providers.ts:411", SRC + "engine/audio.ts:163", SRC + "engine/providers.ts:331"] },
+      { id: "G_clean", t: "gw", g: "x", n: "Clean take?", lp: "t", x: 1000, y: 55, lane: "L_cache", d: "Garbled takes (breathy noise) fall through to the next source, and in the end to a fresh generation." },
+      { id: "E_cache", t: "end", n: "Chunk from cache", x: 1100, y: 55, lane: "L_cache", d: "source = “cache”. Works offline." },
+      { id: "T_join", t: "task", n: "Join older sentence-sized clips", x: 580, y: 150, lane: "L_cache",
+        d: "fromSentenceClips: before passages, each sentence was its own request and clip. If every sentence of this passage is still cached that way, the clips are decoded and joined (edges trimmed) instead of paying for the passage again. The join itself is not cached: cheap to redo, and much larger as PCM.",
+        code: [SRC + "engine/providers.ts:389", SRC + "engine/audio.ts:235"] },
+      { id: "G_joined", t: "gw", g: "x", n: "Every sentence cached?", lp: "t", x: 710, y: 150, lane: "L_cache", d: "All sentences of the passage found as separate clips?" },
+      { id: "E_joined", t: "end", n: "Chunk (joined clips)", x: 820, y: 150, lane: "L_cache", d: "source = “cache”, a WAV joined in memory." },
+      { id: "G_vs", t: "gw", g: "x", n: "VoiceStudio voice?", lp: "l", x: 710, y: 300, lane: "L_net",
+        d: "A VoiceStudio voice reached through the built-in /api/vs proxy — not in the bundled iOS app, which has no proxy (the iOS app loaded from the deployed server has it). Only those can have server-prepared clips; OpenAI and Fish go straight to a request." },
+      { id: "T_prepared", t: "task", k: "receive", n: "Ask for a server-prepared clip", x: 835, y: 300, lane: "L_net",
+        d: "preparedAudio first checks the shared catalogue of server jobs (clips available on the server, then running jobs), then the jobs this browser saved (localStorage). If one lists this cache key: GET /api/preparations/:id/audio/:i. 404/410 (expired, or the device already had it) falls through to normal generation, and a prepared clip that turns out to be breathy noise is replaced by a fresh request.",
+        code: [SRC + "engine/preparation.ts:223", SRC + "engine/providers.ts:422"] },
+      { id: "G_have", t: "gw", g: "x", n: "Prepared?", lp: "b", x: 960, y: 300, lane: "L_net", d: "Did the app server have this clip?" },
+      { id: "T_request", t: "task", k: "send", n: "Request speech at 1×", x: 1080, y: 300, lane: "L_net",
+        d: "apiSynthesize: POST /v1/audio/speech (VoiceStudio’s OpenAI-compatible API, or OpenAI), or Fish /v1/tts. VoiceStudio requests are serialized — one in flight — because its single worker refuses a third with 429. A 429 is retried up to 4 times, waiting Retry-After or 400 ms × 2ⁿ but never more than 5 s. For VoiceStudio voices each take is checked: if less than 20 % of it is voiced speech (OmniVoice sometimes renders breathy noise), it asks again up to 2 times and keeps the clearest take. Each new generation records usage and cost, also per document.",
+        facts: ["OmniVoice requests use VoiceStudio’s normal 16-step preset", "Cloned profiles are sent with the active-engine alias"],
+        code: [SRC + "engine/providers.ts:231", SRC + "engine/providers.ts:252", SRC + "engine/providers.ts:243", SRC + "engine/voicing.ts:13", SRC + "lib/usage.ts:108"] },
+      { id: "B_req", t: "boundary", ev: "error", on: "T_request", side: "bottom", dx: 40, n: "Unreachable, busy or rejected", lp: "r",
+        d: "ApiUnreachable (network error, or 404/502 from the proxy), ApiBusy (still 429 after retries), ApiRejected (another HTTP error, with the server’s message).", code: [SRC + "engine/types.ts:48"] },
+      { id: "G_m1", t: "gw", g: "x", n: "", x: 1210, y: 300, lane: "L_net", d: "Merge: a prepared clip or a fresh one." },
+      { id: "G_words", t: "gw", g: "x", n: "Word timings on?", lp: "t", x: 1320, y: 300, lane: "L_net", d: "Settings → word timings (off by default)." },
+      { id: "T_whisper", t: "task", k: "service", n: "Transcribe the clip and align words", x: 1440, y: 300, lane: "L_net",
+        d: "fetchWordTimings posts the clip to /v1/audio/transcriptions (whisper-1, word granularity). alignWords accepts only an exact count or a clean token match; anything else keeps the estimate. Optional: a failure never blocks playback.",
+        code: [SRC + "engine/providers.ts:475", SRC + "engine/providers.ts:491"] },
+      { id: "G_m2", t: "gw", g: "x", n: "", x: 1560, y: 300, lane: "L_net", d: "Merge." },
+      { id: "T_analyze", t: "task", k: "script", n: "Find sentence starts, loudness, silences", x: 1680, y: 300, lane: "L_net",
+        d: "locateSentences: sentence starts come from word timings when present, otherwise from pauses in the decoded audio (or in proportion to word counts). Lead/tail silence and RMS loudness are measured for joining clips smoothly.",
+        code: [SRC + "engine/providers.ts:331", SRC + "engine/audio.ts:67", SRC + "engine/audio.ts:43"] },
+      { id: "T_store", t: "task", n: "Save to the audio cache", x: 1820, y: 300, lane: "L_net", d: "toCache writes the clip and its timings to IndexedDB (quota errors are ignored).", code: [SRC + "engine/providers.ts:284"] },
+      { id: "E_api", t: "end", n: "Chunk from the speech server", x: 1940, y: 300, lane: "L_net", d: "source = “api”, with renderSeconds — used to warn when a voice renders slower than it plays (≥ 1.5×)." },
+      { id: "T_local", t: "task", n: "Speak with the browser or iPhone voice", x: 320, y: 480, lane: "L_fb",
+        d: "localChunk returns no audio. The engine speaks sentence by sentence with SpeechSynthesis in the document’s language — or, in the iOS app, with the iPhone’s own voice (AVSpeechSynthesizer through a Capacitor plugin), whose boundary events move the word highlight. Timing is otherwise estimated at 2.83 words/s.",
+        code: [SRC + "engine/providers.ts:297", SRC + "engine/engine.ts:605", SRC + "engine/engine.ts:614"] },
+      { id: "E_local", t: "end", n: "Chunk (browser voice)", x: 450, y: 480, lane: "L_fb", d: "source = “local”." },
+      { id: "T_notify", t: "task", n: "Mark offline, tell the listener", x: 960, y: 480, lane: "L_fb",
+        d: "onOffline flags the player offline (with the toast “Speech server unreachable — using the browser voice” when a speech API is configured, silently otherwise); a rejection is shown as a toast. Later passages then take the browser-voice path directly.", code: [SRC + "state/player.ts:85"] },
+      { id: "G_fallback", t: "gw", g: "x", n: "Fallback allowed?", lp: "b", x: 1120, y: 480, lane: "L_fb",
+        d: "Playback, prefetch and preparation pass fallbackLocal: false, so the error goes back to the caller. Only when no server is configured for the engine — for example the bundled iOS app with no speech server set in Settings — does it read with the browser or device voice instead.", code: [SRC + "engine/providers.ts:450", SRC + "lib/speechServer.ts:47"] },
+      { id: "E_unavail", t: "end", ev: "error", n: "Voice unavailable", x: 1250, y: 480, lane: "L_fb", d: "Thrown to the caller — caught by the “Voice unavailable” boundary event in Read a document." },
+      { id: "DS_audio", t: "store", pool: "P_syn", n: "IndexedDB · audio cache", x: 320, y: -75, d: "Clips keyed by engine + voice + text (max 2000).", code: [SRC + "lib/db.ts:220"] },
+      { id: "DS_audio2", t: "store", pool: "P_syn", n: "IndexedDB · audio cache", x: 1820, y: 480, d: "Same store.", code: [SRC + "lib/db.ts:220"] },
+    ],
+    flows: [
+      { f: "S_syn", to: "G_local" },
+      { f: "G_local", to: "T_lookup", n: "no", def: true },
+      { f: "G_local", to: "T_local", n: "yes", r: "vh" },
+      { f: "T_lookup", to: "G_hit" },
+      { f: "G_hit", to: "T_analyzeCache", n: "yes", r: "vh" },
+      { f: "G_hit", to: "T_join", n: "no", def: true },
+      { f: "T_analyzeCache", to: "G_clean" },
+      { f: "G_clean", to: "E_cache", n: "yes", def: true },
+      { f: "G_clean", to: "T_join", n: "no: garbled", wp: [[1000, 104], [580, 104]], lx: 930, ly: 98 },
+      { f: "T_join", to: "G_joined" },
+      { f: "G_joined", to: "E_joined", n: "yes" },
+      { f: "G_joined", to: "G_vs", n: "no", def: true },
+      { f: "G_vs", to: "T_prepared", n: "yes" },
+      { f: "G_vs", to: "T_request", n: "no: OpenAI or Fish", def: true, r: ["vhv", 375], tp: [1030, 339], lx: 760, ly: 369 },
+      { f: "T_prepared", to: "G_have" },
+      { f: "G_have", to: "G_m1", n: "yes", r: ["vhv", 245] },
+      { f: "G_have", to: "T_request", n: "no", def: true },
+      { f: "T_request", to: "G_m1" },
+      { f: "G_m1", to: "G_words" },
+      { f: "G_words", to: "T_whisper", n: "yes" },
+      { f: "G_words", to: "G_m2", n: "no", def: true, r: ["vhv", 375] },
+      { f: "T_whisper", to: "G_m2" },
+      { f: "G_m2", to: "T_analyze" },
+      { f: "T_analyze", to: "T_store" },
+      { f: "T_store", to: "E_api" },
+      { f: "B_req", to: "G_fallback" },
+      { f: "G_fallback", to: "E_unavail", n: "no" },
+      { f: "G_fallback", to: "T_notify", n: "yes", def: true },
+      { f: "T_notify", to: "T_local", wp: [[960, 535], [320, 535]] },
+      { f: "T_local", to: "E_local" },
+      { f: "DS_audio", to: "T_lookup", k: "data" },
+      { f: "DS_audio", to: "T_join", k: "data", r: "hv" },
+      { f: "T_store", to: "DS_audio2", k: "data" },
+      { f: "T_prepared", to: "X_server", k: "msg", n: "GET /api/preparations/:id/audio/:i", lx: 842, ly: 572 },
+      { f: "T_request", to: "X_server", k: "msg", fp: [1060, 339], n: "POST …/v1/audio/speech", lx: 1068, ly: 598 },
+      { f: "T_whisper", to: "X_server", k: "msg", n: "POST /api/vs/v1/audio/transcriptions", lx: 1448, ly: 572 },
+      { f: "X_server", to: "X_vs", k: "msg", fp: [1100, 680], n: "speech · transcription (Bearer key)" },
+      { f: "X_server", to: "X_cloud", k: "msg", fp: [1790, 680], n: "speech for cloud voices" },
+    ],
+    scenarios: [
+      { id: "miss", n: "Not cached: generate it", steps: [
+        { at: "S_syn", say: "Playback needs a passage." },
+        { at: "G_local", say: "A server voice, and the player is online." },
+        { at: "T_lookup", say: "Nothing cached under this engine + voice + text." },
+        { at: "G_hit" },
+        { at: "T_join", say: "No older sentence-sized clips to reuse either." },
+        { at: "G_joined" },
+        { at: "G_vs", say: "It’s a VoiceStudio voice…" },
+        { at: "T_prepared", say: "…but no background job holds this passage." },
+        { at: "G_have" },
+        { at: "T_request", say: "POST /v1/audio/speech at 1× — one VoiceStudio request at a time." },
+        { at: "X_server", say: "The proxy adds the API key and forwards it." },
+        { at: "X_vs", say: "VoiceStudio renders the passage and returns MP3." },
+        { at: "G_m1" },
+        { at: "G_words", say: "Word timings are off (the default)." },
+        { at: "G_m2" },
+        { at: "T_analyze", say: "Pauses in the audio locate each sentence’s start, so the highlight can follow inside one clip." },
+        { at: "T_store", say: "Saved to IndexedDB for next time." },
+        { at: "E_api", say: "Back to the player with a fresh clip." },
+      ] },
+      { id: "hit", n: "Already cached", steps: [
+        { at: "S_syn" }, { at: "G_local" },
+        { at: "T_lookup", say: "Found: this exact text was generated with this voice before." },
+        { at: "G_hit" },
+        { at: "T_analyzeCache", say: "Its sentence starts and noise check are already stored (older clips are measured once)." },
+        { at: "G_clean", say: "A clean take." },
+        { at: "E_cache", say: "No network needed." },
+      ] },
+      { id: "prepared", n: "Rendered by a background job", steps: [
+        { at: "S_syn" }, { at: "G_local" }, { at: "T_lookup" }, { at: "G_hit" }, { at: "T_join" }, { at: "G_joined" }, { at: "G_vs" },
+        { at: "T_prepared", say: "A saved preparation job lists this passage…" },
+        { at: "X_server", say: "…so the stored clip is fetched from the app server, not rendered again." },
+        { at: "G_have", say: "Got it." },
+        { at: "G_m1" }, { at: "G_words" }, { at: "G_m2" }, { at: "T_analyze" },
+        { at: "T_store", say: "Into the device cache." },
+        { at: "E_api" },
+      ] },
+      { id: "down", n: "Server unreachable", steps: [
+        { at: "S_syn" }, { at: "G_local" }, { at: "T_lookup" }, { at: "G_hit" }, { at: "T_join" }, { at: "G_joined" }, { at: "G_vs" }, { at: "T_prepared" }, { at: "G_have" },
+        { at: "T_request", say: "The proxy can’t reach VoiceStudio and answers 502 upstream_unreachable." },
+        { at: "B_req", say: "ApiUnreachable." },
+        { at: "G_fallback", say: "Playback passes fallbackLocal: false — no silent voice switch." },
+        { at: "E_unavail", say: "The error goes back to the player." },
+      ] },
+      { id: "ios", n: "Bundled iPhone app, no speech server", steps: [
+        { at: "S_syn", say: "In an iOS app running its bundled files (not loaded from the deployed server), the first passage of a reading is needed." },
+        { at: "G_local", say: "The player isn’t offline yet, so it tries the normal chain." },
+        { at: "T_lookup" }, { at: "G_hit" }, { at: "T_join" }, { at: "G_joined" },
+        { at: "G_vs", say: "The bundled app has no built-in proxy, so there are no server-prepared clips." },
+        { at: "T_request", say: "No speech server is set in Settings, so there is nowhere to send the request." },
+        { at: "B_req", say: "ApiUnreachable." },
+        { at: "G_fallback", say: "No server is configured, so falling back is allowed." },
+        { at: "T_notify", say: "The player goes offline — silently, since no speech API was ever configured." },
+        { at: "T_local", say: "The iPhone’s own voice reads it; later passages go straight here." },
+        { at: "E_local" },
+      ] },
+      { id: "local", n: "Browser voice", steps: [
+        { at: "S_syn" },
+        { at: "G_local", say: "The player is offline (the listener chose the browser voice)." },
+        { at: "T_local", say: "No audio file: the browser’s speech engine will read it." },
+        { at: "E_local" },
+      ] },
+      { id: "words", n: "With word timings", steps: [
+        { at: "T_request", say: "A fresh clip arrives." },
+        { at: "G_m1" },
+        { at: "G_words", say: "Word timings are on in Settings." },
+        { at: "T_whisper", say: "The clip is transcribed with word timestamps and aligned to the text’s words." },
+        { at: "X_server" }, { at: "X_vs" },
+        { at: "G_m2", say: "Aligned exactly, so the word highlight follows real timings." },
+        { at: "T_analyze", say: "Sentence starts now come straight from the word timings." },
+        { at: "T_store" }, { at: "E_api" },
+      ] },
+    ],
+  },
+
+  /* ------------------------------------------------------------------ 3 */
+  prepare: {
+    title: "Prepare whole reading",
+    parent: "main",
+    sub: "For voices slower than real time: the app server renders the whole reading as a durable job on the best free machine, while the browser pulls finished clips into its cache.",
+    overview: [
+      "Cloned and designed voices (OmniVoice) render ~10× slower than real time on a laptop CPU, so playback would stall between passages. Preparation renders everything ahead of time.",
+      "The job belongs to the web server, not to the browser tab: it survives reloads, a sleeping phone and server restarts (jobs are files on disk), and identical readings share one job.",
+    ],
+    pools: [
+      { id: "P_br", n: "Browser · prerender() / Library queue", x: 0, y: 0, w: 1420, h: 240, lanes: [], d: "player.prerender() → engine.prepare() for the open reading; the Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:256", SRC + "state/preparation.ts:141"] },
+      { id: "P_srv", n: "Vite server · PreparationService", x: 0, y: 300, w: 1420, lanes: [
+        { id: "L_api", n: "Job API", h: 200, d: "/api/preparations: GET / (the shared catalogue: clips available, and clips only some device holds), POST (submit), GET /:id (status), GET /:id/audio/:i (clip), PUT /:id/audio/:i (a device publishes a clip it already has), DELETE /:id (cancel).", code: ["apps/web/vite.prepare.ts:424"] },
+        { id: "L_sched", n: "Machine scheduler", h: 170, d: "One whole reading per machine at a time.", code: ["apps/web/vite.prepare.ts:117"] },
+        { id: "L_render", n: "Renderer", h: 220, d: "Renders one passage at a time on the assigned machine.", code: ["apps/web/vite.prepare.ts:240"] },
+      ], d: "A disk-backed job service inside the Vite dev/preview server (PREPARATION_DATA_DIR, default .readaloud-preparations).", code: ["apps/web/vite.prepare.ts:30"] },
+      { id: "X_mac", bb: true, n: "VoiceStudio · primary (Mac mini, GPU)", x: 560, y: 950, w: 360, h: 60, d: "VOICESTUDIO_URL. Takes every new reading whenever it is free.", code: ["compose.yaml:44"] },
+      { id: "X_omarchy", bb: true, n: "VoiceStudio · overflow (local container)", x: 980, y: 950, w: 360, h: 60, d: "VOICESTUDIO_SECONDARY_URL (named “Omarchy” by default). Used only while the primary is busy, and only for voices it can reproduce exactly.", code: ["compose.yaml:49"] },
+    ],
+    esps: [
+      { id: "ESP_status", n: "Status asked", lane: "L_api", x: 700, y: 325, w: 310, h: 140, d: "Non-interrupting: answers polls while the job runs." },
+      { id: "ESP_clip", n: "Clip asked", lane: "L_api", x: 1040, y: 325, w: 340, h: 140, d: "Non-interrupting: serves finished clips while the job runs." },
+    ],
+    nodes: [
+      { id: "S_prep", t: "start", n: "“Prepare audio” chosen", x: 90, y: 120, pool: "P_br",
+        d: "From the player menu; automatically when a VoiceStudio voice is opened from Compose; or from Library → Prepare for several documents and voices.", code: [SRC + "state/player.ts:216", SRC + "state/preparation.ts:91"] },
+      { id: "T_check", t: "task", n: "Check which passages are already on this device", x: 215, y: 120, pool: "P_br",
+        d: "prepareInBackground marks every passage that IndexedDB already holds as cached, so the server skips it.", code: [SRC + "engine/providers.ts:372"] },
+      { id: "G_all", t: "gw", g: "x", n: "All cached?", lp: "b", x: 345, y: 120, pool: "P_br", d: "Nothing left to render, and no active job for this reading?" },
+      { id: "E_none", t: "end", n: "Nothing to prepare", lp: "r", x: 450, y: 35, pool: "P_br", d: "Progress jumps to done." },
+      { id: "T_submit", t: "task", k: "send", n: "Submit the reading as one job", x: 480, y: 120, pool: "P_br",
+        d: "POST /api/preparations {requests, start}. First, a shared server job for the same passages — running, or with every clip available — is reused without posting. Identical readings share one submission and one job; the job id and its cache keys are saved in localStorage, so a reload reconnects instead of resubmitting. Transient errors are retried every 1.5 s.",
+        code: [SRC + "engine/preparation.ts:132", SRC + "engine/preparation.ts:166"] },
+      { id: "T_poll", t: "task", k: "receive", m: "loop", n: "Poll progress every 1.5 s", x: 640, y: 120, pool: "P_br",
+        d: "GET /api/preparations/:id. Network errors (a suspended phone) are retried, not fatal — the job keeps running on the server. Cancel sends DELETE only when no other reader still needs the job.",
+        code: [SRC + "engine/preparation.ts:185"] },
+      { id: "G_state", t: "gw", g: "x", n: "How did the job end?", lp: "t", x: 780, y: 120, pool: "P_br", d: "done, error or cancelled." },
+      { id: "E_fail", t: "end", ev: "error", n: "Preparation failed", lp: "r", x: 880, y: 200, pool: "P_br", d: "Toast with the server’s message; playback still generates passages on demand." },
+      { id: "T_hydrate", t: "task", m: "seq", n: "Pull each clip into the audio cache", x: 930, y: 120, pool: "P_br",
+        d: "engine.prepare walks every passage from the current one, wrapping round: ensureChunk → synthesize → preparedAudio finds the passage in the shared catalogue or the saved job, fetches the stored clip, measures it and caches it in IndexedDB.",
+        code: [SRC + "engine/engine.ts:385", SRC + "engine/preparation.ts:223"] },
+      { id: "E_ready", t: "end", n: "Prepared: playback won’t wait", x: 1070, y: 120, pool: "P_br", d: "Toast: “Audio prepared — playback no longer waits on the server”." },
+      { id: "S_job", t: "start", ev: "message", n: "Reading submitted", x: 480, y: 370, lane: "L_api", d: "POST /api/preparations." },
+      { id: "T_validate", t: "task", n: "Validate, reuse an identical job, save it to disk", x: 610, y: 370, lane: "L_api",
+        d: "VoiceStudio voices only (not openai / fish / local), ≤ 5000 passages of ≤ 20,000 characters, ≤ 20 running jobs (else 429). An identical running job is returned instead of a new one. The job JSON is written atomically; after a restart, jobs (and clips uploaded by devices) are restored and files older than 7 days are deleted.",
+        code: ["apps/web/vite.prepare.ts:182", "apps/web/vite.prepare.ts:49"] },
+      { id: "S_st", t: "start", ev: "message", ni: true, parent: "ESP_status", n: "GET /:id", x: 750, y: 400, lane: "L_api", d: "A poll from any reader." },
+      { id: "T_st", t: "task", n: "Report progress and machine", x: 870, y: 400, w: 120, h: 70, lane: "L_api", parent: "ESP_status",
+        d: "state, done/total, whether it is queued, and which machine is working (e.g. the Mac mini) — shown in the Library.", code: ["apps/web/vite.prepare.ts:81"] },
+      { id: "E_st", t: "end", n: "", x: 970, y: 400, lane: "L_api", parent: "ESP_status", d: "" },
+      { id: "S_clip", t: "start", ev: "message", ni: true, parent: "ESP_clip", n: "GET /:id/audio/:i", x: 1090, y: 400, lane: "L_api", d: "A clip request from synthesize()." },
+      { id: "T_clip", t: "task", n: "Serve the stored clip", x: 1210, y: 400, w: 130, h: 70, lane: "L_api", parent: "ESP_clip",
+        d: "410 if the device already had that passage. While the job is queued it waits rather than starting a second voice on an occupied machine; it never starts a cancelled job.", code: ["apps/web/vite.prepare.ts:280"] },
+      { id: "E_clip", t: "end", n: "", x: 1335, y: 400, lane: "L_api", parent: "ESP_clip", d: "" },
+      { id: "T_assign", t: "task", n: "Pick a machine: Mac mini first, the other only as overflow", x: 610, y: 585, lane: "L_sched",
+        d: "Oldest job first; a job keeps its machine after a restart (its partial audio lives there). The Mac mini takes readings only it can prepare first. The secondary is overflow: used only while the primary is busy, and only if it has the same engine and — for cloned or designed voices — the same profile recipe and identical reference audio (SHA-256). Which waiting readings it could take is worked out in the background. It never substitutes a different voice.",
+        code: ["apps/web/vite.prepare.ts:132", "apps/web/vite.prepare.ts:117", "apps/web/vite.preparation-workers.ts:81"] },
+      { id: "G_free", t: "gw", g: "x", n: "Compatible machine free?", lp: "t", x: 760, y: 585, lane: "L_sched", d: "One whole reading per machine at a time." },
+      { id: "I_wait", t: "catch", ev: "conditional", n: "A machine frees up (5 s re-check)", x: 880, y: 585, lane: "L_sched",
+        d: "The scheduler runs again when any job finishes, and every 5 s while work waits on a machine that was unreachable.", code: ["apps/web/vite.prepare.ts:170"] },
+      { id: "I_idle", t: "catch", ev: "conditional", n: "Live speech idle for 15 s", lp: "l", x: 760, y: 640, lane: "L_sched",
+        d: "Playback comes first. Before each passage it still has to render, the job waits until no live speech request is going through the proxy, then 15 s more (PREPARATION_YIELD_MS), so a listener never queues behind preparation.",
+        code: ["apps/web/vite.prepare.ts:252", "apps/web/vite.speech-activity.ts:8", "compose.yaml:58"] },
+      { id: "T_render", t: "task", k: "service", m: "seq", n: "Render the next passage from the listener’s spot", x: 760, y: 755, lane: "L_render",
+        d: "From `start`, wrapping round: skips passages the device already has or that are done; POST /v1/audio/speech (16 steps for OmniVoice; a 429 waits for Retry-After, up to 4 times). Each take is decoded and checked: under 20 % voiced speech counts as breathy noise and is asked again, up to 2 times. Identical concurrent requests share one render; clips already on disk never wait behind inference for another voice.",
+        code: ["apps/web/vite.prepare.ts:240", "apps/web/vite.prepare.ts:321", "apps/web/vite.voicing.ts:8", "apps/web/vite.prepare.ts:368"] },
+      { id: "B_retry", t: "boundary", ev: "error", on: "T_render", side: "bottom", dx: -40, n: "Server restarting", lp: "l",
+        d: "A network error, 408/429/5xx or a timeout. A restarting speech server must not turn durable work into a failure, so the passage stays pending." },
+      { id: "I_backoff", t: "catch", ev: "timer", n: "Back off 1 s → 30 s", x: 600, y: 850, lane: "L_render", d: "1, 2, 4 … 32 s, capped at 30 s; then the same passage is tried again." },
+      { id: "T_storeClip", t: "task", n: "Store the clip on disk", x: 910, y: 755, lane: "L_render",
+        d: "<key>.bin and <key>.json written atomically; the job’s completed list and done count are persisted after every passage.", code: ["apps/web/vite.prepare.ts:354"] },
+      { id: "G_moreP", t: "gw", g: "x", n: "More passages?", lp: "b", x: 1040, y: 755, lane: "L_render", d: "" },
+      { id: "E_job", t: "end", n: "Job done", x: 1150, y: 755, lane: "L_render", d: "state = done; the scheduler gives the machine to the next waiting reading." },
+      { id: "DS_disk", t: "store", pool: "P_srv", n: "Disk · job files and clips (7 days)", x: 910, y: 850, d: "PREPARATION_DATA_DIR (/app/preparations in Docker).", code: ["compose.yaml:57", "apps/web/vite.prepare.ts:24"] },
+      { id: "DS_audio", t: "store", pool: "P_br", n: "IndexedDB · audio cache", lp: "t", x: 930, y: -75, d: "The browser’s clip cache.", code: [SRC + "lib/db.ts:220"] },
+    ],
+    flows: [
+      { f: "S_prep", to: "T_check" },
+      { f: "T_check", to: "G_all" },
+      { f: "G_all", to: "E_none", n: "yes", r: "vh" },
+      { f: "G_all", to: "T_submit", n: "no", def: true },
+      { f: "T_submit", to: "T_poll" },
+      { f: "T_poll", to: "G_state" },
+      { f: "G_state", to: "T_hydrate", n: "done", def: true },
+      { f: "G_state", to: "E_fail", n: "error / cancelled", r: "vh" },
+      { f: "T_hydrate", to: "E_ready" },
+      { f: "S_job", to: "T_validate" },
+      { f: "T_validate", to: "T_assign" },
+      { f: "T_assign", to: "G_free" },
+      { f: "G_free", to: "I_idle", n: "yes" },
+      { f: "I_idle", to: "T_render" },
+      { f: "G_free", to: "I_wait", n: "no", def: true },
+      { f: "I_wait", to: "T_assign", wp: [[880, 525], [640, 525]], tp: [640, 543] },
+      { f: "B_retry", to: "I_backoff", r: "vh" },
+      { f: "I_backoff", to: "T_render", r: "vh" },
+      { f: "T_render", to: "T_storeClip" },
+      { f: "T_storeClip", to: "G_moreP" },
+      { f: "G_moreP", to: "I_idle", n: "yes", wp: [[1040, 640]] },
+      { f: "G_moreP", to: "E_job", n: "no", def: true },
+      { f: "S_st", to: "T_st" },
+      { f: "T_st", to: "E_st" },
+      { f: "S_clip", to: "T_clip" },
+      { f: "T_clip", to: "E_clip" },
+      { f: "T_hydrate", to: "DS_audio", k: "data" },
+      { f: "T_storeClip", to: "DS_disk", k: "data" },
+      { f: "T_submit", to: "S_job", k: "msg", n: "POST /api/preparations" },
+      { f: "T_poll", to: "S_st", k: "msg", fp: [640, 159], wp: [[640, 265], [750, 265]], n: "GET /:id", lx: 650, ly: 258 },
+      { f: "T_hydrate", to: "S_clip", k: "msg", fp: [930, 159], wp: [[930, 280], [1090, 280]], n: "GET /:id/audio/:i", lx: 940, ly: 273 },
+      { f: "T_render", to: "X_mac", k: "msg", fp: [780, 794], n: "POST /v1/audio/speech", lx: 640, ly: 932 },
+      { f: "T_render", to: "X_omarchy", k: "msg", fp: [810, 794], wp: [[810, 915], [1100, 915]], n: "overflow", lx: 960, ly: 909 },
+    ],
+    scenarios: [
+      { id: "happy", n: "Prepare a reading", steps: [
+        { at: "S_prep", say: "The listener (or Compose, for a slow voice) asks to prepare the reading." },
+        { at: "T_check", say: "Passages already on this device are marked so the server skips them." },
+        { at: "G_all", say: "Most still need rendering." },
+        { at: "T_submit", say: "The whole reading is submitted as one job." },
+        { at: "S_job", say: "The app server receives it." },
+        { at: "T_validate", say: "Valid, and no identical job is running: a new job is written to disk." },
+        { at: "T_assign", say: "The Mac mini is free, so it gets the reading." },
+        { at: "G_free" },
+        { at: "I_idle" },
+        { at: "T_render", say: "Rendering starts at the listener’s current passage, so what they hear next is ready first." },
+        { at: "X_mac", say: "The Mac renders on its GPU." },
+        { at: "T_storeClip", say: "The clip is stored on disk and progress is saved." },
+        { at: "G_moreP", say: "More passages: loop." },
+        { at: "I_idle" },
+        { at: "T_render" }, { at: "T_storeClip" },
+        { at: "G_moreP", say: "That was the last one (wrapping round to the beginning)." },
+        { at: "E_job", say: "Job done; the Mac is free for the next reading." },
+        { at: "T_poll", say: "Meanwhile the browser has been polling every 1.5 s…" },
+        { at: "S_st" },
+        { at: "T_st", say: "…and the Library showed which machine was working and how far it got." },
+        { at: "E_st" },
+        { at: "G_state", say: "The job reports done." },
+        { at: "T_hydrate", say: "Each clip is pulled into the device cache…" },
+        { at: "S_clip" },
+        { at: "T_clip", say: "…served straight from disk." },
+        { at: "E_clip" },
+        { at: "E_ready", say: "Prepared: playback no longer waits on the server, and it works offline." },
+      ] },
+      { id: "busy", n: "Both machines busy", steps: [
+        { at: "T_validate", say: "A second reading arrives while the Mac mini is working on another." },
+        { at: "T_assign", say: "The overflow machine is free, but it doesn’t have this cloned voice’s exact reference audio." },
+        { at: "G_free", say: "No compatible machine is free." },
+        { at: "I_wait", say: "The reading waits; the Library shows it as queued." },
+        { at: "T_assign", say: "The Mac finished the other reading and takes this one." },
+        { at: "G_free" },
+        { at: "I_idle" },
+        { at: "T_render" },
+      ] },
+      { id: "listening", n: "Someone is listening meanwhile", steps: [
+        { at: "T_storeClip", say: "A passage of the job is stored." },
+        { at: "G_moreP", say: "More passages to render." },
+        { at: "I_idle", say: "But a listener is playing something right now: their speech request is going through the proxy, so the job waits until it’s done, plus 15 s." },
+        { at: "T_render", say: "Quiet again: the next passage renders." },
+        { at: "T_storeClip" },
+      ] },
+      { id: "retry", n: "VoiceStudio restarts mid-job", steps: [
+        { at: "T_render", say: "Mid-job, VoiceStudio restarts and the request fails with a 502." },
+        { at: "B_retry", say: "A transient error, so the passage stays pending." },
+        { at: "I_backoff", say: "Wait — 1 s, then 2 s, 4 s … up to 30 s." },
+        { at: "T_render", say: "Same passage again; the server is back." },
+        { at: "T_storeClip", say: "The job continues as if nothing happened." },
+      ] },
+    ],
+  },
+  /* ------------------------------------------------------------------ 4 */
+  sync: {
+    title: "Sync library",
+    sub: "Every device keeps its own library in IndexedDB; changes go through an outbox to the app server, which merges them into one shared library and answers with the current state.",
+    overview: [
+      "Each write — a new or edited document, a favorite, a reading position — is saved together with an outbox entry in one IndexedDB transaction, so nothing is lost if the tab closes before it syncs.",
+      "The server keeps one library.json. The newest updatedAt wins, deletions are permanent, and read counts keep the higher value, so two devices can read the same article without fighting.",
+    ],
+    pools: [
+      { id: "P_dev", n: "Browser · lib/db.ts + lib/librarySync.ts", x: 0, y: 0, w: 1580, lanes: [
+        { id: "L_store", n: "Library storage", h: 170, d: "IndexedDB readaloud v2: docs, positions, audio, plus the outbox and meta stores added for sync.", code: [SRC + "lib/db.ts:123"] },
+        { id: "L_sync", n: "Sync loop", h: 200, d: "startLibrarySync runs syncLibrary on every trigger; only one run is in flight at a time.", code: [SRC + "lib/librarySync.ts:133", SRC + "lib/librarySync.ts:82"] },
+      ], d: "One shared library across devices, synced through the app server.", code: [SRC + "App.tsx:42"] },
+      { id: "P_lsrv", n: "App server · LibraryService (/api/library/sync)", x: 0, y: 470, w: 1150, h: 170, lanes: [], d: "A plugin of the Vite server. Requests are handled one at a time.", code: ["apps/web/vite.library.ts:85"] },
+      { id: "X_prepS", bb: true, n: "PreparationService — GET /api/preparations · PUT …/audio/:i", x: 1190, y: 470, w: 390, h: 80, d: "The shared catalogue of prepared readings (see Prepare whole reading).", code: ["apps/web/vite.prepare.ts:213", "apps/web/vite.prepare.ts:301"] },
+    ],
+    esps: [],
+    nodes: [
+      { id: "S_write", t: "start", n: "A document or position is saved", lw: 84, x: 100, y: 85, lane: "L_store", d: "Creating, editing, favoriting, filing on a shelf, deleting, or the player saving the reading position." },
+      { id: "T_outbox", t: "task", n: "Write it and queue it in the outbox", x: 230, y: 85, lane: "L_store",
+        d: "docs.put writes the record and an outbox entry (doc:<id>) in one transaction. Deleting also removes the position and queues a deletion. positions.put adds one to reads when a reading was completed and queues position:<docId>.",
+        code: [SRC + "lib/db.ts:173", SRC + "lib/db.ts:184", SRC + "lib/db.ts:200"] },
+      { id: "E_notify", t: "end", ev: "message", n: "notifyLibrary()", x: 360, y: 85, lane: "L_store", d: "Tells the sync loop something changed.", code: [SRC + "lib/db.ts:181"] },
+      { id: "S_change", t: "start", ev: "message", n: "Library changed", lp: "t", x: 100, y: 225, lane: "L_sync", d: "After a write, debounced by 400 ms.", code: [SRC + "lib/librarySync.ts:144"] },
+      { id: "S_tick", t: "start", ev: "timer", n: "Every 5 s · online · focus", x: 100, y: 320, lane: "L_sync", d: "Every 5 s while the tab is visible, and when the browser comes back online, the window gets focus, or the tab becomes visible.", code: [SRC + "lib/librarySync.ts:147"] },
+      { id: "G_start", t: "gw", g: "x", n: "", x: 200, y: 270, lane: "L_sync", d: "Merge: any trigger runs the same sync." },
+      { id: "T_migrate", t: "task", n: "Queue older documents once", x: 320, y: 270, lane: "L_sync", d: "On the first sync on this device, every document and position saved before sync existed is queued (remembered in the meta store).", code: [SRC + "lib/librarySync.ts:14"] },
+      { id: "T_batch", t: "task", n: "Take a batch from the outbox", x: 470, y: 270, lane: "L_sync", d: "Up to 100 changes or 8 MB per request. With nothing queued, an empty request still brings back the server’s state.", code: [SRC + "lib/librarySync.ts:96"] },
+      { id: "T_post", t: "task", k: "send", n: "POST /api/library/sync", x: 620, y: 270, lane: "L_sync", d: "{changes}, 20 s timeout, no cache.", code: [SRC + "lib/librarySync.ts:105"] },
+      { id: "B_off", t: "boundary", ev: "error", on: "T_post", side: "bottom", dx: 20, n: "Offline or failed", lp: "r", d: "Network error, a timeout, or an error answer." },
+      { id: "E_off", t: "end", n: "Offline — the next trigger retries", x: 760, y: 345, lane: "L_sync", d: "Status shows offline with the number of pending changes; the outbox keeps them.", code: [SRC + "lib/librarySync.ts:124"] },
+      { id: "T_apply", t: "task", k: "receive", n: "Apply the server’s answer", x: 800, y: 270, lane: "L_sync",
+        d: "Acknowledges only outbox entries whose token still matches, re-queues local records newer than the server’s, writes remote documents and positions unless a local change is pending, and applies deletions (deletion always wins).",
+        code: [SRC + "lib/librarySync.ts:33"] },
+      { id: "G_round", t: "gw", g: "x", n: "Still pending? (≤ 2 rounds)", lp: "t", x: 940, y: 270, lane: "L_sync", d: "A second round uploads records recovered while applying the answer. Bounded, so continuous playback writes can’t starve completion." },
+      { id: "T_ids", t: "task", n: "Compare document IDs with the server", x: 1080, y: 270, lane: "L_sync", d: "With nothing pending, the local and server document IDs must match; otherwise it reports “The library has not finished syncing”.", code: [SRC + "lib/librarySync.ts:118"] },
+      { id: "T_shared", t: "task", k: "service", n: "Refresh shared preparations", x: 1300, y: 270, lane: "L_sync",
+        d: "Lists the server’s prepared readings (10 s timeout) so the Library shows what is ready, and uploads up to 8 clips per pass that only this device holds (30 s each).",
+        code: [SRC + "engine/preparation.ts:38", SRC + "state/preparation.ts:66"] },
+      { id: "E_synced", t: "end", n: "Synced", x: 1440, y: 270, lane: "L_sync", d: "Status synced; the Library list refreshes." },
+      { id: "S_sync", t: "start", ev: "message", n: "Changes arrive", lp: "l", x: 620, y: 555, pool: "P_lsrv", d: "POST /api/library/sync." },
+      { id: "T_vlib", t: "task", n: "Check origin, size and every record", x: 740, y: 555, pool: "P_lsrv",
+        d: "Cross-origin writes get 403, non-JSON 415, bodies over 16 MB 413, more than 1000 changes 400. Documents and positions are validated field by field (text up to 5,000,000 characters).",
+        code: ["apps/web/vite.library.ts:146", "apps/web/vite.library.ts:35", "apps/web/vite.library.ts:71"] },
+      { id: "T_merge", t: "task", n: "Merge into the shared library", x: 880, y: 555, pool: "P_lsrv",
+        d: "Documents: the newest updatedAt wins; deletions are permanent tombstones. Positions: the newer one wins, keeping the higher read count.", code: ["apps/web/vite.library.ts:104", "apps/web/vite.library.ts:121"] },
+      { id: "T_saveLib", t: "task", n: "Write library.json", x: 1010, y: 555, pool: "P_lsrv", d: "To a temporary file, then renamed over the old one.", code: ["apps/web/vite.library.ts:127"] },
+      { id: "E_reply", t: "end", ev: "message", n: "Answer with the library", lp: "b", x: 1110, y: 555, pool: "P_lsrv", d: "Accepted tokens plus all documents, positions and deletions." },
+      { id: "DS_outbox", t: "store", pool: "P_dev", n: "IndexedDB · outbox", x: 470, y: -75, d: "Pending changes {key, token, change}.", code: [SRC + "lib/db.ts:132"] },
+      { id: "DS_lib", t: "store", pool: "P_lsrv", n: "Disk · library.json", x: 1010, y: 720, d: "LIBRARY_DATA_DIR (default .readaloud-library), on a volume.", code: ["compose.yaml:59", "apps/web/vite.library.ts:167"] },
+    ],
+    flows: [
+      { f: "S_write", to: "T_outbox" },
+      { f: "T_outbox", to: "E_notify" },
+      { f: "S_change", to: "G_start", r: "hv" },
+      { f: "S_tick", to: "G_start", r: "hv" },
+      { f: "G_start", to: "T_migrate" },
+      { f: "T_migrate", to: "T_batch" },
+      { f: "T_batch", to: "T_post" },
+      { f: "T_post", to: "T_apply" },
+      { f: "B_off", to: "E_off", r: "vh" },
+      { f: "T_apply", to: "G_round" },
+      { f: "G_round", to: "T_batch", n: "yes", wp: [[940, 200], [470, 200]] },
+      { f: "G_round", to: "T_ids", n: "no", def: true },
+      { f: "T_ids", to: "T_shared" },
+      { f: "T_shared", to: "E_synced" },
+      { f: "S_sync", to: "T_vlib" },
+      { f: "T_vlib", to: "T_merge" },
+      { f: "T_merge", to: "T_saveLib" },
+      { f: "T_saveLib", to: "E_reply" },
+      { f: "T_outbox", to: "DS_outbox", k: "data", r: "vh" },
+      { f: "DS_outbox", to: "T_batch", k: "data" },
+      { f: "T_saveLib", to: "DS_lib", k: "data" },
+      { f: "T_post", to: "S_sync", k: "msg", fp: [610, 309], n: "{changes}", lx: 580, ly: 440 },
+      { f: "E_reply", to: "T_apply", k: "msg", wp: [[1110, 420], [830, 420]], tp: [830, 309], n: "accepted · docs · positions · deletions", lx: 970, ly: 412 },
+      { f: "T_shared", to: "X_prepS", k: "msg", n: "catalogue · device-only clips", lx: 1390, ly: 420 },
+    ],
+    scenarios: [
+      { id: "edit", n: "Save a document, sync it", steps: [
+        { at: "S_write", say: "The listener files an article on a new shelf." },
+        { at: "T_outbox", say: "The record and an outbox entry are written in one transaction." },
+        { at: "E_notify" },
+        { at: "S_change", say: "400 ms later, the sync loop wakes." },
+        { at: "G_start" },
+        { at: "T_migrate", say: "Older documents were queued on this device’s first sync, so nothing to do." },
+        { at: "T_batch", say: "One change in the outbox." },
+        { at: "T_post", say: "It goes to the app server…" },
+        { at: "S_sync" },
+        { at: "T_vlib", say: "…which checks it…" },
+        { at: "T_merge", say: "…merges it: this version is the newest…" },
+        { at: "T_saveLib", say: "…and writes library.json." },
+        { at: "E_reply", say: "The answer carries the accepted change and the whole library." },
+        { at: "T_apply", say: "The outbox entry is acknowledged; anything another device changed is written locally." },
+        { at: "G_round", say: "Nothing left pending." },
+        { at: "T_ids", say: "Both sides have the same documents." },
+        { at: "T_shared", say: "The shared preparations are refreshed too…" },
+        { at: "X_prepS" },
+        { at: "E_synced", say: "Synced. The other devices pick the change up within 5 s." },
+      ] },
+      { id: "remote", n: "Pick up another device’s changes", steps: [
+        { at: "S_tick", say: "Five seconds have passed with the tab visible." },
+        { at: "G_start" }, { at: "T_migrate" },
+        { at: "T_batch", say: "Nothing queued here; an empty request still brings back the server’s state." },
+        { at: "T_post" }, { at: "S_sync" }, { at: "T_vlib" }, { at: "T_merge" }, { at: "T_saveLib" }, { at: "E_reply" },
+        { at: "T_apply", say: "The phone finished an article: its position (with the read count) is written here." },
+        { at: "G_round" }, { at: "T_ids" }, { at: "T_shared" },
+        { at: "E_synced", say: "The Library shows it as read." },
+      ] },
+      { id: "offline", n: "Offline", steps: [
+        { at: "S_change", say: "A document is saved on a train with no signal." },
+        { at: "G_start" }, { at: "T_migrate" }, { at: "T_batch" },
+        { at: "T_post", say: "The request fails." },
+        { at: "B_off" },
+        { at: "E_off", say: "Status: offline, 1 pending. The outbox keeps the change; the next trigger sends it." },
+      ] },
+    ],
+  },
+
+  /* ------------------------------------------------------------------ 5 */
+  summary: {
+    title: "Summarize an article",
+    sub: "An LLM writes a summary of the article on request; the listener can read it, or listen to it in the document’s voice.",
+    overview: [
+      "Summaries need an LLM key, set in Settings and saved on the app server. The request goes through the server’s /api/llm proxy to OpenCode Go.",
+      "Listening to a summary loads it as the reading in place of the article: it’s read as written and never saves a position. “Read the full article” switches back.",
+    ],
+    pools: [
+      { id: "P_sum", n: "Browser · Reader, useSummaries, player", x: 0, y: 0, w: 1560, lanes: [
+        { id: "L_su", n: "Listener", h: 140, d: "The person reading or listening." },
+        { id: "L_sr", n: "Reader · summaries · player", h: 200, d: "The Reader screen, the ArticleSummary card, the useSummaries store and the player.", code: [SRC + "routes/Reader.tsx:84", SRC + "state/summaries.ts:20"] },
+      ], d: "Summaries are stored on the document, so they sync to other devices." },
+      { id: "X_llmS", bb: true, n: "App server — /api/llm proxy (adds the key) → OpenCode Go", x: 0, y: 420, w: 1560, h: 70, d: "Adds the Bearer key and an x-opencode-session header; 300 s timeout.", code: ["apps/web/vite.llm.ts:98"] },
+    ],
+    esps: [],
+    nodes: [
+      { id: "S_sum", t: "start", n: "Wants the gist", x: 100, y: 70, lane: "L_su", d: "A long article, and the listener wants to know what it says first." },
+      { id: "T_tap", t: "task", k: "user", n: "Tap Summarize", x: 230, y: 70, lane: "L_su", d: "The sparkles button in the Reader’s toolbar.", code: [SRC + "routes/Reader.tsx:136"] },
+      { id: "G_fresh", t: "gw", g: "x", n: "Summary of this text saved?", lp: "t", x: 380, y: 240, lane: "L_sr", d: "A summary is kept with a fingerprint of the text (hash and length); an edited article needs a new one.", code: [SRC + "lib/summary.ts:24"] },
+      { id: "T_summarize", t: "task", k: "service", n: "Summarize with the LLM", x: 510, y: 240, lane: "L_sr",
+        d: "POST /api/llm/v1/chat/completions with the summary model (muse-spark-1.3-contributor by default, or glm-5.3). Images are sent as their spoken narration. The answer must have finished normally (finish_reason stop).",
+        facts: ["text up to 1.5 million characters", "max_tokens 16,000"],
+        code: [SRC + "lib/summary.ts:30", SRC + "lib/summary.ts:54"] },
+      { id: "B_sumerr", t: "boundary", ev: "error", on: "T_summarize", side: "bottom", dx: 20, n: "No key, error or cut off", lp: "r", d: "No LLM key on the server, an upstream error, or an answer that stopped early." },
+      { id: "E_sumerr", t: "end", ev: "error", n: "Shows Retry", x: 650, y: 310, lane: "L_sr", d: "The summary card shows the error with Retry." },
+      { id: "T_saveSum", t: "task", n: "Save it on the document", x: 650, y: 240, lane: "L_sr", d: "Merged into the newest copy of the record (so a voice change or sync during the request is kept), then saved — which queues it for library sync.", code: [SRC + "state/summaries.ts:25"] },
+      { id: "G_sm", t: "gw", g: "x", n: "", x: 790, y: 240, lane: "L_sr", d: "Merge." },
+      { id: "T_card", t: "task", n: "Show the summary card", x: 910, y: 240, lane: "L_sr", d: "Above the article, with Listen.", code: [SRC + "components/ArticleSummary.tsx:27"] },
+      { id: "T_listen", t: "task", k: "user", n: "Tap Listen", x: 1040, y: 70, lane: "L_su", d: "Listen to the summary in the document’s voice." },
+      { id: "T_openS", t: "task", n: "Load the summary as the reading", x: 1170, y: 240, lane: "L_sr",
+        d: "player.open(record, {summary: true, autoplay: true}): the summary is read as written — no Patois rewrite, no code step, no restored position — and its position is never saved.",
+        code: [SRC + "state/player.ts:172", SRC + "state/player.ts:102"] },
+      { id: "CA_readS", t: "call", ref: "synth", m: "loop", n: "Read it aloud, passage by passage", x: 1320, y: 240, lane: "L_sr", d: "Planned into passages and played like any reading; each passage gets its audio from Synthesize passage." },
+      { id: "E_sumread", t: "end", n: "Summary read", x: 1460, y: 240, lane: "L_sr", d: "“Read the full article” reopens the article itself.", code: [SRC + "routes/Reader.tsx:205"] },
+      { id: "DS_docsS", t: "store", pool: "P_sum", n: "IndexedDB · docs", x: 650, y: -75, d: "summary {source, text, model, version, createdAt} on the DocRecord.", code: [SRC + "lib/db.ts:45"] },
+    ],
+    flows: [
+      { f: "S_sum", to: "T_tap" },
+      { f: "T_tap", to: "G_fresh", r: "hv" },
+      { f: "G_fresh", to: "T_summarize", n: "no", def: true },
+      { f: "G_fresh", to: "G_sm", n: "yes", r: ["vhv", 175] },
+      { f: "T_summarize", to: "T_saveSum" },
+      { f: "B_sumerr", to: "E_sumerr", r: "vh" },
+      { f: "T_saveSum", to: "G_sm" },
+      { f: "G_sm", to: "T_card" },
+      { f: "T_card", to: "T_listen", r: "vh" },
+      { f: "T_listen", to: "T_openS", r: "hv" },
+      { f: "T_openS", to: "CA_readS" },
+      { f: "CA_readS", to: "E_sumread" },
+      { f: "T_saveSum", to: "DS_docsS", k: "data" },
+      { f: "T_summarize", to: "X_llmS", k: "msg", fp: [480, 279], n: "POST /api/llm/v1/chat/completions", lx: 380, ly: 380 },
+    ],
+    scenarios: [
+      { id: "first", n: "Summarize, then listen", steps: [
+        { at: "S_sum", say: "A 40-minute article; the listener wants the gist first." },
+        { at: "T_tap" },
+        { at: "G_fresh", say: "No summary of this text yet." },
+        { at: "T_summarize", say: "The article goes to the LLM…" },
+        { at: "X_llmS", say: "…through the app server’s proxy, which adds the key." },
+        { at: "T_saveSum", say: "The summary is saved on the document and syncs to other devices." },
+        { at: "G_sm" },
+        { at: "T_card", say: "It appears above the article." },
+        { at: "T_listen", say: "The listener taps Listen." },
+        { at: "T_openS", say: "The summary becomes the reading — no saved place, since it’s short." },
+        { at: "CA_readS", call: "synth", sc: "miss", say: "Each passage gets audio as usual." },
+        { at: "E_sumread", say: "Done. “Read the full article” goes back to the article." },
+      ] },
+      { id: "saved", n: "A summary already exists", steps: [
+        { at: "T_tap", say: "On another device, the listener opens the same article and taps Summarize." },
+        { at: "G_fresh", say: "A summary of this exact text arrived through library sync." },
+        { at: "G_sm" },
+        { at: "T_card", say: "Shown at once — no LLM request." },
+      ] },
+      { id: "nokey", n: "No LLM key", steps: [
+        { at: "T_tap" }, { at: "G_fresh" },
+        { at: "T_summarize", say: "The server has no LLM key." },
+        { at: "B_sumerr" },
+        { at: "E_sumerr", say: "The card shows the error with Retry; a key can be added in Settings." },
+      ] },
+    ],
+  },
+};
+
+/* ---------- geometry ---------- */
+function build(id) {
+  const D = DIAGRAMS[id];
+  const E = {};
+  for (const p of D.pools) {
+    let y = p.y;
+    if (!p.bb) {
+      p.h = p.h || p.lanes.reduce((s, l) => s + l.h, 0);
+      for (const l of p.lanes) {
+        Object.assign(l, { kind: "lane", pool: p.id, x: p.x + 30, y, w: p.w - 30 });
+        E[l.id] = Object.assign(l, { cx: l.x + l.w / 2, cy: y + l.h / 2, hw: l.w / 2, hh: l.h / 2 });
+        y += l.h;
+      }
+    }
+    E[p.id] = Object.assign(p, { kind: "pool", cx: p.x + p.w / 2, cy: p.y + p.h / 2, hw: p.w / 2, hh: p.h / 2 });
+  }
+  for (const s of D.esps) E[s.id] = Object.assign(s, { kind: "esp", t: "esp", cx: s.x + s.w / 2, cy: s.y + s.h / 2, hw: s.w / 2, hh: s.h / 2 });
+  for (const n of D.nodes) {
+    const [w, h] = [n.w || SIZE[n.t][0], n.h || SIZE[n.t][1]];
+    n.w = w; n.h = h; n.kind = "node";
+    E[n.id] = n;
+  }
+  for (const n of D.nodes) {
+    if (n.t === "boundary") {
+      const host = E[n.on];
+      n.x = host.x + (n.dx || 0);
+      n.y = host.y + (n.side === "top" ? -host.h / 2 : host.h / 2);
+      n.lane = host.lane; n.pool = host.pool;
+    }
+    Object.assign(n, { cx: n.x, cy: n.y, hw: n.w / 2, hh: n.h / 2 });
+    if (!n.pool && n.lane) n.pool = E[n.lane].pool;
+  }
+  for (const s of D.esps) s.pool = E[s.lane].pool;
+  const seen = {};
+  const flows = D.flows.map((fl) => {
+    const k = fl.k || "seq";
+    let fid = `F_${fl.f}_${fl.to}`;
+    seen[fid] = (seen[fid] || 0) + 1;
+    if (seen[fid] > 1) fid += `_${seen[fid]}`;
+    return { ...fl, k, id: fl.id || fid, pts: route(fl, E) };
+  });
+  return { D, E, flows };
+}
+
+function clip(n, p) {
+  const dx = p[0] - n.cx, dy = p[1] - n.cy;
+  if (!dx && !dy) return [n.cx, n.cy];
+  if (Math.abs(dx) * n.hh > Math.abs(dy) * n.hw) return [n.cx + Math.sign(dx) * n.hw, n.cy + dy * (n.hw / Math.abs(dx))];
+  return [n.cx + dx * (n.hh / Math.abs(dy)), n.cy + Math.sign(dy) * n.hh];
+}
+const edgeY = (pool, otherY) => (otherY < pool.y ? pool.y : pool.y + pool.h);
+
+function route(fl, E) {
+  const a = E[fl.f], b = E[fl.to];
+  const A = fl.fp || [a.cx, a.cy], B = fl.tp || [b.cx, b.cy];
+  let mids = fl.wp ? fl.wp.slice() : [];
+  if (!fl.wp && a.kind !== "pool" && b.kind !== "pool") {
+    let r = fl.r;
+    if (!r && fl.k !== "data" && A[0] !== B[0] && A[1] !== B[1]) r = ["hvh", (A[0] + B[0]) / 2];
+    if (r === "hv") mids = [[B[0], A[1]]];
+    else if (r === "vh") mids = [[A[0], B[1]]];
+    else if (r && r[0] === "hvh") mids = [[r[1], A[1]], [r[1], B[1]]];
+    else if (r && r[0] === "vhv") mids = [[A[0], r[1]], [B[0], r[1]]];
+  }
+  let s = fl.fp, e = fl.tp;
+  if (!s && a.kind === "pool") s = [(mids[0] || e || [b.cx])[0], edgeY(a, b.cy)];
+  if (!e && b.kind === "pool") e = [(mids[mids.length - 1] || s || [a.cx])[0], edgeY(b, a.cy)];
+  s = s || clip(a, mids[0] || e || B);
+  e = e || clip(b, mids[mids.length - 1] || s);
+  return [s, ...mids, e].map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+}
+
+function bounds(G) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const add = (x, y) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
+  for (const e of Object.values(G.E)) { add(e.cx - e.hw, e.cy - e.hh); add(e.cx + e.hw, e.cy + e.hh + (e.t === "store" ? 30 : 0)); }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/* ---------- BPMN 2.0 XML export ---------- */
+function xesc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function toBPMN(id) {
+  const G = build(id), { D, E, flows } = G;
+  const out = [];
+  const w = (depth, s) => out.push("  ".repeat(depth) + s);
+  const name = (n) => (n ? ` name="${xesc(n)}"` : "");
+  const doc = (depth, el) => { if (el.d) w(depth, `<bpmn:documentation>${xesc(el.d + (el.code ? "\n" + el.code.join("\n") : ""))}</bpmn:documentation>`); };
+  const seq = flows.filter((f) => f.k === "seq"), msg = flows.filter((f) => f.k === "msg"), data = flows.filter((f) => f.k === "data");
+  const TAG = { start: "startEvent", end: "endEvent", catch: "intermediateCatchEvent", boundary: "boundaryEvent", call: "callActivity", store: "dataStoreReference" };
+  const TASK = { user: "userTask", service: "serviceTask", send: "sendTask", receive: "receiveTask", script: "scriptTask" };
+  const GW = { x: "exclusiveGateway", "+": "parallelGateway", o: "inclusiveGateway" };
+  const tagOf = (n) => n.t === "task" ? TASK[n.k] || "task" : n.t === "gw" ? GW[n.g] : TAG[n.t];
+  const evDef = (depth, n) => {
+    if (n.ev === "message") w(depth, `<bpmn:messageEventDefinition id="${n.id}_def" />`);
+    if (n.ev === "timer") w(depth, `<bpmn:timerEventDefinition id="${n.id}_def" />`);
+    if (n.ev === "error") w(depth, `<bpmn:errorEventDefinition id="${n.id}_def" />`);
+    if (n.ev === "conditional") { w(depth, `<bpmn:conditionalEventDefinition id="${n.id}_def">`); w(depth + 1, `<bpmn:condition xsi:type="bpmn:tFormalExpression" />`); w(depth, `</bpmn:conditionalEventDefinition>`); }
+  };
+  const node = (depth, n) => {
+    const tag = tagOf(n);
+    let attrs = `id="${n.id}"${name(n.n)}`;
+    if (n.t === "boundary") attrs += ` attachedToRef="${n.on}"`;
+    if (n.t === "call") attrs += ` calledElement="Process_${n.ref}"`;
+    if (n.t === "start" && n.ni) attrs += ` isInterrupting="false"`;
+    const dflt = seq.find((f) => f.f === n.id && f.def);
+    if (n.t === "gw" && n.g !== "+" && dflt) attrs += ` default="${dflt.id}"`;
+    if (n.t === "store") { w(depth, `<bpmn:${tag} ${attrs} />`); return; }
+    w(depth, `<bpmn:${tag} ${attrs}>`);
+    doc(depth + 1, n);
+    for (const f of seq.filter((f) => f.to === n.id)) w(depth + 1, `<bpmn:incoming>${f.id}</bpmn:incoming>`);
+    for (const f of seq.filter((f) => f.f === n.id)) w(depth + 1, `<bpmn:outgoing>${f.id}</bpmn:outgoing>`);
+    const ins = data.filter((f) => f.to === n.id), outs = data.filter((f) => f.f === n.id);
+    if (ins.length) w(depth + 1, `<bpmn:property id="${n.id}_prop" name="__targetRef_placeholder" />`);
+    for (const f of ins) { w(depth + 1, `<bpmn:dataInputAssociation id="${f.id}">`); w(depth + 2, `<bpmn:sourceRef>${f.f}</bpmn:sourceRef>`); w(depth + 2, `<bpmn:targetRef>${n.id}_prop</bpmn:targetRef>`); w(depth + 1, `</bpmn:dataInputAssociation>`); }
+    for (const f of outs) { w(depth + 1, `<bpmn:dataOutputAssociation id="${f.id}">`); w(depth + 2, `<bpmn:targetRef>${f.to}</bpmn:targetRef>`); w(depth + 1, `</bpmn:dataOutputAssociation>`); }
+    if (n.m === "loop") w(depth + 1, `<bpmn:standardLoopCharacteristics />`);
+    if (n.m === "seq") w(depth + 1, `<bpmn:multiInstanceLoopCharacteristics isSequential="true" />`);
+    if (n.m === "par") w(depth + 1, `<bpmn:multiInstanceLoopCharacteristics />`);
+    evDef(depth + 1, n);
+    w(depth, `</bpmn:${tag}>`);
+  };
+  const seqFlow = (depth, f) => w(depth, `<bpmn:sequenceFlow id="${f.id}"${name(f.n)} sourceRef="${f.f}" targetRef="${f.to}" />`);
+
+  w(0, `<?xml version="1.0" encoding="UTF-8"?>`);
+  w(0, `<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="Definitions_${id}" targetNamespace="https://github.com/andysolomon/arc-reader/readaloud" exporter="ReadAloud docs/readaloud-bpmn.html" exporterVersion="1">`);
+  w(1, `<bpmn:collaboration id="Collaboration_${id}">`);
+  w(2, `<bpmn:documentation>${xesc(D.title + " — " + D.sub)}</bpmn:documentation>`);
+  // The first owned pool's process is named after the diagram, so call activities can reference it.
+  const firstOwned = D.pools.find((q) => !q.bb).id;
+  const processOf = (p) => `Process_${p.id === firstOwned ? id : p.id}`;
+  for (const p of D.pools) {
+    w(2, `<bpmn:participant id="${p.id}"${name(p.n)}${p.bb ? "" : ` processRef="${processOf(p)}"`}>`);
+    doc(3, p);
+    w(2, `</bpmn:participant>`);
+  }
+  for (const f of msg) w(2, `<bpmn:messageFlow id="${f.id}"${name(f.n)} sourceRef="${f.f}" targetRef="${f.to}" />`);
+  w(1, `</bpmn:collaboration>`);
+
+  for (const p of D.pools.filter((q) => !q.bb)) {
+    w(1, `<bpmn:process id="${processOf(p)}"${name(p.id === firstOwned ? D.title : p.n)} isExecutable="false">`);
+    const top = D.nodes.filter((n) => n.pool === p.id && !n.parent);
+    const espHere = D.esps.filter((s) => s.pool === p.id);
+    if (p.lanes.length) {
+      w(2, `<bpmn:laneSet id="LaneSet_${p.id}">`);
+      for (const l of p.lanes) {
+        w(3, `<bpmn:lane id="${l.id}"${name(l.n)}>`);
+        for (const n of [...top.filter((n) => n.lane === l.id && n.t !== "store"), ...espHere.filter((s) => s.lane === l.id)]) w(4, `<bpmn:flowNodeRef>${n.id}</bpmn:flowNodeRef>`);
+        w(3, `</bpmn:lane>`);
+      }
+      w(2, `</bpmn:laneSet>`);
+    }
+    for (const n of top) node(2, n);
+    for (const s of espHere) {
+      w(2, `<bpmn:subProcess id="${s.id}"${name(s.n)} triggeredByEvent="true">`);
+      doc(3, s);
+      const kids = D.nodes.filter((n) => n.parent === s.id);
+      for (const n of kids) node(3, n);
+      for (const f of seq.filter((f) => E[f.f].parent === s.id)) seqFlow(3, f);
+      w(2, `</bpmn:subProcess>`);
+    }
+    for (const f of seq.filter((f) => E[f.f].pool === p.id && !E[f.f].parent)) seqFlow(2, f);
+    w(1, `</bpmn:process>`);
+  }
+
+  const r = (v) => Math.round(v);
+  w(1, `<bpmndi:BPMNDiagram id="Diagram_${id}">`);
+  w(2, `<bpmndi:BPMNPlane id="Plane_${id}" bpmnElement="Collaboration_${id}">`);
+  const shape = (el, extra = "") => {
+    const x = el.cx - el.hw, y = el.cy - el.hh;
+    w(3, `<bpmndi:BPMNShape id="${el.id}_di" bpmnElement="${el.id}"${extra}>`);
+    w(4, `<dc:Bounds x="${r(x)}" y="${r(y)}" width="${r(el.hw * 2)}" height="${r(el.hh * 2)}" />`);
+    w(3, `</bpmndi:BPMNShape>`);
+  };
+  for (const p of D.pools) { shape(p, ` isHorizontal="true"`); for (const l of p.lanes || []) shape(l, ` isHorizontal="true"`); }
+  for (const s of D.esps) shape(s, ` isExpanded="true"`);
+  for (const n of D.nodes) shape(n);
+  for (const f of flows) {
+    w(3, `<bpmndi:BPMNEdge id="${f.id}_di" bpmnElement="${f.id}">`);
+    for (const [x, y] of f.pts) w(4, `<di:waypoint x="${r(x)}" y="${r(y)}" />`);
+    w(3, `</bpmndi:BPMNEdge>`);
+  }
+  w(2, `</bpmndi:BPMNPlane>`);
+  w(1, `</bpmndi:BPMNDiagram>`);
+  w(0, `</bpmn:definitions>`);
+  return out.join("\n") + "\n";
+}
+if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, bounds };
+</script>
+
+<script id="ui">
+(() => {
+  const svg = document.getElementById("svg"), root = document.getElementById("root");
+  const panel = document.getElementById("panel"), crumb = document.getElementById("crumb");
+  const ORDER = ["main", "synth", "prepare", "sync", "summary"];
+  const KIND = {
+    start: "Start event", end: "End event", catch: "Intermediate catch event", boundary: "Boundary event",
+    call: "Call activity", store: "Data store", esp: "Event sub-process", pool: "Pool (participant)", lane: "Lane",
+    task: "Task", user: "User task", service: "Service task", send: "Send task", receive: "Receive task", script: "Script task",
+    x: "Exclusive gateway", "+": "Parallel gateway", o: "Inclusive gateway",
+  };
+  const EVK = { message: "message", timer: "timer", error: "error", conditional: "conditional" };
+  const S = { cur: null, G: null, sel: null, views: {}, visit: {}, run: null };
+
+  /* ---------- svg helpers ---------- */
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function wrap(text, maxW, fs) {
+    const max = Math.max(4, Math.floor(maxW / (fs * 0.54)));
+    const out = []; let line = "";
+    for (const word of String(text || "").split(/\s+/)) {
+      if (!word) continue;
+      if (!line) line = word;
+      else if ((line + " " + word).length <= max) line += " " + word;
+      else { out.push(line); line = word; }
+    }
+    if (line) out.push(line);
+    return out;
+  }
+  function tb(lines, x, y, fs, cls, anchor = "middle", attrs = "") {
+    const lh = fs * 1.22, y0 = y - ((lines.length - 1) * lh) / 2;
+    return `<text class="${cls}" x="${x}" y="${y0}" font-size="${fs}" text-anchor="${anchor}" dominant-baseline="middle" ${attrs}>${lines.map((l, i) => `<tspan x="${x}" y="${(y0 + i * lh).toFixed(1)}">${esc(l)}</tspan>`).join("")}</text>`;
+  }
+  function gear(cx, cy, r) {
+    const p = [];
+    for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2, rr = i % 2 ? r * 0.72 : r; p.push(`${(cx + Math.cos(a) * rr).toFixed(1)},${(cy + Math.sin(a) * rr).toFixed(1)}`); }
+    return `<polygon class="icon" points="${p.join(" ")}"/><circle class="icon" cx="${cx}" cy="${cy}" r="${r * 0.32}"/>`;
+  }
+  const envelope = (cx, cy, w, h, filled) => `<rect class="icon${filled ? " fill" : ""}" x="${cx - w / 2}" y="${cy - h / 2}" width="${w}" height="${h}" rx="1"/><path class="icon" style="${filled ? "stroke:var(--shape-fill)" : ""}" d="M${cx - w / 2},${cy - h / 2} L${cx},${cy + 1} L${cx + w / 2},${cy - h / 2}"/>`;
+  const bolt = (cx, cy, filled) => `<path class="icon${filled ? " fill" : ""}" d="M${cx - 6},${cy + 8} L${cx - 2},${cy - 5} L${cx + 2},${cy + 1} L${cx + 6},${cy - 8} L${cx + 3},${cy + 6} L${cx - 1},${cy - 1} Z"/>`;
+  function evIcon(n) {
+    const { x, y } = n, filled = n.t === "end";
+    if (n.ev === "message") return envelope(x, y, 16, 11, filled);
+    if (n.ev === "error") return bolt(x, y, filled);
+    if (n.ev === "timer") {
+      let ticks = "";
+      for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; ticks += `M${(x + Math.cos(a) * 8).toFixed(1)},${(y + Math.sin(a) * 8).toFixed(1)} L${(x + Math.cos(a) * 10).toFixed(1)},${(y + Math.sin(a) * 10).toFixed(1)} `; }
+      return `<circle class="icon" cx="${x}" cy="${y}" r="10.5"/><path class="icon" d="${ticks} M${x},${y} L${x + 1},${y - 7} M${x},${y} L${x + 5},${y + 2}"/>`;
+    }
+    if (n.ev === "conditional") return `<rect class="icon" x="${x - 6}" y="${y - 8}" width="12" height="16"/><path class="icon" d="M${x - 4},${y - 4.5} h8 M${x - 4},${y - 1.5} h8 M${x - 4},${y + 1.5} h8 M${x - 4},${y + 4.5} h8"/>`;
+    return "";
+  }
+  function taskIcon(n, x0, y0) {
+    const ix = x0 + 14, iy = y0 + 14;
+    if (n.k === "user") return `<circle class="icon" cx="${ix}" cy="${iy - 3}" r="3.6"/><path class="icon" d="M${ix - 7},${iy + 8} q0,-7 7,-7 q7,0 7,7 z"/>`;
+    if (n.k === "service") return gear(ix, iy, 7);
+    if (n.k === "send") return envelope(ix, iy, 15, 10, true);
+    if (n.k === "receive") return envelope(ix, iy, 15, 10, false);
+    if (n.k === "script") return `<path class="icon" d="M${ix - 5},${iy - 7} h10 q-3,3.5 0,7 q3,3.5 0,7 h-10 q3,-3.5 0,-7 q-3,-3.5 0,-7 z M${ix - 3},${iy - 3} h6 M${ix - 3},${iy} h6 M${ix - 2},${iy + 3} h6"/>`;
+    return "";
+  }
+  function markers(n, cx, by) {
+    const list = [];
+    if (n.t === "call") list.push("call");
+    if (n.m) list.push(n.m);
+    const gap = 18, x0 = cx - ((list.length - 1) * gap) / 2;
+    return list.map((m, i) => {
+      const x = x0 + i * gap, y = by;
+      if (m === "call") return `<rect class="marker" x="${x - 7}" y="${y - 7}" width="14" height="14" rx="1.5"/><path class="marker" d="M${x - 4},${y} h8 M${x},${y - 4} v8"/>`;
+      if (m === "loop") return `<path class="marker" d="M${x + 4.5},${y + 4} A6,6 0 1 0 ${x - 1},${y + 6}"/><path class="marker" d="M${x + 1},${y + 2.5} L${x + 4.5},${y + 4.2} L${x + 6},${y + 0.5}"/>`;
+      if (m === "par") return `<path class="marker" d="M${x - 4},${y - 6} v12 M${x},${y - 6} v12 M${x + 4},${y - 6} v12"/>`;
+      if (m === "seq") return `<path class="marker" d="M${x - 6},${y - 4} h12 M${x - 6},${y} h12 M${x - 6},${y + 4} h12"/>`;
+      return "";
+    }).join("");
+  }
+  function outerLabel(n) {
+    if (!n.n) return "";
+    const fs = 11, lines = wrap(n.n, n.lw || (n.t === "store" ? 120 : 118), fs), lh = fs * 1.22, pos = n.lp || "b";
+    const blockH = lines.length * lh;
+    if (pos === "t") return tb(lines, n.x, n.y - n.hh - 6 - blockH / 2 + lh / 2 - 1, fs, "sublabel");
+    if (pos === "tl") return tb(lines, n.x - 10, n.y - n.hh - 6 - blockH / 2 + lh / 2 - 1, fs, "sublabel", "end");
+    if (pos === "l") return tb(lines, n.x - n.hw - 7, n.y, fs, "sublabel", "end");
+    if (pos === "r") return tb(lines, n.x + n.hw + 7, n.y, fs, "sublabel", "start");
+    return tb(lines, n.x, n.y + n.hh + 6 + blockH / 2 - lh / 2 + (n.t === "store" ? 0 : 1), fs, "sublabel");
+  }
+
+  function nodeSVG(n) {
+    const { x, y, w, h } = n, x0 = x - w / 2, y0 = y - h / 2;
+    let body = "", cls = n.t;
+    if (n.t === "task" || n.t === "call") {
+      if (n.t === "task") cls += " task";
+      body += `<rect class="shape" x="${x0}" y="${y0}" width="${w}" height="${h}" rx="10"/>`;
+      body += taskIcon(n, x0, y0);
+      const hasMk = n.t === "call" || n.m;
+      const fs = 11.8, lines = wrap(n.n, w - (n.k ? 20 : 14), fs).slice(0, 4);
+      body += tb(lines, x + (n.k && lines.length > 2 ? 4 : 0), y + (hasMk ? -6 : 0) + (n.k && lines.length > 3 ? 3 : 0), fs, "label");
+      body += markers(n, x, y0 + h - 11);
+    } else if (n.t === "gw") {
+      body += `<polygon class="shape" points="${x},${y0} ${x0 + w},${y} ${x},${y0 + h} ${x0},${y}"/>`;
+      if (n.g === "x") body += `<path class="icon" d="M${x - 7},${y - 7} L${x + 7},${y + 7} M${x + 7},${y - 7} L${x - 7},${y + 7}"/>`;
+      if (n.g === "+") body += `<path class="icon" d="M${x},${y - 10} v20 M${x - 10},${y} h20"/>`;
+      if (n.g === "o") body += `<circle class="icon" cx="${x}" cy="${y}" r="10.5" style="stroke-width:2.6"/>`;
+      body += outerLabel(n);
+    } else if (n.t === "store") {
+      const sx = x0, sy = y0;
+      body += `<path class="shape" d="M${sx},${sy + 7} a${w / 2},7 0 0,0 ${w},0 a${w / 2},7 0 0,0 ${-w},0 v${h - 14} a${w / 2},7 0 0,0 ${w},0 v${-(h - 14)}"/><path class="icon" style="stroke:var(--data)" d="M${sx},${sy + 12} a${w / 2},7 0 0,0 ${w},0 M${sx},${sy + 17} a${w / 2},7 0 0,0 ${w},0"/>`;
+      body += outerLabel(n);
+    } else {
+      if (n.ni) cls += " ni";
+      if (n.t === "start" || n.t === "end") body += `<circle class="shape" cx="${x}" cy="${y}" r="${n.t === "end" ? 16.5 : 18}"/>`;
+      else body += `<circle class="shape" cx="${x}" cy="${y}" r="18"/><circle class="shape" cx="${x}" cy="${y}" r="14.5" style="fill:none"/>`;
+      body += evIcon(n);
+      body += outerLabel(n);
+    }
+    return `<g class="el ${cls}" data-id="${n.id}" tabindex="-1">${body}</g>`;
+  }
+
+  function poolSVG(p) {
+    let s = "";
+    if (p.bb) {
+      s += `<g class="pool-hit bb" data-id="${p.id}"><rect class="pool-rect" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="2"/>${tb(wrap(p.n, p.w - 30, 12.5), p.x + p.w / 2, p.y + p.h / 2, 12.5, "pool-label")}</g>`;
+      return s;
+    }
+    s += `<g class="pool-hit" data-id="${p.id}"><rect class="pool-rect" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}"/><rect class="pool-strip" x="${p.x}" y="${p.y}" width="30" height="${p.h}"/>`;
+    s += tb(wrap(p.n, p.h - 20, 12.5).slice(0, 2), p.x + 15, p.y + p.h / 2, 12.5, "pool-label", "middle", `transform="rotate(-90 ${p.x + 15} ${p.y + p.h / 2})"`) + `</g>`;
+    for (const l of p.lanes) {
+      s += `<g class="pool-hit" data-id="${l.id}"><rect class="lane-rect" x="${l.x}" y="${l.y}" width="${l.w}" height="${l.h}"/><rect class="lane-strip" x="${l.x}" y="${l.y}" width="30" height="${l.h}"/>`;
+      s += tb(wrap(l.n, l.h - 16, 11.5).slice(0, 2), l.x + 15, l.y + l.h / 2, 11.5, "lane-label", "middle", `transform="rotate(-90 ${l.x + 15} ${l.y + l.h / 2})"`) + `</g>`;
+    }
+    return s;
+  }
+
+  function pathD(p, rad = 9) {
+    let d = `M${p[0][0]},${p[0][1]}`;
+    for (let i = 1; i < p.length - 1; i++) {
+      const [x0, y0] = p[i - 1], [x1, y1] = p[i], [x2, y2] = p[i + 1];
+      const d1 = Math.hypot(x1 - x0, y1 - y0), d2 = Math.hypot(x2 - x1, y2 - y1);
+      if (!d1 || !d2) { d += ` L${x1},${y1}`; continue; }
+      const r = Math.min(rad, d1 / 2, d2 / 2);
+      d += ` L${(x1 + ((x0 - x1) / d1) * r).toFixed(1)},${(y1 + ((y0 - y1) / d1) * r).toFixed(1)} Q${x1},${y1} ${(x1 + ((x2 - x1) / d2) * r).toFixed(1)},${(y1 + ((y2 - y1) / d2) * r).toFixed(1)}`;
+    }
+    const l = p[p.length - 1];
+    return d + ` L${l[0]},${l[1]}`;
+  }
+  function flowSVG(f) {
+    const p = f.pts, d = pathD(p);
+    const mk = f.k === "seq" ? `marker-end="url(#m-seq)"` : f.k === "msg" ? `marker-start="url(#m-msg-start)" marker-end="url(#m-msg-end)"` : `marker-end="url(#m-data)"`;
+    let s = `<g class="fl" data-flow="${f.id}"><path class="flow ${f.k}" id="path-${f.id}" d="${d}" ${mk}/>`;
+    if (f.def) {
+      const [ax, ay] = p[0], [bx, by] = p[1], L = Math.hypot(bx - ax, by - ay) || 1, ux = (bx - ax) / L, uy = (by - ay) / L, nx = -uy, ny = ux;
+      const cx = ax + ux * 12, cy = ay + uy * 12;
+      s += `<path class="flow" d="M${cx + nx * 5 - ux * 3},${cy + ny * 5 - uy * 3} L${cx - nx * 5 + ux * 3},${cy - ny * 5 + uy * 3}"/>`;
+    }
+    if (f.n) {
+      let x, y, anchor = "start";
+      if (f.lx !== undefined) { x = f.lx; y = f.ly; }
+      else if (f.k === "msg") {
+        let best = 0, bi = 0;
+        for (let i = 0; i < p.length - 1; i++) { const L = Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1]); if (L > best) { best = L; bi = i; } }
+        x = (p[bi][0] + p[bi + 1][0]) / 2 + 7; y = (p[bi][1] + p[bi + 1][1]) / 2;
+      } else {
+        const [ax, ay] = p[0], [bx, by] = p[1];
+        if (Math.abs(by - ay) < 1) { x = ax + (bx > ax ? 9 : -9); y = ay - 8; anchor = bx > ax ? "start" : "end"; }
+        else { x = ax + 7; y = ay + (by > ay ? 15 : -11); }
+      }
+      s += `<text class="flow-label${f.k === "msg" ? " msg" : ""}" x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="middle">${esc(f.n)}</text>`;
+    }
+    s += `<path class="flow-hit" d="${d}"/></g>`;
+    return s;
+  }
+
+  /* ---------- render ---------- */
+  function render(id) {
+    S.cur = id;
+    S.G = build(id);
+    const { D, E, flows } = S.G;
+    let html = `<g id="layer-pools">${D.pools.map(poolSVG).join("")}</g>`;
+    html += `<g id="layer-esp">${D.esps.map((s) => `<g class="el espg" data-id="${s.id}"><rect class="esp" x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="12"/><text class="esp-label" x="${s.x + 12}" y="${s.y + 17}">${esc(s.n)}</text></g>`).join("")}</g>`;
+    html += `<g id="layer-flows">${flows.map(flowSVG).join("")}</g>`;
+    html += `<g id="layer-nodes">${D.nodes.map(nodeSVG).join("")}</g>`;
+    html += `<g id="layer-token"></g>`;
+    root.innerHTML = html;
+    document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.id === id)));
+    const chain = [];
+    for (let d = D; d; d = d.parent ? DIAGRAMS[d.parent] : null) chain.unshift(d);
+    crumb.innerHTML = chain.map((d, i) => i === chain.length - 1 ? `<b>${esc(d.title)}</b>` : `<button data-go="${ORDER.find((k) => DIAGRAMS[k] === d)}">${esc(d.title)}</button> ›`).join(" ");
+    S.sel = null;
+    fillScenarios();
+    applyVisit();
+    if (!S.views[id]) fit(false); else applyView();
+    showOverview();
+  }
+
+  function applyVisit() {
+    const v = S.visit[S.cur];
+    root.classList.toggle("dim", !!(v && v.size));
+    if (!v) return;
+    for (const id of v) {
+      root.querySelector(`[data-id="${id}"]`)?.classList.add("visited");
+      const fp = document.getElementById("path-" + id);
+      if (fp) fp.classList.add("visited");
+    }
+  }
+
+  /* ---------- view ---------- */
+  const view = () => S.views[S.cur];
+  function applyView() { const v = view(); root.setAttribute("transform", `translate(${v.x},${v.y}) scale(${v.k})`); }
+  function fit(animate = true) {
+    const b = bounds(S.G), r = svg.getBoundingClientRect(), pad = 30;
+    const k = Math.max(0.15, Math.min(1.4, Math.min((r.width - pad * 2) / b.w, (r.height - pad * 2 - 30) / b.h)));
+    const target = { k, x: (r.width - b.w * k) / 2 - b.x * k, y: (r.height - b.h * k) / 2 - b.y * k + 15 };
+    if (animate && S.views[S.cur]) tween(target); else { S.views[S.cur] = target; applyView(); }
+  }
+  let tw = 0;
+  function tween(to, ms = 380) {
+    const from = { ...view() }, t0 = performance.now(), id = ++tw;
+    return new Promise((res) => {
+      const step = (t) => {
+        if (id !== tw) return res();
+        const u = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - u, 3);
+        S.views[S.cur] = { k: from.k + (to.k - from.k) * e, x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e };
+        applyView();
+        u < 1 ? requestAnimationFrame(step) : res();
+      };
+      requestAnimationFrame(step);
+    });
+  }
+  function zoomAt(f, mx, my) {
+    const v = view(), k = Math.max(0.15, Math.min(3, v.k * f)), r = k / v.k;
+    S.views[S.cur] = { k, x: mx - (mx - v.x) * r, y: my - (my - v.y) * r };
+    applyView();
+  }
+  /** Pan (and zoom in to at least minK) only when the point is near the edge or off screen. */
+  function focusOn(pt, minK = 0.8) {
+    const r = svg.getBoundingClientRect(), v = view();
+    const k = Math.max(v.k, minK);
+    const px = pt.cx * v.k + v.x, py = pt.cy * v.k + v.y;
+    const mx = r.width * 0.16, my = r.height * 0.18;
+    if (k === v.k && px > mx && px < r.width - mx && py > my && py < r.height - my) return Promise.resolve();
+    return tween({ k, x: r.width / 2 - pt.cx * k, y: r.height / 2 - pt.cy * k });
+  }
+
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = svg.getBoundingClientRect();
+    if (e.ctrlKey || Math.abs(e.deltaY) > Math.abs(e.deltaX)) zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0016)), e.clientX - r.left, e.clientY - r.top);
+    else { const v = view(); v.x -= e.deltaX; applyView(); }
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, vx: view().x, vy: view().y, moved: false, id: e.pointerId }; });
+  window.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) > 4) { drag.moved = true; svg.classList.add("drag"); svg.setPointerCapture?.(drag.id); }
+    if (drag.moved) { tw++; S.views[S.cur] = { ...view(), x: drag.vx + dx, y: drag.vy + dy }; applyView(); }
+  });
+  window.addEventListener("pointerup", (e) => {
+    if (!drag) return;
+    const wasDrag = drag.moved; drag = null; svg.classList.remove("drag");
+    if (wasDrag) return;
+    const t = e.target.closest?.("[data-id],[data-flow]");
+    if (!t || !svg.contains(t)) { select(null); return; }
+    if (t.dataset.flow) select(t.dataset.flow); else select(t.dataset.id);
+  });
+  svg.addEventListener("dblclick", (e) => {
+    const t = e.target.closest?.("[data-id]");
+    const n = t && S.G.E[t.dataset.id];
+    if (n && n.t === "call") open(n.ref);
+  });
+  document.getElementById("zin").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(1.25, r.width / 2, r.height / 2); };
+  document.getElementById("zout").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(0.8, r.width / 2, r.height / 2); };
+  document.getElementById("zfit").onclick = () => fit();
+  window.addEventListener("resize", () => fit(false));
+  crumb.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) open(b.dataset.go); });
+
+  /* ---------- selection & panel ---------- */
+  function kindOf(el) {
+    if (el.kind === "pool") return el.bb ? "Pool (black box — an external participant)" : KIND.pool;
+    if (el.kind === "lane") return KIND.lane;
+    if (el.t === "esp") return KIND.esp;
+    if (el.t === "task") return KIND[el.k || "task"] + (el.m === "loop" ? " · loop" : el.m === "seq" ? " · sequential multi-instance" : el.m === "par" ? " · parallel multi-instance" : "");
+    if (el.t === "gw") return KIND[el.g];
+    let k = KIND[el.t];
+    if (el.ev) k = k.replace(" event", ` ${EVK[el.ev]} event`).replace("event event", "event");
+    if (el.ni) k += " · non-interrupting";
+    return k;
+  }
+  function flowKind(f) { return f.k === "msg" ? "Message flow (between participants)" : f.k === "data" ? "Data association" : f.def ? "Sequence flow · default" : "Sequence flow"; }
+  const label = (el) => el.n || (el.t === "gw" ? (el.g === "+" ? "Parallel gateway" : "Merge") : el.t === "end" ? "End" : el.id);
+  function codeList(code) {
+    if (!code || !code.length) return "";
+    return `<h3>In the code</h3><div class="code">${code.map((c) => `<button title="Copy path" data-copy="${esc(c)}">${esc(c)}</button>`).join("")}</div>`;
+  }
+  function linkBtn(id, prefix) {
+    const el = S.G.E[id];
+    return `<button data-sel="${id}"><small>${prefix}</small> ${esc(label(el))}</button>`;
+  }
+  function select(id, { pan = false } = {}) {
+    root.querySelectorAll(".sel").forEach((n) => n.classList.remove("sel"));
+    root.querySelectorAll(".near").forEach((n) => n.classList.remove("near"));
+    root.querySelectorAll('.flow[marker-end="url(#m-seq-hi)"]').forEach((p) => p.setAttribute("marker-end", "url(#m-seq)"));
+    S.sel = id;
+    if (!id) { showOverview(); return; }
+    const flow = S.G.flows.find((f) => f.id === id);
+    if (flow) {
+      const p = document.getElementById("path-" + id);
+      p.classList.add("sel");
+      if (flow.k === "seq") p.setAttribute("marker-end", "url(#m-seq-hi)");
+      panel.innerHTML = `<span class="kind"><i style="background:var(--${flow.k === "msg" ? "msg" : flow.k === "data" ? "data" : "faint"})"></i>${flowKind(flow)}</span>
+        <h2>${esc(flow.n || label(S.G.E[flow.f]) + " → " + label(S.G.E[flow.to]))}</h2>
+        <h3>Connects</h3><div class="links">${linkBtn(flow.f, "from")}${linkBtn(flow.to, "to")}</div>`;
+      return;
+    }
+    const el = S.G.E[id];
+    if (!el) return;
+    root.querySelector(`[data-id="${id}"]`)?.classList.add("sel");
+    const inc = S.G.flows.filter((f) => f.to === id), out = S.G.flows.filter((f) => f.f === id);
+    for (const f of [...inc, ...out]) {
+      const p = document.getElementById("path-" + f.id);
+      p?.classList.add("near");
+      if (f.k === "seq") p?.setAttribute("marker-end", "url(#m-seq-hi)");
+    }
+    const where = el.kind === "lane" ? S.G.E[el.pool].n : el.lane ? `${S.G.E[el.lane].n}` : el.pool && S.G.E[el.pool] ? S.G.E[el.pool].n : "";
+    const host = el.t === "boundary" ? `<p class="hint">Attached to <b>${esc(label(S.G.E[el.on]))}</b>${el.ni ? "; it does not cancel it" : "; it interrupts it"}.</p>` : "";
+    const parent = el.parent ? `<p class="hint">Inside the event sub-process <b>${esc(S.G.E[el.parent].n)}</b>.</p>` : "";
+    const fl = (f, dir) => {
+      const other = S.G.E[dir === "in" ? f.f : f.to];
+      const tag = f.k === "msg" ? (dir === "in" ? "message from" : "message to") : f.k === "data" ? (dir === "in" ? "reads" : "writes") : dir === "in" ? "from" : f.n ? f.n + " →" : "next";
+      return `<button data-sel="${other.id}"><small>${esc(tag)}</small> ${esc(label(other))}</button>`;
+    };
+    const links = inc.length + out.length ? `<h3>Connections</h3><div class="links">${inc.map((f) => fl(f, "in")).join("")}${out.map((f) => fl(f, "out")).join("")}</div>` : "";
+    const facts = el.facts ? `<h3>Numbers</h3><ul>${el.facts.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : "";
+    const drill = el.t === "call" ? `<button class="drill" data-open="${el.ref}">Open “${esc(DIAGRAMS[el.ref].title)}” ›</button>` : "";
+    panel.innerHTML = `<span class="kind"><i style="background:var(--${el.t === "start" ? "start" : el.t === "end" ? "end" : el.t === "gw" || el.t === "catch" || el.t === "boundary" ? "gw" : el.t === "store" ? "data" : el.bb ? "msg" : "accent"})"></i>${esc(kindOf(el))}</span>
+      <h2>${esc(label(el))}</h2>
+      ${where ? `<p class="hint">${esc(where)}</p>` : ""}${host}${parent}
+      ${el.d ? `<p>${esc(el.d)}</p>` : ""}${facts}${codeList(el.code)}${links}${drill}`;
+    if (pan) focusOn(el, view().k);
+  }
+  panel.addEventListener("click", (e) => {
+    const s = e.target.closest("[data-sel]"), o = e.target.closest("[data-open]"), c = e.target.closest("[data-copy]"), sc = e.target.closest("[data-scen]");
+    if (s) select(s.dataset.sel, { pan: true });
+    if (o) open(o.dataset.open);
+    if (sc) { document.getElementById("scen").value = sc.dataset.scen; startRun(); }
+    if (c) { navigator.clipboard?.writeText(c.dataset.copy).then(() => { c.classList.add("ok"); setTimeout(() => c.classList.remove("ok"), 1200); }).catch(() => {}); }
+  });
+
+  function showOverview() {
+    const D = DIAGRAMS[S.cur];
+    const calls = D.nodes.filter((n) => n.t === "call");
+    panel.innerHTML = `<span class="kind"><i></i>Process ${ORDER.indexOf(S.cur) + 1} of ${ORDER.length}</span>
+      <h2>${esc(D.title)}</h2><p>${esc(D.sub)}</p>
+      ${D.overview.map((p) => `<p class="hint">${esc(p)}</p>`).join("")}
+      <h3>Walkthroughs</h3><div class="links">${D.scenarios.map((s) => `<button data-scen="${s.id}">▶ ${esc(s.n)}</button>`).join("")}</div>
+      ${calls.length ? `<h3>Sub-processes</h3><div class="links">${calls.map((c) => `<button data-open="${c.ref}">${esc(c.n)} ›</button>`).join("")}</div>` : D.parent ? `<h3>Called from</h3><div class="links"><button data-open="${D.parent}">‹ ${esc(DIAGRAMS[D.parent].title)}</button></div>` : ""}
+      <h3>Getting around</h3>
+      <p class="hint">Click a shape for what it does and where it lives in the code. Double-click a thick-bordered call activity to open it. Drag to pan, scroll to zoom, <kbd>0</kbd> fits, <kbd>Esc</kbd> clears, <kbd>→</kbd> steps a walkthrough.</p>`;
+  }
+
+  /* ---------- legend ---------- */
+  function legendHTML() {
+    const mini = (inner) => `<svg viewBox="-22 -15 44 30">${inner}</svg>`;
+    const fake = (o) => nodeSVG(Object.assign({ x: 0, y: 0, n: "", hw: 18, hh: 18, w: 36, h: 36 }, o));
+    const rows = [
+      [fake({ t: "start" }), "Start event — where a process begins"],
+      [fake({ t: "start", ev: "message" }), "Message start — begins when something arrives (a share, a request)"],
+      [fake({ t: "start", ev: "message", ni: true }), "Non-interrupting start of an event sub-process"],
+      [fake({ t: "end" }), "End event"],
+      [fake({ t: "end", ev: "error" }), "Error end — throws an error to the caller"],
+      [fake({ t: "boundary", ev: "error" }), "Error boundary event — catches an error on the task it is attached to"],
+      [fake({ t: "catch", ev: "timer" }), "Timer / conditional catch — waits"],
+      [`<rect class="shape" x="-20" y="-13" width="40" height="26" rx="6" style="fill:var(--task);stroke:var(--task-stroke);stroke-width:1.5"/>`, "Task (icons: person = user, gear = service, envelope = send / receive, scroll = script)"],
+      [`<rect class="shape" x="-20" y="-13" width="40" height="26" rx="6" style="fill:var(--task);stroke:var(--task-stroke);stroke-width:3"/><rect class="marker" x="-4.5" y="2" width="9" height="9"/><path class="marker" d="M-2.5,6.5 h5 M0,4 v5"/>`, "Call activity — runs another process (open it)"],
+      [`<rect class="shape" x="-20" y="-13" width="40" height="26" rx="6" style="fill:var(--task);stroke:var(--task-stroke);stroke-width:1.5"/><path class="marker" d="M-8,4 h16 M-8,7 h16 M-8,10 h16"/>`, "Markers: ≡ sequential for each item, ⦀ parallel for each item, ↻ loop"],
+      [fake({ t: "gw", g: "x", w: 30, h: 30 }), "Exclusive gateway — exactly one path (or a merge)"],
+      [fake({ t: "gw", g: "+", w: 30, h: 30 }), "Parallel gateway — all paths at once"],
+      [fake({ t: "gw", g: "o", w: 30, h: 30 }), "Inclusive gateway — one or more paths"],
+      [`<path class="flow" d="M-20,0 H16" marker-end="url(#m-seq)"/>`, "Sequence flow (slash = default path)"],
+      [`<path class="flow msg" d="M-18,0 H16" marker-start="url(#m-msg-start)" marker-end="url(#m-msg-end)"/>`, "Message flow — a request between participants"],
+      [`<path class="flow data" d="M-20,0 H16" marker-end="url(#m-data)"/>`, "Data association — reads or writes a store"],
+      [fake({ t: "store", w: 30, h: 28 }), "Data store (IndexedDB, disk)"],
+    ];
+    return `<span class="kind"><i></i>Notation</span><h2>Reading BPMN</h2>
+      <p class="hint">Pools are participants (the browser app, the app server); lanes split a pool by responsibility. Grey pools are black boxes: external systems whose insides aren’t modelled.</p>
+      <div class="legend">${rows.map(([s, t]) => `${mini(s)}<span>${esc(t)}</span>`).join("")}</div>
+      <p class="hint" style="margin-top:14px">Click anywhere on the diagram to close.</p>`;
+  }
+  document.getElementById("legendBtn").onclick = () => { select(null); panel.innerHTML = legendHTML(); };
+
+  /* ---------- tabs, download, theme ---------- */
+  document.getElementById("tabs").innerHTML = ORDER.map((id, i) => `<button role="tab" data-id="${id}"><span class="n">${i + 1}</span>${esc(DIAGRAMS[id].title)}</button>`).join("");
+  document.getElementById("tabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { stopRun(); open(b.dataset.id); } });
+  function open(id) { if (id !== S.cur) render(id); }
+  document.getElementById("dl").onclick = () => {
+    const xml = toBPMN(S.cur);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([xml], { type: "application/xml" }));
+    a.download = `readaloud-${S.cur}.bpmn`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  const themeKey = "readaloud-bpmn-theme";
+  const setTheme = (t) => { document.documentElement.dataset.theme = t; try { localStorage.setItem(themeKey, t); } catch {} };
+  let saved = null; try { saved = localStorage.getItem(themeKey); } catch {}
+  setTheme(saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+  document.getElementById("theme").onclick = () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+
+  /* ---------- walkthroughs ---------- */
+  const scenSel = document.getElementById("scen"), playBtn = document.getElementById("play"), stepBtn = document.getElementById("step");
+  const sayK = document.getElementById("sayk"), sayT = document.getElementById("sayt");
+  function fillScenarios() {
+    if (S.run) return;
+    scenSel.innerHTML = DIAGRAMS[S.cur].scenarios.map((s) => `<option value="${s.id}">${esc(s.n)}</option>`).join("");
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function gate(run) {
+    if (run.playing) return Promise.resolve();
+    return new Promise((r) => { run.wake = r; });
+  }
+  function wake(run) { const w = run.wake; run.wake = null; w?.(); }
+  function animate(pts, cls, run) {
+    const layer = document.getElementById("layer-token");
+    const tok = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    tok.setAttribute("r", "7"); tok.setAttribute("class", "token " + cls);
+    layer.appendChild(tok);
+    const seg = []; let L = 0;
+    for (let i = 0; i < pts.length - 1; i++) { const l = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); seg.push(l); L += l; }
+    const ms = Math.max(260, Math.min(1500, L * 1.25)), t0 = performance.now();
+    return new Promise((res) => {
+      const frame = (t) => {
+        if (run.dead) { tok.remove(); return res(); }
+        let d = Math.min(1, (t - t0) / ms) * L, i = 0;
+        while (i < seg.length - 1 && d > seg[i]) { d -= seg[i]; i++; }
+        const u = seg[i] ? d / seg[i] : 1;
+        tok.setAttribute("cx", pts[i][0] + (pts[i + 1][0] - pts[i][0]) * u);
+        tok.setAttribute("cy", pts[i][1] + (pts[i + 1][1] - pts[i][1]) * u);
+        if (t - t0 < ms) requestAnimationFrame(frame); else { tok.remove(); res(); }
+      };
+      requestAnimationFrame(frame);
+    });
+  }
+  function mark(id) {
+    (S.visit[S.cur] ||= new Set()).add(id);
+    root.classList.add("dim");
+    root.querySelectorAll(".active").forEach((n) => n.classList.remove("active"));
+    const g = root.querySelector(`[data-id="${id}"]`);
+    g?.classList.add("visited", "active");
+  }
+  async function walk(diag, scId, run) {
+    if (S.cur !== diag) { render(diag); await sleep(250); }
+    const sc = DIAGRAMS[diag].scenarios.find((s) => s.id === scId);
+    let prev = null;
+    for (let i = 0; i < sc.steps.length; i++) {
+      if (run.dead) return;
+      const st = sc.steps[i];
+      // Paused or stepping: wait for Play or the next Step (the very first step runs at once).
+      if (run.count > 0) await gate(run);
+      if (run.dead) return;
+      const el = S.G.E[st.at];
+      const f = prev && S.G.flows.find((x) => x.f === prev && x.to === st.at && x.k !== "data");
+      // A wide pool is focused where the message lands, not at its centre.
+      const end = f && f.pts[f.pts.length - 1];
+      await focusOn(el.kind === "pool" && end ? { cx: end[0], cy: end[1] } : el, 0.72);
+      if (f) {
+        (S.visit[S.cur] ||= new Set()).add(f.id);
+        document.getElementById("path-" + f.id)?.classList.add("visited");
+        await animate(f.pts, f.k === "msg" ? "msg" : "", run);
+      }
+      if (run.dead) return;
+      mark(st.at);
+      run.count++;
+      sayK.textContent = `${DIAGRAMS[diag].title} · ${i + 1}/${sc.steps.length}`;
+      sayT.className = ""; sayT.textContent = st.say || label(el);
+      if (S.sel !== st.at) select(st.at);
+      await sleep(run.playing ? (st.say ? 1500 : 650) : 0);
+      if (st.call && document.getElementById("follow").checked && !run.dead) {
+        await walk(st.call, st.sc, run);
+        if (run.dead) return;
+        render(diag); await sleep(200);
+        mark(st.at);
+        await focusOn(el, 0.72);
+      }
+      prev = st.at;
+    }
+  }
+  function stopRun() {
+    if (!S.run) return;
+    S.run.dead = true; wake(S.run); S.run = null;
+    playBtn.textContent = "▶ Play"; scenSel.disabled = false;
+  }
+  function startRun(playing = true) {
+    stopRun();
+    // Read the choice first: render() refills the list.
+    const home = S.cur, sc = scenSel.value;
+    S.visit = {};
+    render(S.cur);
+    scenSel.value = sc;
+    const run = { dead: false, playing, wake: null, count: 0 };
+    S.run = run;
+    scenSel.disabled = true;
+    playBtn.textContent = playing ? "❚❚ Pause" : "▶ Play";
+    walk(home, sc, run).then(() => {
+      if (run.dead) return;
+      S.run = null; scenSel.disabled = false; playBtn.textContent = "▶ Play";
+      root.querySelectorAll(".active").forEach((n) => n.classList.remove("active"));
+      sayK.textContent = "Done"; sayT.textContent = "Walkthrough finished — visited shapes stay highlighted. Reset to clear.";
+      if (S.cur !== home) render(home);
+      scenSel.value = sc;
+    });
+  }
+  playBtn.onclick = () => {
+    if (!S.run) return startRun(true);
+    S.run.playing = !S.run.playing;
+    playBtn.textContent = S.run.playing ? "❚❚ Pause" : "▶ Play";
+    if (S.run.playing) wake(S.run);
+  };
+  stepBtn.onclick = () => {
+    if (!S.run) return startRun(false);
+    S.run.playing = false; playBtn.textContent = "▶ Play";
+    wake(S.run);
+  };
+  document.getElementById("reset").onclick = () => {
+    stopRun(); S.visit = {};
+    sayK.textContent = ""; sayT.className = "hint"; sayT.textContent = "Pick a walkthrough and press Play, or click any shape.";
+    render(S.cur);
+  };
+  window.addEventListener("keydown", (e) => {
+    if (e.target.closest?.("select,input")) return;
+    if (e.key === "Escape") select(null);
+    else if (e.key === "0") fit();
+    else if (e.key === "+" || e.key === "=") document.getElementById("zin").click();
+    else if (e.key === "-") document.getElementById("zout").click();
+    else if (e.key === "ArrowRight") { e.preventDefault(); stepBtn.click(); }
+    else if (e.key === " ") { e.preventDefault(); playBtn.click(); }
+  });
+
+  render("main");
+})();
+</script>
+</body>
+</html>
