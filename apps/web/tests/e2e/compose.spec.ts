@@ -77,3 +77,50 @@ test("a draft reopens the text box on return", async ({ page }) => {
   await expect(page.getByLabel("Text to read")).toHaveValue("Keep this unfinished draft.");
   await expect(page.getByRole("button", { name: "Type or paste text" })).toHaveAttribute("aria-expanded", "true");
 });
+
+test("the text box clears with one tap and stays cleared", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Clear text" })).toHaveCount(0);
+  await composeText(page, "Some pasted text to throw away.");
+  await page.getByRole("button", { name: "Clear text" }).click();
+  await expect(page.getByLabel("Text to read")).toHaveValue("");
+  await expect(page.getByLabel("Text to read")).toBeFocused();
+  await expect(page.getByRole("button", { name: "Clear text" })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel("Text to read")).toHaveCount(0);
+});
+
+/** A one-finger drag from (x, y) down by `dy`, as touch events on the element under the finger. */
+async function drag(page: Page, x: number, y: number, dy: number, dx = 0) {
+  await page.evaluate(
+    ({ x, y, dy, dx }) => {
+      const el = document.elementFromPoint(x, y)!;
+      const fire = (type: string, cx: number, cy: number) => {
+        const t = new Touch({ identifier: 1, target: el, clientX: cx, clientY: cy });
+        const touches = type === "touchend" ? [] : [t];
+        el.dispatchEvent(new TouchEvent(type, { touches, targetTouches: touches, changedTouches: [t], bubbles: true, cancelable: true }));
+      };
+      fire("touchstart", x, y);
+      for (let i = 1; i <= 10; i++) fire("touchmove", x + (dx * i) / 10, y + (dy * i) / 10);
+      fire("touchend", x + dx, y + dy);
+    },
+    { x, y, dy, dx },
+  );
+}
+
+test("pulling down from the top of a page reloads it", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => ((window as unknown as { beforeReload: boolean }).beforeReload = true));
+  const heading = await page.getByRole("heading", { name: "What should I read to you?" }).boundingBox();
+  const x = heading!.x + heading!.width / 2;
+  const y = heading!.y + heading!.height / 2;
+
+  // A short pull, or a sideways swipe, springs back without reloading.
+  await drag(page, x, y, 80);
+  await drag(page, x, y, 40, 300);
+  await expect(page.getByTestId("pull-to-refresh")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { beforeReload?: boolean }).beforeReload)).toBe(true);
+
+  await Promise.all([page.waitForEvent("load"), drag(page, x, y, 260)]);
+  expect(await page.evaluate(() => (window as unknown as { beforeReload?: boolean }).beforeReload)).toBeUndefined();
+});

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { AlignLeft, ChevronDown, Clipboard, Link2, Upload } from "lucide-react";
-import { Button, Chip, TextArea, VoiceAvatar, VoiceSourceBadge, formatSpeed, cn } from "@readaloud/ui";
+import { AlignLeft, ChevronDown, Clipboard, Link2, Upload, X } from "lucide-react";
+import { Button, Chip, IconButton, TextArea, VoiceAvatar, VoiceSourceBadge, formatSpeed, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { PLACEHOLDERS, SAMPLE, SAMPLE_TITLE } from "../data/sample";
 import { getVoice } from "../state/voices";
@@ -62,6 +62,12 @@ export function Compose() {
     focusText.current = focus;
     setTextOpen(true);
     if (focus) ta.current?.focus();
+  };
+
+  const clearText = () => {
+    setText("");
+    setTitle(undefined);
+    ta.current?.focus();
   };
 
   const readLink = async (raw: string) => {
@@ -249,7 +255,7 @@ export function Compose() {
         </div>
 
         {textOpen && (
-          <div id={TEXT_PANEL_ID} className="animate-rise">
+          <div id={TEXT_PANEL_ID} className="relative animate-rise">
             <TextArea
               ref={ta}
               aria-label="Text to read"
@@ -261,7 +267,15 @@ export function Compose() {
               onKeyDown={onTextKey}
               placeholder={PLACEHOLDERS[ph]}
               rows={8}
+              className={cn(text && "pr-14")}
             />
+            {text && (
+              <span className="absolute right-1.5 top-1.5">
+                <IconButton label="Clear text" size={44} round onClick={clearText}>
+                  <X size={18} strokeWidth={1.5} aria-hidden />
+                </IconButton>
+              </span>
+            )}
           </div>
         )}
 

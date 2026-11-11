@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Clipboard } from "lucide-react";
 import { Button, Toast } from "@readaloud/ui";
@@ -7,6 +8,7 @@ import { PlayerHost } from "./PlayerHost";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { OfflineBanner } from "./OfflineBanner";
 import { LiveRegion } from "./LiveRegion";
+import { PullToRefresh } from "./PullToRefresh";
 import { useShortcuts } from "../hooks/useShortcuts";
 import { useBreakpoint } from "../hooks/useMedia";
 import { usePlayer } from "../state/player";
@@ -18,6 +20,7 @@ export function Shell() {
   useShortcuts();
   useLinkToasts();
   const bp = useBreakpoint();
+  const mainRef = useRef<HTMLElement>(null);
   const focus = usePlayer((s) => s.focus);
   const hasDoc = usePlayer((s) => !!s.doc);
   const preparing = usePlayer((s) => s.preparing);
@@ -39,7 +42,8 @@ export function Shell() {
       <LiveRegion />
       <div className="flex min-h-0 flex-1">
         {showRail && <Rail />}
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden" data-breakpoint={bp}>
+        <main ref={mainRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden" data-breakpoint={bp}>
+          <PullToRefresh target={mainRef} />
           <OfflineBanner />
           {showTabs && pathname !== "/" && <div className="flex shrink-0 justify-end border-b border-line px-4 py-2">
             <Button leading={<Clipboard size={16} strokeWidth={1.5} aria-hidden />} loading={clipboard.busy} onClick={() => void clipboard.readClipboard()}>Read clipboard</Button>
@@ -56,7 +60,10 @@ export function Shell() {
             <button className="text-accent underline" onClick={() => usePlayer.getState().dismissSpeechError()}>Dismiss</button>
           </div>}
           <Outlet />
-          <PlayerHost />
+          {/* Dragging the player's scrubber or sheet must never reload mid-reading. */}
+          <div data-no-pull-refresh className="contents">
+            <PlayerHost />
+          </div>
         </main>
       </div>
       {showTabs && <TabBar />}
