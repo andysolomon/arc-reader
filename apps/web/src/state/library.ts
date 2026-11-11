@@ -53,10 +53,13 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
         if (id && !voices.some((v) => v.id === id)) voices.push({ id, name: id, engine: engine.split(":")[0], kind: "preset", lang: "", hue: null, tags: [] });
       }
       set({
-        items: all.map((rec) => {
-          const p = byId.get(rec.id);
-          return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
-        }),
+        items: all
+          .map((rec) => {
+            const p = byId.get(rec.id);
+            return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
+          })
+          // Newest first by when the document was added: filing, editing or opening it doesn't move it.
+          .sort((a, b) => b.rec.createdAt - a.rec.createdAt),
         loaded: true,
       });
     } catch {

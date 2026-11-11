@@ -38,6 +38,8 @@ export interface Settings {
   wide: boolean;
   railOpen: boolean;
   libView: "list" | "grid";
+  /** Library order: newest added first, or by listening time */
+  libSort: LibrarySort;
   apiKey: string;
   email: string | null;
   /**
@@ -48,6 +50,9 @@ export interface Settings {
   /** VoiceStudio key sent only with an absolute speech-server URL. */
   speechServerKey: string;
 }
+
+export const LIBRARY_SORTS = ["created", "shortest", "longest"] as const;
+export type LibrarySort = (typeof LIBRARY_SORTS)[number];
 
 interface Actions {
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
@@ -84,6 +89,7 @@ export const useSettings = create<Settings & Actions>()(
       wide: false,
       railOpen: typeof window === "undefined" ? true : window.innerWidth > 1024,
       libView: "list",
+      libSort: "created",
       apiKey: typeof crypto !== "undefined" ? genKey() : "ra_live_unavailable",
       email: null,
       speechServer: "",
@@ -116,7 +122,8 @@ export const useSettings = create<Settings & Actions>()(
         const p = (persisted ?? {}) as Partial<Settings>;
         const openaiModel = p.openaiModel === OPENAI_STEADY_MODEL || p.openaiModel === OPENAI_STANDARD_MODEL ? p.openaiModel : current.openaiModel;
         const summaryModel = isSummaryModel(p.summaryModel) ? p.summaryModel : current.summaryModel;
-        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null, openaiModel, summaryModel };
+        const libSort = LIBRARY_SORTS.includes(p.libSort as LibrarySort) ? p.libSort! : current.libSort;
+        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null, openaiModel, summaryModel, libSort };
       },
     },
   ),
