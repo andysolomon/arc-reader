@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { htmlToText, looksLikeUrl, markdownToText, publishedDate } from "./fetchUrl";
 import { segment } from "./segment";
+import { placeLinks } from "./linkPlaces";
 
 describe("importing code examples", () => {
   it("preserves preformatted code, language, and nesting without duplicates", () => {
@@ -93,6 +94,19 @@ describe("htmlToText", () => {
     expect(htmlToText(html, "https://example.com/blog/post").links).toEqual([
       { url: "https://example.com/guide", text: "the guide" },
       { url: "https://other.org/x", text: "another site" },
+    ]);
+  });
+});
+
+describe("a fetched page's links in the reading", () => {
+  it("places each link at the words it was attached to", () => {
+    const html = `<html><body><article>
+      <p>Start here. Then read <a href="/guide">the guide</a> before the rest.</p>
+      <p>The code is on <a href="https://git.example/repo">our repository</a>.</p></article></body></html>`;
+    const page = htmlToText(html, "https://example.com/post");
+    expect(placeLinks(page.links, segment(page.text).sentences).map((l) => [l.text, l.at])).toEqual([
+      ["the guide", { sentence: 1, word: 3 }],
+      ["our repository", { sentence: 2, word: 5 }],
     ]);
   });
 });

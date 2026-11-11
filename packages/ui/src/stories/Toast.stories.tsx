@@ -7,3 +7,4 @@ type S = StoryObj<typeof Toast>;
 export const Visible: S = {};
 export const Error: S = { args: { message: "Clipboard unavailable here" } };
 export const Hidden: S = { args: { message: null } };
+export const Link: S = { args: { message: "the style guide · example.com", href: "https://example.com/style" } };

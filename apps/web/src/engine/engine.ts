@@ -33,6 +33,8 @@ export interface EngineSnapshot {
   ticks: number[];
   source: Chunk["source"] | null;
   ended: boolean;
+  /** Times the place was set rather than read to: a load, a seek, or a restart. */
+  seeks: number;
 }
 
 export interface EngineOptions {
@@ -111,6 +113,7 @@ export class PlaybackEngine {
   private index = 0;
   private offset = 0;
   private wordIndex = -1;
+  private seeks = 0;
   private playing = false;
   private loading = false;
   private ended = false;
@@ -136,7 +139,7 @@ export class PlaybackEngine {
   constructor(private opts: EngineOptions) {}
 
   static empty(): EngineSnapshot {
-    return { docId: null, index: 0, wordIndex: -1, offset: 0, playing: false, loading: false, speed: 1, elapsed: 0, total: 0, fraction: 0, ticks: [], source: null, ended: false };
+    return { docId: null, index: 0, wordIndex: -1, offset: 0, playing: false, loading: false, speed: 1, elapsed: 0, total: 0, fraction: 0, ticks: [], source: null, ended: false, seeks: 0 };
   }
 
   subscribe(fn: Listener) {
@@ -178,6 +181,7 @@ export class PlaybackEngine {
     this.loading = false;
     this.ended = false;
     this.slowNoted = false;
+    this.seeks++;
     this.emit();
   }
 
@@ -257,6 +261,7 @@ export class PlaybackEngine {
       this.index = 0;
       this.offset = 0;
       this.ended = false;
+      this.seeks++;
     }
     const token = ++this.token;
     this.stopMedia();
@@ -318,6 +323,7 @@ export class PlaybackEngine {
     this.offset = 0;
     this.wordIndex = -1;
     this.ended = false;
+    this.seeks++;
     this.emit();
   }
 
@@ -329,6 +335,7 @@ export class PlaybackEngine {
     this.offset = 0;
     this.wordIndex = -1;
     this.ended = false;
+    this.seeks++;
     if (autoplay || this.playing) void this.play();
     else {
       this.stopMedia();
@@ -350,6 +357,7 @@ export class PlaybackEngine {
     this.offset = Math.min(target, this.durations[i]);
     this.wordIndex = -1;
     this.ended = false;
+    this.seeks++;
     if (autoplay || this.playing) void this.play();
     else {
       this.stopMedia();
@@ -859,6 +867,7 @@ export class PlaybackEngine {
       ticks,
       source: this.current?.source ?? null,
       ended: this.ended,
+      seeks: this.seeks,
     };
     for (const l of this.listeners) l(this.snap);
   }

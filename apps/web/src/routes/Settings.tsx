@@ -129,6 +129,9 @@ export function SettingsPage() {
             <RowItem label="Auto-play on share" hint="When text arrives from the share sheet, open the Reader already playing.">
               <Switch checked={s.autoplayShare} onChange={(v) => s.set("autoplayShare", v)} label="Auto-play on share" />
             </RowItem>
+            <RowItem label="Show links as they are read" hint="When a linked word or phrase has been read, its link appears for a few seconds. Every link is also listed under Links in the Reader.">
+              <Switch checked={s.linkToasts} onChange={(v) => s.set("linkToasts", v)} label="Show links as they are read" />
+            </RowItem>
             {hasOpenAI() && (
               <RowItem label="OpenAI model" hint="Steady follows a narration prompt for an even delivery and powers accent voices. Standard costs about a third less per passage but ignores the prompt; accent voices stay on Steady.">
                 <Segmented
