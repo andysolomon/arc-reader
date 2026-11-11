@@ -8,6 +8,9 @@ import { PreparationService } from "./vite.prepare";
 import { PreparationWorkers } from "./vite.preparation-workers";
 import { SpeechActivity } from "./vite.speech-activity";
 import type { PreparationRequest } from "./src/engine/preparation";
+import { mp3VoicedShare } from "./vite.voicing";
+
+vi.mock("./vite.voicing", () => ({ mp3VoicedShare: vi.fn(async () => undefined) }));
 
 const item = (text: string): PreparationRequest => ({ key: text, text, voice: "v", engine: "kittentts", protocol: "openai" });
 const deferred = () => {
@@ -397,6 +400,25 @@ describe("server-owned audio preparation", () => {
     expect(await service.get(job.id)).toMatchObject({ state: "running", done: 0 });
     await expect.poll(async () => (await service.get(job.id)).state, { timeout: 5000 }).toBe("done");
     expect(calls.map((call) => call.body.input)).toEqual(["first"]);
+  });
+
+  it("asks again for a garbled passage and stores the clean take", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(mp3VoicedShare).mockResolvedValueOnce(0.05).mockResolvedValueOnce(0.7);
+    const service = new PreparationService(env, directory);
+    const job = await service.submit({ requests: [item("garbled once")], start: 0 });
+    await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["garbled once", "garbled once"]);
+    expect((await new PreparationService(env, directory).audio(job.id, 0)).body.toString()).toBe("audio:garbled once");
+  });
+
+  it("keeps the best of three garbled takes rather than failing the passage", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(mp3VoicedShare).mockResolvedValueOnce(0.05).mockResolvedValueOnce(0.15).mockResolvedValueOnce(0.01);
+    const service = new PreparationService(env, directory);
+    const job = await service.submit({ requests: [item("12")], start: 0 });
+    await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(calls).toHaveLength(3);
   });
 
   it("reports upstream failures without claiming the document was prepared", async () => {

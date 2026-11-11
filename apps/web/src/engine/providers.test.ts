@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiRejected, ApiUnreachable } from "./types";
 import { apiSynthesize, openaiSpeechSynthesize, synthesize, cacheKey, localChunk, startsFromWords } from "./providers";
-import { joinClips } from "./audio";
+import { clipVoicedShare, joinClips } from "./audio";
 import { addUsage } from "../lib/usage";
 import { audioCache } from "../lib/db";
 import { preparedAudio } from "./preparation";
 
 vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
 vi.mock("./preparation", () => ({ preparedAudio: vi.fn(async () => null) }));
-vi.mock("./audio", async (importOriginal) => ({ ...await importOriginal<typeof import("./audio")>(), joinClips: vi.fn(async () => null) }));
+vi.mock("./audio", async (importOriginal) => ({ ...await importOriginal<typeof import("./audio")>(), joinClips: vi.fn(async () => null), clipVoicedShare: vi.fn(async () => undefined) }));
 vi.mock("../lib/usage", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/usage")>(), addUsage: vi.fn() }));
 
 // VITE_API_BASE=/api/vs comes from vitest.config.ts
@@ -374,5 +374,86 @@ describe("sentence clips cached before passages", () => {
     await synthesize(opts);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(joinClips).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("garbled speech", () => {
+  const fetchMock = vi.fn(async () => new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+  const voiced = vi.mocked(clipVoicedShare);
+  beforeEach(() => {
+    fetchMock.mockClear();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(audioCache.put).mockClear();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    voiced.mockReset();
+    voiced.mockResolvedValue(undefined);
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("asks again when a take is mostly unvoiced noise", async () => {
+    voiced.mockResolvedValueOnce(0.05).mockResolvedValueOnce(0.8);
+    const c = await apiSynthesize({ text: "When writing an evaluator.", voice: "v", engine: "omnivoice" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(c.voiced).toBe(0.8);
+  });
+
+  it("keeps the best take after the retries run out", async () => {
+    voiced.mockResolvedValueOnce(0.05).mockResolvedValueOnce(0.12).mockResolvedValueOnce(0.02);
+    const c = await apiSynthesize({ text: "12", voice: "v", engine: "omnivoice" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(c.voiced).toBe(0.12);
+  });
+
+  it("accepts a take that cannot be measured", async () => {
+    const c = await apiSynthesize({ text: "Hello.", voice: "v", engine: "kittentts" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(c.voiced).toBeUndefined();
+  });
+
+  it("does not check or retry OpenAI speech", async () => {
+    voiced.mockResolvedValue(0.01);
+    const c = await apiSynthesize({ text: "Hello.", voice: "nova", engine: "openai" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(voiced).not.toHaveBeenCalled();
+    expect(c.voiced).toBeUndefined();
+  });
+
+  it("regenerates a garbled clip cached before voicing was checked, and stores the clean take", async () => {
+    const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
+    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 3, loudness: -20, createdAt: 0 });
+    voiced.mockResolvedValueOnce(0.07).mockResolvedValueOnce(0.7);
+    const c = await synthesize(req);
+    expect(c.source).toBe("api");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(audioCache.put).toHaveBeenCalledWith(expect.objectContaining({ key: cacheKey(req), voiced: 0.7 }));
+  });
+
+  it("marks a clean legacy cached clip as checked without regenerating it", async () => {
+    const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
+    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 3, loudness: -20, createdAt: 0 });
+    voiced.mockResolvedValueOnce(0.6);
+    const c = await synthesize(req);
+    expect(c.source).toBe("cache");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(audioCache.put).toHaveBeenCalledWith(expect.objectContaining({ voiced: 0.6 }));
+  });
+
+  it("does not re-measure a cached clip already checked", async () => {
+    const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
+    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 3, loudness: -20, voiced: 0.6, createdAt: 0 });
+    await synthesize(req);
+    expect(voiced).not.toHaveBeenCalled();
+  });
+
+  it("replaces a garbled prepared clip with a fresh take", async () => {
+    const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
+    vi.mocked(preparedAudio).mockResolvedValueOnce(new Response("audio", { headers: { "content-type": "audio/mpeg", "x-duration": "3" } }));
+    voiced.mockResolvedValueOnce(0.07).mockResolvedValueOnce(0.7);
+    const c = await synthesize(req);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(c).toMatchObject({ source: "api", voiced: 0.7 });
   });
 });

@@ -103,6 +103,8 @@ export interface AudioRecord {
   lead?: number;
   tail?: number;
   loudness?: number;
+  /** See Chunk.voiced; absent on clips stored before it was measured. */
+  voiced?: number;
   createdAt: number;
 }
 
