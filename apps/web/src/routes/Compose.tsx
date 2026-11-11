@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type 
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { AlignLeft, ChevronDown, Clipboard, Link2, Upload } from "lucide-react";
-import { Button, Chip, TextArea, VoiceAvatar, VoiceSourceBadge, formatSpeed, cn } from "@readaloud/ui";
+import { Button, Chip, TextArea, VoiceAvatar, VoiceServiceName, formatSpeed, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { PLACEHOLDERS, SAMPLE, SAMPLE_TITLE } from "../data/sample";
 import { getVoice } from "../state/voices";
@@ -233,8 +233,7 @@ export function Compose() {
           </Button>
           <span className="flex-1" />
           <Chip leading={<VoiceAvatar voice={voice} size={24} />} onClick={() => navigate("/voices")} aria-label={`Voice: ${voice.name} · ${voiceSource(voice)}. Change voice`}>
-            {voice.name}
-            <VoiceSourceBadge source={voiceSource(voice)} />
+            <VoiceServiceName source={voiceSource(voice)}>{voice.name}</VoiceServiceName>
           </Chip>
           <Chip
             onClick={() => {
