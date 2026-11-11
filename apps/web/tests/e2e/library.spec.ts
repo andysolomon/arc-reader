@@ -270,3 +270,39 @@ test("opening from the Library does not start playback, and finished readings st
   await page.reload();
   await expect(item.getByLabel("Read once", { exact: true })).toBeVisible();
 });
+
+test("keeps documents in the order they were added and sorts by duration on request", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("heading", { name: "Library", exact: true }).waitFor();
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("readaloud");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    // Oldest was edited last (say, filed by Jev); that must not move it to the top.
+    const seeds = [["Oldest", 1, 900, 30], ["Middle", 2, 2, 5], ["Newest", 3, 3, 80]] as const;
+    await new Promise<void>((resolve, reject) => {
+      const tx = database.transaction("docs", "readwrite");
+      for (const [id, createdAt, updatedAt, sentences] of seeds) {
+        const text = Array.from({ length: sentences }, (_, i) => `${id} sentence number ${i} carries on for a while.`).join(" ");
+        tx.objectStore("docs").put({ id, title: `${id} document`, text, voice: null, source: "paste", domain: "Pasted text", chars: text.length, createdAt, updatedAt });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    database.close();
+  });
+  await page.reload();
+  const titles = page.locator('[data-screen="library"] li').getByRole("button", { name: / document$/ });
+  await expect(titles).toHaveText(["Newest document", "Middle document", "Oldest document"]);
+  await page.getByRole("button", { name: "Shortest first" }).click();
+  await expect(titles).toHaveText(["Middle document", "Oldest document", "Newest document"]);
+  await page.getByRole("button", { name: "Shortest first" }).click();
+  await expect(titles).toHaveText(["Newest document", "Oldest document", "Middle document"]);
+  // The choice survives a reload, and the calendar button restores the default.
+  await page.reload();
+  await expect(titles).toHaveText(["Newest document", "Oldest document", "Middle document"]);
+  await page.getByRole("button", { name: "Newest first" }).click();
+  await expect(titles).toHaveText(["Newest document", "Middle document", "Oldest document"]);
+});

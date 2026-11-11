@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star, UserRound } from "lucide-react";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, UserRound } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -37,6 +37,7 @@ export function LibraryPage() {
   const touch = useIsTouch();
   const { items, loaded, refresh, remove } = useLibrary();
   const libView = useSettings((s) => s.libView);
+  const libSort = useSettings((s) => s.libSort);
   const set = useSettings((s) => s.set);
   const defaultVoice = useSettings((s) => s.voice);
   const openaiModel = useSettings((s) => s.openaiModel);
@@ -93,6 +94,8 @@ export function LibraryPage() {
       return searchable(it).includes(needle);
     });
   }, [items, q, vf, cf, favoritesOnly, defaultVoice]);
+  // Items arrive newest first; equal durations keep that order.
+  const sorted = useMemo(() => libSort === "created" ? filtered : [...filtered].sort((a, b) => libSort === "shortest" ? a.duration - b.duration : b.duration - a.duration), [filtered, libSort]);
   const fileUncategorized = async () => {
     setFiling(true);
     try {
@@ -136,6 +139,15 @@ export function LibraryPage() {
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="m-0 flex-1 font-serif text-[26px] font-medium">Library</h1>
           <Input ref={searchRef} leading={<Search size={16} strokeWidth={1.5} aria-hidden />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search  /" aria-label="Search library" wrapperClassName="w-full sm:w-[240px]" />
+          <div className="flex overflow-hidden rounded-control border border-line bg-bg2" role="group" aria-label="Sort">
+            <IconButton label="Newest first" active={libSort === "created"} onClick={() => set("libSort", "created")} className="rounded-none">
+              <CalendarArrowDown size={16} strokeWidth={1.5} />
+            </IconButton>
+            {/* Duration flips between shortest and longest first on each press. */}
+            <IconButton label={libSort === "longest" ? "Longest first" : "Shortest first"} active={libSort !== "created"} onClick={() => set("libSort", libSort === "shortest" ? "longest" : "shortest")} className="rounded-none">
+              {libSort === "longest" ? <ArrowDownWideNarrow size={16} strokeWidth={1.5} /> : <ArrowDownNarrowWide size={16} strokeWidth={1.5} />}
+            </IconButton>
+          </div>
           {bp !== "md" && (
             <div className="flex overflow-hidden rounded-control border border-line bg-bg2" role="group" aria-label="View">
               <IconButton label="List" active={!grid} onClick={() => set("libView", "list")} className="rounded-none">
@@ -220,14 +232,14 @@ export function LibraryPage() {
         )}
         {filtered.length > 0 && !grid && (
           <ul className="-mx-5 m-0 flex list-none flex-col overflow-hidden border-y border-line bg-bg2 p-0 sm:mx-0 sm:rounded-card sm:border-x">
-            {filtered.map((it) => (
+            {sorted.map((it) => (
               <Row key={it.rec.id} it={it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
             ))}
           </ul>
         )}
         {filtered.length > 0 && grid && (
           <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 p-0">
-            {filtered.map((it) => (
+            {sorted.map((it) => (
               <CardItem key={it.rec.id} it={it} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
             ))}
           </ul>
@@ -291,7 +303,7 @@ function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate
           <span className="truncate">{it.rec.domain}</span>
         </Fact>
         <Fact className="tabular-nums">{fmtTime(it.duration)}</Fact>
-        {withDate && <Fact>{dateLabel(it.rec.updatedAt)}</Fact>}
+        {withDate && <Fact title="Added">{dateLabel(it.rec.createdAt)}</Fact>}
         {it.reads > 0 && <Fact><ReadBadge reads={it.reads} /></Fact>}
         {it.rec.category && (
           <Fact title={it.rec.category.by === "jev" ? "Filed by Jev" : "Category"}>
