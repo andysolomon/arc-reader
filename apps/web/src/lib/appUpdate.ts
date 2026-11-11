@@ -48,3 +48,20 @@ export function reloadOnNewBuild(store: ActivityStore) {
     reloadWhenIdle(store);
   });
 }
+
+/** The query a reachability probe adds to "/", so tests can tell it from a page load. */
+export const PROBE_QUERY = "reachable";
+
+/**
+ * True when the server answers within `timeoutMs`. A stale Tailscale tunnel
+ * (common right after the phone changes networks) can leave a request hanging
+ * for a minute, so give up early rather than wait.
+ */
+export async function serverReachable(timeoutMs = 5000, load: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const res = await load(`/?${PROBE_QUERY}=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

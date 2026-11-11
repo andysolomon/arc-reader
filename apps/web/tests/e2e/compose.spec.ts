@@ -124,3 +124,16 @@ test("pulling down from the top of a page reloads it", async ({ page }) => {
   await Promise.all([page.waitForEvent("load"), drag(page, x, y, 260)]);
   expect(await page.evaluate(() => (window as unknown as { beforeReload?: boolean }).beforeReload)).toBeUndefined();
 });
+
+test("pulling to reload while the server is out of reach keeps the page", async ({ page }) => {
+  await page.goto("/");
+  await composeText(page, "Keep me on screen.");
+  await page.route(/\/\?reachable=/, (route) => route.abort("internetdisconnected"));
+  await page.evaluate(() => ((window as unknown as { beforeReload: boolean }).beforeReload = true));
+  const heading = await page.getByRole("heading", { name: "What should I read to you?" }).boundingBox();
+  await drag(page, heading!.x + heading!.width / 2, heading!.y + heading!.height / 2, 260);
+  await expect(page.getByRole("status").filter({ hasText: "Can't reach ReadAloud right now" })).toBeVisible();
+  await expect(page.getByTestId("pull-to-refresh")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { beforeReload?: boolean }).beforeReload)).toBe(true);
+  await expect(page.getByLabel("Text to read")).toHaveValue("Keep me on screen.");
+});
