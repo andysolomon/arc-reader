@@ -15,6 +15,7 @@ import { hasPatois, preparePatois } from "../lib/patois";
 import { hasSummary } from "../lib/summary";
 import { prepareCodeSummaries } from "../lib/codeSummaries";
 import { readingBlocks } from "../lib/codeBlocks";
+import { catalogue } from "../lib/postTitle";
 
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
@@ -188,7 +189,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       }
       signal.throwIfAborted();
       const seg = segment(readingText, prepared.codeSummaries, prepared.visualDescriptions);
-      const doc: EngineDoc = { id: rec.id, title: rec.title, voice: voice.id, lang: voiceLang(voice), ...seg };
+      const doc: EngineDoc = { id: rec.id, title: catalogue(rec).title, voice: voice.id, lang: voiceLang(voice), ...seg };
       let index = 0, offset = 0;
       if (opts.resume !== false && !summary) {
         const pos = await positions.get(rec.id).catch(() => undefined);

@@ -15,6 +15,7 @@ import { usePremiumContext } from "../state/premium";
 import { estimatePremium, pendingNote, spentOn } from "../lib/premiumEstimate";
 import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
+import { catalogue } from "../lib/postTitle";
 
 const fieldClass = "h-9 w-full min-w-0 bg-bg px-3 text-[14px]";
 
@@ -63,7 +64,7 @@ export function DocumentDetails({ record, summaryAvailable, onShowSummary, onClo
       </div>
       <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-[96px_minmax(0,1fr)] sm:items-center">
         <Row label="Title">
-          {(id) => <Field id={id} value={record.title} onSave={(v) => { if (v.trim()) void update(record.id, { title: v.trim() }); }} />}
+          {(id) => <Field id={id} value={catalogue(record).title} onSave={(v) => { if (v.trim()) void update(record.id, { title: v.trim() }); }} />}
         </Row>
         <Row label="Link">
           {(id) => (
@@ -77,7 +78,7 @@ export function DocumentDetails({ record, summaryAvailable, onShowSummary, onClo
             </div>
           )}
         </Row>
-        <Row label="Author">{(id) => <Field id={id} value={meta.author ?? ""} onSave={(v) => saveMeta("author", v)} />}</Row>
+        <Row label="Author">{(id) => <Field id={id} value={catalogue(record).author ?? ""} onSave={(v) => saveMeta("author", v)} />}</Row>
         <Row label="Published">{(id) => <Field id={id} value={meta.published ?? ""} placeholder="YYYY-MM-DD" onSave={(v) => saveMeta("published", v)} />}</Row>
         <Row label="Site">{(id) => <Field id={id} value={meta.site ?? ""} placeholder={record.domain} onSave={(v) => saveMeta("site", v)} />}</Row>
         <Row label="Category" top>
