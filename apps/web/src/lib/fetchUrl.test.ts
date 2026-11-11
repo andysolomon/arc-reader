@@ -98,6 +98,54 @@ describe("htmlToText", () => {
   });
 });
 
+describe("keeping an article's structure", () => {
+  it("marks headings so the reading keeps its outline", () => {
+    const { text } = htmlToText(`<article><h2>Why databases exist</h2><p>They persist data.</p><h3>Disk <code>vs</code> RAM</h3><p>Disk is roomy.</p></article>`, "https://example.com/a");
+    expect(text).toBe("## Why databases exist\n\nThey persist data.\n\n### Disk vs RAM\n\nDisk is roomy.");
+    const { paragraphs, sentences } = segment(text);
+    expect(paragraphs.map((p) => p.heading)).toEqual([2, undefined, 3, undefined]);
+    // The marker is for the page, not the voice.
+    expect(sentences.map((s) => s.text)).toEqual(["Why databases exist", "They persist data.", "Disk vs RAM", "Disk is roomy."]);
+  });
+
+  it("keeps headings from the Markdown proxy and from pasted Markdown", () => {
+    expect(markdownToText("# Title\n\nSome **bold** text.")).toBe("# Title\n\nSome bold text.");
+    const { paragraphs, sentences } = segment("Intro line.\n## Setup ##\nInstall it first.\n#hashtag is not a heading.");
+    expect(paragraphs.map((p) => p.heading)).toEqual([undefined, 2, undefined]);
+    expect(sentences.map((s) => s.text)).toEqual(["Intro line.", "Setup", "Install it first.", "#hashtag is not a heading."]);
+  });
+
+  it("keeps callouts set beside the text and drops sidebars", () => {
+    const html = `<main><article><p>Before the note.</p>
+      <aside class="callout is-info"><p class="callout-title">Mental model</p><p>A database is a persistence layer.</p></aside>
+      <aside role="note"><p>Verified on PostgreSQL 16.</p></aside>
+      <aside class="starlight-aside starlight-aside--tip"><p>Use bigserial.</p></aside>
+      <aside class="related"><p>Related posts you might like.</p></aside>
+      <aside class="callout"><form><input></form>Subscribe to the newsletter.</aside>
+      <p>After the note.</p></article><aside class="author-info">About the author.</aside></main>`;
+    expect(htmlToText(html, "https://example.com/a").text.split("\n\n")).toEqual([
+      "Before the note.", "Mental model", "A database is a persistence layer.", "Verified on PostgreSQL 16.", "Use bigserial.", "After the note.",
+    ]);
+  });
+
+  it("reads a table row by row under its column headings", () => {
+    const two = `<table><thead><tr><th>Responsibility</th><th>What it means</th></tr></thead><tbody>
+      <tr><td><strong>Access</strong></td><td>Provide methods for CRUD.</td></tr><tr><td>Security</td><td>Protect data from <code>unauthorized</code> access</td></tr></tbody></table>`;
+    const three = `<table><tr><th>Type</th><th>Size</th><th>Use for</th></tr><tr><td>integer</td><td>4 bytes</td><td>Counts.</td></tr><tr><td>bigint</td><td></td><td>Large IDs</td></tr></table>`;
+    const bare = `<table><tr><td>GET</td><td>Read a resource</td></tr><tr><td></td><td></td></tr></table>`;
+    const { text } = htmlToText(`<article><p>Intro.</p>${two}${three}${bare}<p>Outro.</p></article>`, "https://example.com/a");
+    expect(text.split("\n\n")).toEqual([
+      "Intro.",
+      "Access: Provide methods for CRUD.",
+      "Security: Protect data from unauthorized access.",
+      "integer. Size: 4 bytes. Use for: Counts.",
+      "bigint. Use for: Large IDs.",
+      "GET. Read a resource.",
+      "Outro.",
+    ]);
+  });
+});
+
 describe("a fetched page's links in the reading", () => {
   it("places each link at the words it was attached to", () => {
     const html = `<html><body><article>

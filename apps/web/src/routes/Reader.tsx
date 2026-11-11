@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon, X } from "lucide-react";
+import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon, X } from "lucide-react";
 import { Button, IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
@@ -20,6 +20,9 @@ import { ArticleSummary } from "../components/ArticleSummary";
 import { DocumentDetails } from "../components/DocumentDetails";
 import { DocumentLinks } from "../components/DocumentLinks";
 import { docLinks, linksRead } from "../state/links";
+import { BookOffer, ChapterNav, MissingChapters, chapterLabel, useOpenChapter } from "../components/BookChapters";
+import { neighbours } from "../state/books";
+import { useLibrary } from "../state/library";
 
 export function Reader() {
   const { id } = useParams();
@@ -51,6 +54,8 @@ export function Reader() {
   const links = usePlayer(docLinks);
   const read = usePlayer(linksRead);
   const [linksOpen, setLinksOpen] = useState(false);
+  const library = useLibrary((s) => s.items);
+  const openChapter = useOpenChapter();
 
   // Pull the shared library first so deep links also work on a new device.
   useEffect(() => {
@@ -73,6 +78,9 @@ export function Reader() {
   }, [id, doc?.id, navigate]);
 
   useEffect(() => () => setFocus(false), [setFocus]);
+  // A deep link lands here before the Library has been shown; the chapters either side come from it.
+  const bookId = record?.book?.id;
+  useEffect(() => { if (bookId && !useLibrary.getState().loaded) void useLibrary.getState().refresh(); }, [bookId]);
 
   const ready = doc && doc.id === id;
   const title = ready ? doc.title : "";
@@ -88,6 +96,8 @@ export function Reader() {
   const detailsRecord = ready && record?.id === id ? record : null;
   const hasLinks = !!ready && links.length > 0;
   const showLinks = hasLinks && linksOpen && !focus;
+  const chapter = detailsRecord?.book && !readingSummary ? detailsRecord : null;
+  const { previous, next } = chapter ? neighbours(library, chapter) : {};
 
   const textControls = (
     <>
@@ -160,7 +170,13 @@ export function Reader() {
             <span aria-hidden className="listening-bars" data-active={playing && !loading}><i /><i /><i /><i /></span>
             <span className="shrink-0 font-medium" role="status">{loading ? "Preparing audio" : ended ? "Reading complete" : playing ? "Now listening" : started ? "Paused" : "Ready to listen"}</span>
             <span className="hidden min-w-0 truncate sm:block">{offline ? "Browser voice" : getVoice(doc.voice).name}</span>
-            <span className="ml-auto shrink-0 tabular-nums">{ended ? <Check size={15} aria-label="Complete" /> : `${remainingMinutes} min left`}</span>
+            {ended && next && (
+              <button type="button" onClick={() => openChapter(next)} className="ml-auto inline-flex min-w-0 items-center gap-1.5 border-0 bg-transparent p-0 font-medium text-accent hover:text-fg">
+                <span className="truncate">Next: {next.rec.title}</span>
+                <ArrowRight size={13} strokeWidth={1.5} className="shrink-0" aria-hidden />
+              </button>
+            )}
+            <span className={cn("shrink-0 tabular-nums", !(ended && next) && "ml-auto")}>{ended ? <Check size={15} aria-label="Complete" /> : `${remainingMinutes} min left`}</span>
             <span className="w-9 text-right font-mono tabular-nums">{progress}%</span>
           </div>
           <div className="reader-progress" aria-hidden><span style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div>
@@ -186,15 +202,22 @@ export function Reader() {
           </IconButton>
         )}
         <motion.div layoutId="doc-surface" className="mx-auto" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
+          {detailsRecord && !focus && !readingSummary && <BookOffer record={detailsRecord} />}
           {ready && !focus && (
             <div className="mb-10 border-b border-line pb-7">
               <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-medium uppercase tracking-[0.16em] text-fg2">
                 <span className="inline-flex items-center gap-2"><Headphones size={13} aria-hidden />{readingSummary ? "The summary" : "Your listening space"}</span>
+                {chapter && <span className="inline-flex items-center gap-2"><BookOpen size={13} aria-hidden />{chapterLabel(chapter)}</span>}
                 {doc.paragraphs.some((p) => p.code) && <span className="inline-flex items-center gap-2"><Code2 size={13} aria-hidden />Code examples</span>}
                 {doc.paragraphs.some((p) => p.visual) && <span className="inline-flex items-center gap-2"><ImageIcon size={13} aria-hidden />Images & diagrams</span>}
               </div>
               <p className="m-0 font-serif text-[clamp(1.75rem,3vw,2.6rem)] font-normal leading-[1.18] tracking-[-0.025em] text-fg">{title}</p>
-              {record?.domain && <p className="mb-0 mt-4 text-[12px] text-fg2">{record.domain}</p>}
+              {record?.domain && (
+                <p className="mb-0 mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg2">
+                  <span>{chapter ? `${chapter.book!.title} · ` : ""}{record.domain}</span>
+                  {chapter && <MissingChapters record={chapter} />}
+                </p>
+              )}
             </div>
           )}
           {ready && !readingSummary && doc.voice === JAMAICAN_PATOIS_VOICE_ID && <p className="mb-6 text-sm text-fg2">Jamaican Patois adaptation · Your original is saved. Choose another voice to read the original.</p>}
@@ -234,6 +257,7 @@ export function Reader() {
               <span className="block h-[1.2em] w-[60%] animate-pulse rounded-[6px] bg-bg3 motion-reduce:animate-none" />
             </div>
           )}
+          {chapter && !focus && <ChapterNav previous={previous} next={next} className="mt-14 border-t border-line pt-8" />}
         </motion.div>
       </div>
       {showLinks && bp !== "sm" && (

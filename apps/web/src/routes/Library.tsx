@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, UserRound } from "lucide-react";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, UserRound, BookOpen, ChevronRight, ListPlus } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -24,12 +24,19 @@ import { estimatePremium, type PremiumEstimate } from "../lib/premiumEstimate";
 import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
 import { catalogue } from "../lib/postTitle";
+import { finished, nextUnread, shelves, useBooks, type Shelf } from "../state/books";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
 
 /** Everything a researcher might remember a document by. */
-const searchable = ({ rec }: LibraryItem) => [rec.title, rec.domain, rec.category?.name, ...Object.values(rec.meta ?? {})].join("\n").toLowerCase();
+const searchable = ({ rec }: LibraryItem) => [rec.title, rec.domain, rec.book?.title, rec.category?.name, ...Object.values(rec.meta ?? {})].join("\n").toLowerCase();
+
+/** A row of the Library: a document, or a book standing in for its chapters. */
+type Entry = { kind: "doc"; it: LibraryItem } | { kind: "book"; shelf: Shelf; duration: number };
+
+/** Books left open stay open while you go and read a chapter. */
+const openBooks = new Set<string>();
 
 export function LibraryPage() {
   const navigate = useNavigate();
@@ -94,8 +101,30 @@ export function LibraryPage() {
       return searchable(it).includes(needle);
     });
   }, [items, q, vf, cf, favoritesOnly, defaultVoice]);
-  // Items arrive newest first; equal durations keep that order.
-  const sorted = useMemo(() => libSort === "created" ? filtered : [...filtered].sort((a, b) => libSort === "shortest" ? a.duration - b.duration : b.duration - a.duration), [filtered, libSort]);
+  const library = useMemo(() => shelves(items), [items]);
+  // Two or more chapters of a book share one row, placed where its newest chapter would be.
+  const entries = useMemo(() => {
+    const books = shelves(filtered);
+    const placed = new Set<string>();
+    const list: Entry[] = [];
+    for (const it of filtered) {
+      const shelf = it.rec.book ? books.get(it.rec.book.id) : undefined;
+      if (!shelf || shelf.items.length < 2) list.push({ kind: "doc", it });
+      else if (!placed.has(shelf.id)) {
+        placed.add(shelf.id);
+        list.push({ kind: "book", shelf, duration: shelf.items.reduce((sum, chapter) => sum + chapter.duration, 0) });
+      }
+    }
+    // Items arrive newest first; equal durations keep that order.
+    if (libSort === "created") return list;
+    const length = (entry: Entry) => entry.kind === "doc" ? entry.it.duration : entry.duration;
+    return list.sort((a, b) => libSort === "shortest" ? length(a) - length(b) : length(b) - length(a));
+  }, [filtered, libSort]);
+  const [, setOpened] = useState(0);
+  const toggleBook = (id: string) => {
+    if (!openBooks.delete(id)) openBooks.add(id);
+    setOpened((n) => n + 1);
+  };
   const fileUncategorized = async () => {
     setFiling(true);
     try {
@@ -131,6 +160,18 @@ export function LibraryPage() {
       await remove(it.rec.id);
       toast("Removed from library");
     },
+  };
+
+  const bookProps = (shelf: Shelf) => {
+    const whole = library.get(shelf.id) ?? shelf;
+    const source = whole.items.find((it) => it.rec.meta?.url);
+    return {
+      shelf, whole, grid, open: openBooks.has(shelf.id),
+      onToggle: () => toggleBook(shelf.id),
+      onContinue: () => act.resume(nextUnread(whole)),
+      onPrepare: () => setPrepareIds(whole.items.map((it) => it.rec.id)),
+      onComplete: source ? () => void useBooks.getState().complete(source.rec) : undefined,
+    };
   };
 
   return (
@@ -232,15 +273,27 @@ export function LibraryPage() {
         )}
         {filtered.length > 0 && !grid && (
           <ul className="-mx-5 m-0 flex list-none flex-col overflow-hidden border-y border-line bg-bg2 p-0 sm:mx-0 sm:rounded-card sm:border-x">
-            {sorted.map((it) => (
-              <Row key={it.rec.id} it={it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+            {entries.map((entry) => entry.kind === "doc" ? (
+              <Row key={entry.it.rec.id} it={entry.it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
+            ) : (
+              <BookGroup key={entry.shelf.id} {...bookProps(entry.shelf)}>
+                {entry.shelf.items.map((it) => (
+                  <Row key={it.rec.id} it={it} inBook touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+                ))}
+              </BookGroup>
             ))}
           </ul>
         )}
         {filtered.length > 0 && grid && (
           <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 p-0">
-            {sorted.map((it) => (
-              <CardItem key={it.rec.id} it={it} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+            {entries.map((entry) => entry.kind === "doc" ? (
+              <CardItem key={entry.it.rec.id} it={entry.it} defaultVoice={defaultVoice} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
+            ) : (
+              <BookGroup key={entry.shelf.id} {...bookProps(entry.shelf)}>
+                {entry.shelf.items.map((it) => (
+                  <CardItem key={it.rec.id} it={it} inBook defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+                ))}
+              </BookGroup>
             ))}
           </ul>
         )}
@@ -252,6 +305,8 @@ export function LibraryPage() {
 
 interface ItemProps {
   it: LibraryItem;
+  /** Listed under its book, which already names the book and orders the chapters */
+  inBook?: boolean;
   defaultVoice: string;
   selected: boolean;
   /** Premium read estimate, for favorites */
@@ -294,7 +349,7 @@ function Actions({ it, resume, revoice, prepare, favorite, del, size = 36, class
  * Each separator belongs to the fact after it and the one starting a line is clipped,
  * so a wrap never strands a dot. The reading voice is in the prepared-audio chips.
  */
-function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate?: boolean; estimate?: PremiumEstimate; className?: string }) {
+function Meta({ it, inBook, withDate, estimate, className }: { it: LibraryItem; inBook?: boolean; withDate?: boolean; estimate?: PremiumEstimate; className?: string }) {
   return (
     <div className={cn("min-w-0 overflow-hidden text-[12px] leading-[18px] text-fg2", className)}>
       <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
@@ -303,6 +358,12 @@ function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate
           <span className="truncate">{it.rec.domain}</span>
         </Fact>
         <Fact className="tabular-nums">{fmtTime(it.duration)}</Fact>
+        {it.rec.book && !inBook && (
+          <Fact title={`Chapter ${it.rec.book.chapter} of ${it.rec.book.title}`}>
+            <BookOpen size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
+            <span className="truncate">Ch. {it.rec.book.chapter} · {it.rec.book.title}</span>
+          </Fact>
+        )}
         {withDate && <Fact title="Added">{dateLabel(it.rec.createdAt)}</Fact>}
         {it.reads > 0 && <Fact><ReadBadge reads={it.reads} /></Fact>}
         {it.rec.category && (
@@ -314,6 +375,81 @@ function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate
         {it.rec.favoritedAt && <Fact><PremiumBadge it={it} estimate={estimate} /></Fact>}
       </div>
     </div>
+  );
+}
+
+/** A chapter listed under its book leads with its number. */
+const rowTitle = ({ it, inBook }: Pick<ItemProps, "it" | "inBook">) => `${inBook && it.rec.book ? `${it.rec.book.chapter}. ` : ""}${catalogue(it.rec).title}`;
+
+/**
+ * A book's chapters behind one row: how far through the book you are, with the chapters
+ * a click away. Continue picks up at the first chapter you haven't finished.
+ */
+function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, onComplete, children }: {
+  /** The chapters that pass the current filters */
+  shelf: Shelf;
+  /** Every chapter in the library */
+  whole: Shelf;
+  grid: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onContinue: () => void;
+  onPrepare: () => void;
+  /** Fetch the chapters the library is missing */
+  onComplete?: () => void;
+  children: ReactNode;
+}) {
+  const adding = useBooks((s) => s.adding[shelf.id]);
+  const total = whole.items.reduce((sum, it) => sum + it.duration, 0);
+  const heard = whole.items.reduce((sum, it) => sum + it.duration * (finished(it) ? 1 : it.progress), 0);
+  const read = whole.items.filter(finished).length;
+  const have = new Set(whole.items.map((it) => it.rec.book!.chapter)).size;
+  const missing = whole.chapters - have;
+  const started = heard > 0;
+  const panel = `book-${shelf.id.replace(/\W/g, "-")}`;
+  return (
+    <li data-book={shelf.title} className={cn(grid ? "col-span-full overflow-hidden rounded-card border border-line bg-bg2" : "border-b border-line last:border-b-0")}>
+      <div className={cn("grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 bg-bg2 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:gap-x-3.5", grid ? "p-[18px]" : "px-5 py-4")}>
+        <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} chapters of ${shelf.title}`} onClick={onToggle} className="col-start-1 row-start-1 -m-1 grid size-6 place-items-center rounded-control border-0 bg-transparent text-fg2 hover:bg-bg3 hover:text-fg">
+          <ChevronRight size={16} strokeWidth={1.5} className={cn("transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
+        </button>
+        <div className="col-start-2 row-start-1 min-w-0">
+          <button type="button" onClick={onToggle} tabIndex={-1} aria-hidden className="line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
+            {shelf.title}
+          </button>
+        </div>
+        <div className="col-start-2 row-start-2 min-w-0 overflow-hidden text-[12px] leading-[18px] text-fg2">
+          <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
+            <Fact><BookOpen size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />Book</Fact>
+            <Fact className="tabular-nums">{missing > 0 ? `${have} of ${whole.chapters} chapters` : `${have} chapters`}</Fact>
+            <Fact className="tabular-nums">{fmtTime(total)}</Fact>
+            {read > 0 && <Fact className="tabular-nums text-accent">{read === have ? "All read" : `${read} read`}</Fact>}
+            {shelf.items.length < whole.items.length && <Fact className="tabular-nums">{shelf.items.length} shown</Fact>}
+          </div>
+        </div>
+        {(adding || (missing > 0 && onComplete)) && (
+          <div className="col-span-2 col-start-2 row-start-3 mt-1.5 text-[13px] text-fg2 sm:col-span-1">
+            {adding
+              ? <span role="status" className="tabular-nums">Adding chapters · {adding.done} of {adding.total}</span>
+              : <Button variant="ghost" className="-ml-3" leading={<ListPlus size={15} strokeWidth={1.5} />} onClick={onComplete}>{missing === 1 ? "Add the missing chapter" : `Add the ${missing} missing chapters`}</Button>}
+          </div>
+        )}
+        <ReadProgress value={total ? heard / total : 0} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3" />
+        <div className="col-span-2 col-start-2 row-start-4 -ml-2 flex gap-0.5 sm:col-span-1 sm:col-start-3 sm:row-span-3 sm:row-start-1 sm:-my-0.5 sm:ml-0">
+          <IconButton label={`${started ? "Continue" : "Start"} ${shelf.title}`} onClick={onContinue}>
+            <Play size={20} strokeWidth={1.5} />
+          </IconButton>
+          <IconButton label={`Prepare audio for ${shelf.title}`} onClick={onPrepare}>
+            <Zap size={20} strokeWidth={1.5} />
+          </IconButton>
+        </div>
+      </div>
+      {open && (
+        <ul id={panel} aria-label={`Chapters of ${shelf.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 bg-bg p-[18px]" : "flex flex-col pl-4 sm:pl-8")}>
+          {children}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -469,11 +605,11 @@ function Row(props: ItemProps & { touch: boolean }) {
         <DocumentSelection {...props} className="col-start-1 row-start-1 mt-1" />
         <div className="col-start-2 row-start-1 min-w-0">
           <button type="button" onClick={() => props.open(it)} className="line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
-            {catalogue(it.rec).title}
+            {rowTitle(props)}
           </button>
           <Author it={it} className="mt-1" />
         </div>
-        <Meta it={it} estimate={props.estimate} withDate className="col-start-2 row-start-2" />
+        <Meta it={it} inBook={props.inBook} estimate={props.estimate} withDate className="col-start-2 row-start-2" />
         <div className="col-span-2 col-start-2 row-start-3 mt-1.5 sm:col-span-1 sm:col-start-2"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
         <ReadProgress value={it.progress} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3 sm:row-start-1" />
         {!touch && <Actions {...props} className="col-span-2 col-start-2 row-start-4 -ml-2 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 sm:col-span-1 sm:col-start-3 sm:row-span-3 sm:row-start-1 sm:-my-0.5 sm:ml-0 sm:opacity-0" />}
@@ -492,12 +628,12 @@ function CardItem(props: ItemProps) {
       </div>
       <div className="flex-1">
         <button type="button" onClick={() => props.open(it)} className="line-clamp-3 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
-          {catalogue(it.rec).title}
+          {rowTitle(props)}
         </button>
         <Author it={it} className="mt-1.5" />
       </div>
       <div className="flex flex-col gap-2.5 border-t border-line pt-3">
-        <Meta it={it} estimate={props.estimate} />
+        <Meta it={it} inBook={props.inBook} estimate={props.estimate} />
         <PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} />
       </div>
     </li>
