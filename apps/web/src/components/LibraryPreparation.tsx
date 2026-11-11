@@ -1,8 +1,11 @@
 import { useMemo, useState } from "react";
 import { Button, Dialog, Input, ProgressRing, VoiceServiceName, cn } from "@readaloud/ui";
 import { Search, Zap } from "lucide-react";
-import { voiceSource } from "../data/voices";
-import { baseFor, isPaidEngine } from "../engine/providers";
+import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
+import { FISH_ENGINE, FISH_MODEL, baseFor, isPaidEngine, openaiModelFor } from "../engine/providers";
+import { readingCost } from "../lib/premiumEstimate";
+import { formatUsd } from "../lib/usage";
+import { usePremiumContext } from "../state/premium";
 import { LOCAL_ENGINE } from "../engine/types";
 import { isPreparing, PREPARATION_CONCURRENCY, usePreparation } from "../state/preparation";
 import { getVoice, useVoices } from "../state/voices";
@@ -68,6 +71,21 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
   const chosen = available.filter((v) => selected.includes(v.id));
   const shown = available.filter((v) => `${v.name} ${voiceSource(v)}`.toLowerCase().includes(query.trim().toLowerCase()));
   const paid = chosen.some((v) => isPaidEngine(v.engine));
+  const premium = usePremiumContext();
+  const openaiModel = useSettings((s) => s.openaiModel);
+  // What the paid voices would bill for audio not saved yet, before any is made.
+  const paidCosts = useMemo(() => chosen.filter((v) => isPaidEngine(v.engine)).flatMap((voice) => {
+    const provider = voice.engine === FISH_ENGINE ? "fish" as const : "openai" as const;
+    const model = provider === "fish" ? FISH_MODEL : openaiModelFor({ voice: voice.id, openaiModel });
+    let total = 0;
+    for (const it of documents) {
+      const rec = voice.id === JAMAICAN_PATOIS_VOICE_ID && it.rec.patois ? { ...it.rec, text: it.rec.patois.text } : it.rec;
+      const cost = readingCost(rec, provider, model, premium.calibration, { explainable: premium.explainable });
+      if (cost === null) return [];
+      total += cost * (1 - (it.prepared.find((p) => p.voiceId === voice.id)?.fraction ?? 0));
+    }
+    return [{ name: voice.name, cost: total }];
+  }), [chosen, documents, openaiModel, premium]);
   const start = () => {
     const count = usePreparation.getState().enqueue(documents.map((it) => it.rec), chosen);
     toast(count ? `Queued ${count} ${count === 1 ? "reading" : "readings"} to prepare` : "These readings are already queued");
@@ -90,6 +108,13 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
           {shown.length === 0 && <p className="p-2 text-sm text-fg2">No voices match.</p>}
         </div>
         {paid && <p className="m-0 text-[12px] text-fg2">ChatGPT and Fish voices bill uncached audio for the full document in each selected voice. Jamaican Patois also bills a text rewrite.</p>}
+        {paidCosts.length > 0 && (
+          <p className="m-0 text-[13px] text-fg" aria-label="Estimated cost">
+            Estimated cost ≈{formatUsd(paidCosts.reduce((n, c) => n + c.cost, 0))}
+            {paidCosts.length > 1 && <span className="text-fg2"> · {paidCosts.map((c) => `${c.name} ≈${formatUsd(c.cost)}`).join(" · ")}</span>}
+            <span className="text-fg2"> · audio already saved is not billed again</span>
+          </p>
+        )}
       </> : <p className="m-0 text-sm text-fg2">Connect a speech provider to prepare audio. The browser voice speaks live and cannot be saved.</p>}
       <div className="flex flex-wrap justify-end gap-2">
         <Button onClick={onClose}>Cancel</Button>

@@ -200,7 +200,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     for (const passage of passages) {
       signal.throwIfAborted();
       const req = {
-        text: passage.text, voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel,
+        text: passage.text, voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel, docId: job.docId,
         profile: job.voice.kind === "profile", wordTimings: job.wordTimings,
         words: passage.parts.flat(), parts: passage.parts,
         sentences: sentences.slice(passage.start, passage.end).map((s) => s.text),

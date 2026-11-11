@@ -71,6 +71,16 @@ describe("shared server library", () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
   });
 
+  it("syncs favorites and Jev's premium fit, and rejects malformed ones", async () => {
+    const premium = { fit: "strong" as const, confidence: 0.8, model: "jev-latest", source: "abc:6", at: 3 };
+    const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), favoritedAt: 2, premium } }] });
+    expect(result.docs[0]).toMatchObject({ favoritedAt: 2, premium });
+    for (const bad of [{ favoritedAt: "yes" }, { premium: { ...premium, fit: "great" } }, { premium: { ...premium, confidence: 2 } }]) {
+      const record = { ...doc("b"), ...bad } as unknown as DocRecord;
+      expect(() => service.sync({ changes: [{ kind: "doc", record }] })).toThrow("Invalid library change");
+    }
+  });
+
   it("stores document links and rejects malformed ones", async () => {
     const links = [{ url: "https://example.com/a", text: "A" }];
     const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), links } }] });

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DocRecord } from "./db";
 import { CATEGORIES, categoryNames, categoryRequest, citation, suggestCategory } from "./category";
 import { summarySource } from "./summary";
+import { assessPremiumFit, hasPremiumFit, premiumFitRequest } from "./premiumFit";
 
 const rec = (patch: Partial<DocRecord> = {}): DocRecord =>
   ({ id: "d", title: "Evals for agents", text: "How to measure agents.", source: "url", domain: "example.com", voice: null, chars: 22, createdAt: 0, updatedAt: 0, ...patch });
@@ -44,6 +45,19 @@ describe("categories", () => {
     await expect(suggestCategory(rec(), [])).rejects.toThrow("didn't return a category");
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: { message: "Add your TypeSafe API key in Settings → Library." } }, { status: 503 })));
     await expect(suggestCategory(rec(), [])).rejects.toThrow("TypeSafe API key");
+  });
+
+  it("asks Jev whether a document deserves a paid voice and ties the verdict to its text", async () => {
+    const request = premiumFitRequest(rec());
+    expect(request.state.text).toBe("How to measure agents.");
+    expect(Object.keys(request.questions.premium.criteria)).toEqual(["strong", "good", "weak"]);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ model: "jev-1.14.0", answers: { premium: { choice: "strong", confidence: 0.7 } } })));
+    const premium = await assessPremiumFit(rec());
+    expect(premium).toMatchObject({ fit: "strong", confidence: 0.7, model: "jev-1.14.0", source: summarySource("How to measure agents.") });
+    expect(hasPremiumFit(rec({ premium }))).toBe(true);
+    expect(hasPremiumFit(rec({ premium, text: "Edited." }))).toBe(false);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ answers: { premium: { choice: "AI evaluation" } } })));
+    await expect(assessPremiumFit(rec())).rejects.toThrow("didn't return an assessment");
   });
 
   it("formats a citation from whatever details are known", () => {
