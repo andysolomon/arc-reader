@@ -5,6 +5,8 @@
 # The first run creates the cluster; Docker Compose is stopped first because the cluster
 # takes over its ports (4179, 3900). Compose volumes are kept and mounted into the cluster.
 # Settings come from the root .env, mapped the same way compose.yaml maps them.
+# With READALOUD_PUBLIC_URL set, Terraform has Tailscale serve the app there, and the
+# deploy fails unless that address ends up serving the new build.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
@@ -93,4 +95,24 @@ for image in json.load(sys.stdin)["images"]:
 done
 docker image ls --format '{{.Repository}}:{{.Tag}}' readaloud-web | grep -vxE "readaloud-web:(latest|$tag)" | xargs -r docker rmi >/dev/null 2>&1 || true
 
-step "Deployed $web_image: http://127.0.0.1:4179 (https://omarchy.tail1b9428.ts.net:8449)"
+# The iOS app loads the web app from READALOUD_PUBLIC_URL, so that address must now
+# serve the build that was just deployed. Traefik can take a moment to see the new pod.
+entry_script() { curl -fsS --max-time 10 "$1" 2>/dev/null | grep -o 'assets/index-[^"]*\.js' | head -1 || true; }
+public=${READALOUD_PUBLIC_URL:+${READALOUD_PUBLIC_URL%/}}
+if [ -n "$public" ]; then
+  step "Checking $public"
+  deployed="" served=""
+  for _ in $(seq 30); do
+    deployed=$(entry_script http://127.0.0.1:4179/)
+    served=$(entry_script "$public/")
+    [ -n "$deployed" ] && [ "$deployed" = "$served" ] && break
+    sleep 2
+  done
+  if [ -z "$deployed" ] || [ "$deployed" != "$served" ]; then
+    echo "$public does not serve the deployed build (local: ${deployed:-nothing}, public: ${served:-nothing})." >&2
+    echo "Check: tailscale serve status; deploy/kind/terraform.sh app plan" >&2
+    exit 1
+  fi
+fi
+
+step "Deployed $web_image: http://127.0.0.1:4179${public:+ ($public)}"

@@ -16,3 +16,35 @@ export function reloadWhenIdle(store: ActivityStore, reload = () => location.rel
     reload();
   });
 }
+
+/** The entry script a built index.html loads, e.g. "/assets/index-3fa9c1.js". Every build names it differently. */
+export const entryScript = (html: string) => html.match(/<script type="module"[^>]*\ssrc="([^"]+)"/)?.[1] ?? null;
+
+/** True when the server's page loads a different build from `running`. Unknown (offline, an error page) counts as no. */
+export async function serverHasNewBuild(running: string | null, loadPage: () => Promise<string>): Promise<boolean> {
+  if (!running) return false;
+  try {
+    const served = entryScript(await loadPage());
+    return served !== null && served !== running;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * For the iOS shell that loads the app from the server. It has no service
+ * worker to announce a deploy, and iOS keeps the page alive for days, so each
+ * time the app comes to the foreground, ask the server which build it serves
+ * and reload (once nothing is playing) when it has moved on.
+ */
+export function reloadOnNewBuild(store: ActivityStore) {
+  const running = entryScript(document.head.innerHTML);
+  let reloading = false;
+  document.addEventListener("visibilitychange", async () => {
+    if (document.hidden || reloading) return;
+    const page = async () => (await fetch("/", { cache: "no-store" })).text();
+    if (reloading || !(await serverHasNewBuild(running, page))) return;
+    reloading = true;
+    reloadWhenIdle(store);
+  });
+}

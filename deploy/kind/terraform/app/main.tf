@@ -1,10 +1,12 @@
 # Everything that runs in the kind cluster from ../cluster: the readaloud module, with
 # VoiceStudio in the cluster. deploy.sh applies it on every deploy, after loading the
-# images into the node, and sets the variables from the root .env (env.tf).
+# images into the node, and sets the variables from the root .env (env.tf). public-url.tf
+# has Tailscale serve the app at its tailnet address.
 terraform {
   required_version = ">= 1.6"
   required_providers {
     kubernetes = { source = "hashicorp/kubernetes", version = "~> 3.5" }
+    external   = { source = "hashicorp/external", version = "~> 2.3" }
   }
   # terraform.sh passes the path, outside the repository, so every checkout shares one state.
   backend "local" {}

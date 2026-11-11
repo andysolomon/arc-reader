@@ -36,7 +36,10 @@ Copy `apps/web/.env.example` to `.env` to point the app at a TTS backend.
 
 ## iOS app
 
-Capacitor 8 wraps the Vite production build in a native app. The Xcode project is `apps/web/ios/App/App.xcodeproj` and uses Swift Package Manager (no CocoaPods). `webDir` is `apps/web/dist`. After `ios:sync`, the web view loads those bundled files on the device. It does not open a remote URL.
+Capacitor 8 wraps the web app in a native app. The Xcode project is `apps/web/ios/App/App.xcodeproj` and uses Swift Package Manager (no CocoaPods). `webDir` is `apps/web/dist`. What the web view loads is decided when `ios:sync` builds the app:
+
+- **From a ReadAloud server**, when `READALOUD_PUBLIC_URL` is set (in the environment, `apps/web/.env.local`, or the root `.env`). The app opens that address, so it is the deployed web app with the device plugins added: every deploy reaches the phone without rebuilding, and the speech proxy, the shared library and background preparation all work as they do in a browser. See [Load the app from the server](#load-the-app-from-the-server).
+- **From its own files**, when the setting is empty. The web view loads the bundle copied into the app and never opens a remote URL. It works with no network, and each web change needs a new `ios:sync` and Xcode build.
 
 | | |
 |---|---|
@@ -49,9 +52,25 @@ ReadAloud is the name on the web app's home screen and window title. The bundle 
 
 The shell pads `env(safe-area-inset-*)`: the status bar overlays the web view, the top of every screen clears the notch, and the home indicator is owned by the tab bar (or by the player, when focus mode hides the tab bar). The status-bar text follows the theme.
 
+### Load the app from the server
+
+Set the address once, where the deploy also reads it, then build and install the app:
+
+```sh
+# root .env (or apps/web/.env.local)
+READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:8449
+```
+
+`ios:sync` writes it into the app as Capacitor's `server.url`, so changing the address means building and installing the app again. The local kind deployment owns the other end: with the same setting, Terraform has Tailscale serve the cluster's web port at that address, and `deploy/kind/deploy.sh` fails unless the address ends up serving the build it just deployed (see [the kind cluster](#or-run-it-in-a-local-kind-cluster)).
+
+- The phone must be on the tailnet to open the app. When the server cannot be reached, the app shows a page stored inside it that names the server and offers **Try again**; it also retries when the app returns to the foreground. If the server answers with an error instead (for a few seconds while a deploy restarts the web pod), that error is what the web view shows; close and reopen the app.
+- iOS keeps the page alive for days, so the app asks the server which build it serves each time it comes to the foreground, and reloads once nothing is playing when a deploy has happened.
+- The app's storage belongs to the address it loads from. Documents saved in an app that ran its own files stay with that build; the server's shared library takes their place.
+- The speech server setting described below is hidden. Speech goes through the server's `/api/vs` proxy, and the Local voice still reads with the iPhone's own voices.
+
 ### Voices on device
 
-The browser build sends speech to the Vite proxy at `/api/vs`, which holds the VoiceStudio key. That proxy is not in the iOS bundle, so a relative `/api/vs` is ignored and passages are read with **AVSpeechSynthesizer** (the iPhone's installed voices) through a small plugin in the app target. WKWebView's Web Speech API is not used for this: it often stays silent, and it stops when the app leaves the foreground. Word highlighting follows the synthesizer's word ranges, with the same estimated clock the browser voice uses between ranges.
+This section describes the app running its own files. The browser build sends speech to the Vite proxy at `/api/vs`, which holds the VoiceStudio key. That proxy is not in the iOS bundle, so a relative `/api/vs` is ignored and passages are read with **AVSpeechSynthesizer** (the iPhone's installed voices) through a small plugin in the app target. WKWebView's Web Speech API is not used for this: it often stays silent, and it stops when the app leaves the foreground. Word highlighting follows the synthesizer's word ranges, with the same estimated clock the browser voice uses between ranges.
 
 To use VoiceStudio or a ReadAloud server instead, open Settings → Speech server and paste an absolute URL:
 
@@ -62,7 +81,7 @@ Those requests use Capacitor's native HTTP stack, so the server does not need to
 
 The audio session is playback, and the app declares the audio background mode, so the current passage keeps playing when the screen locks. There is no lock-screen play/pause button. iOS can suspend the app in a gap between sentences, and the orange background-audio indicator is the cost of letting a reader continue while locked. The browser PWA is unchanged.
 
-The service worker is registered only in the browser. The native shell unregisters any worker so a cached PWA shell cannot intercept the bundled files.
+The service worker is registered only in the browser. The native shell unregisters any worker, so a cached PWA shell cannot intercept the bundled files or hide a deploy from an app that loads from the server.
 
 Paste into the composer works as a normal text paste. **Read clipboard** uses the system pasteboard, which asks for permission on iOS 16 and later.
 
@@ -76,7 +95,7 @@ pnpm ios:sync     # production web build, then copy dist/ into the Xcode project
 pnpm ios:open     # opens apps/web/ios/App/App.xcodeproj
 ```
 
-`pnpm --filter @readaloud/web ios:sync` and `ios:open` do the same thing. Run `ios:sync` before the first Xcode build, and again after any web change. The copied web bundle (`apps/web/ios/App/App/public`) and the generated `capacitor.config.json` are gitignored.
+`pnpm --filter @readaloud/web ios:sync` and `ios:open` do the same thing. Run `ios:sync` before the first Xcode build. An app that runs its own files needs it again after any web change; an app that loads from the server needs it only when the address, a plugin or the native project changes. Check `server.url` in the generated `capacitor.config.json` to see which one a sync built. The copied web bundle (`apps/web/ios/App/App/public`) and the generated `capacitor.config.json` are gitignored.
 
 The first Xcode build downloads the Capacitor Swift package from `https://github.com/ionic-team/capacitor-swift-pm.git`. That needs a network connection once. Swift packages resolve through the pnpm symlinks in `apps/web/node_modules`.
 
@@ -177,6 +196,8 @@ curl -X POST -H "Authorization: Bearer $VOICESTUDIO_API_KEY" -H "Content-Type: a
 `deploy/kind` runs the same two services in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged. Both host ports lead to a [Traefik](https://doc.traefik.io/traefik/) ingress controller (namespace `traefik`), and an Ingress routes each port to its app's ClusterIP Service.
 
 Terraform owns all of it in two stages: `deploy/kind/terraform/cluster` creates the kind cluster (ports, mounts, node image) and `deploy/kind/terraform/app` calls the shared `deploy/terraform/modules/readaloud` module for everything in it (Traefik, the Deployments, Services, Ingresses, config and secrets from `.env`). The state lives in `~/.local/state/readaloud/terraform`, outside the repository, so every checkout deploys the same cluster; the app state holds the `.env` secrets.
+
+Set `READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:<port>` in `.env` and Terraform also has Tailscale serve the web port at that address (`deploy/kind/terraform/app/public-url.tf`): it runs `tailscale serve` when the address is first set or changes, runs it again if Tailscale has stopped serving it, and refuses an address that names another machine. Each deploy then ends by checking that the address serves the new build, and fails if it does not. The iOS app can be built to load from the same address ([iOS app](#load-the-app-from-the-server)), which makes this deploy the way the phone is updated. Without the setting, Terraform leaves Tailscale alone.
 
 ```sh
 deploy/kind/deploy.sh   # build the web image, load it into kind, roll out

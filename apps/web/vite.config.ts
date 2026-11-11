@@ -10,6 +10,8 @@ import { sharedLibrary } from "./vite.library";
 import { SpeechActivity } from "./vite.speech-activity";
 import { llm } from "./vite.llm";
 import { jev } from "./vite.jev";
+import { shellFallback } from "./vite.shell";
+import { serverUrl, UNREACHABLE_PAGE } from "./capacitor.config";
 
 export default defineConfig(({ mode }) => {
   // Server-side only (no VITE_ prefix): never reaches the bundle.
@@ -27,6 +29,7 @@ export default defineConfig(({ mode }) => {
     sharedLibrary(env),
     llm(env),
     jev(env),
+    shellFallback(serverUrl, UNREACHABLE_PAGE),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icons/*.svg", "icons/*.png", "splash.svg"],

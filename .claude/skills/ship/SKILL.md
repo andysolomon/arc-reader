@@ -80,4 +80,5 @@ Never start Docker Compose alongside the cluster: both want ports 4179 and 3900,
 - Give the merge commit and the test results.
 - Confirm the deploy is live at https://omarchy.tail1b9428.ts.net:8449.
 - Tell the user to reload open app tabs. The service worker keeps serving the old bundle until a full page load.
+- The iPhone app loads from the same address when it was built with `READALOUD_PUBLIC_URL`, so it needs no rebuild: it picks up the deploy the next time it comes to the foreground. Only a change under `apps/web/ios`, to `capacitor.config.ts`, or to a Capacitor plugin needs a new iOS build; say so when the change touches those.
 - Do not push to `origin` unless asked. Mention how many commits local `main` is ahead of `origin/main`.
