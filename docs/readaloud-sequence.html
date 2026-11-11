@@ -205,10 +205,10 @@ const P = {
   U: { n: "Listener", kind: "actor", d: "The person using the app: pastes, shares, presses play, picks voices." },
   UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:48", SRC + "routes/Compose.tsx:98", SRC + "routes/ReadNew.tsx:13"] },
   PL: { n: "usePlayer", s: "state/player.ts", d: "The Zustand player store. It owns the single PlaybackEngine, resolves the voice, rewrites Patois, restores the saved place, and turns engine callbacks into UI state (speechError, offline, toasts).", code: [SRC + "state/player.ts:79", SRC + "state/player.ts:121"] },
-  EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:96"] },
+  EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:98"] },
   PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:407", SRC + "engine/preparation.ts:166"] },
   DB: { n: "IndexedDB", s: "docs · positions · audio", kind: "db", d: "The readaloud database (idb). docs: Library documents. positions: one per document. audio: clips keyed by engine + voice + text, up to 2000, oldest evicted first.", code: [SRC + "lib/db.ts:126", SRC + "lib/db.ts:216"] },
-  SV: { n: "App server", s: "Vite plugins · /api/*", d: "Node-side plugins of the Vite dev and preview servers (the Docker image runs preview on :4179). /api/fetch fetches pages; /api/vs, /api/oa and /api/fish proxy speech APIs with keys from server-side env, so keys never reach the bundle; /api/preparations is the background job service.", code: ["apps/web/vite.config.ts:14", "apps/web/vite.fetch.ts:20", "apps/web/vite.proxy.ts:42", "apps/web/vite.prepare.ts:424"] },
+  SV: { n: "App server", s: "Vite plugins · /api/*", d: "Node-side plugins of the Vite dev and preview servers (the Docker image runs preview on :4179). /api/fetch fetches pages; /api/vs, /api/oa and /api/fish proxy speech APIs with keys from server-side env, so keys never reach the bundle; /api/preparations is the background job service.", code: ["apps/web/vite.config.ts:16", "apps/web/vite.fetch.ts:20", "apps/web/vite.proxy.ts:42", "apps/web/vite.prepare.ts:424"] },
   DK: { n: "Disk", s: "preparations · library.json", kind: "db", d: "Server-side files on volumes. Preparations: PREPARATION_DATA_DIR (default .readaloud-preparations) — job JSON written atomically, clips as <key>.bin + <key>.json (shared-<key> for clips uploaded by devices), restored after a restart and deleted after 7 days. Library: LIBRARY_DATA_DIR/library.json.", code: ["apps/web/vite.prepare.ts:49", "apps/web/vite.library.ts:167", "compose.yaml:57", "compose.yaml:59"] },
   VS: { n: "VoiceStudio", s: "Mac mini · container overflow", d: "Self-hosted TTS with an OpenAI-compatible API (/v1/audio/speech, /v1/audio/transcriptions). One worker that queues at most one more request; a third concurrent request gets 429. KittenTTS is fast on CPU; OmniVoice clones and designed voices are ~10× slower than real time on CPU, so the Mac (GPU) is preferred.", code: ["compose.yaml:41"] },
   VM: { n: "VoiceStudio · primary", s: "Mac mini (GPU)", d: "VOICESTUDIO_URL. Takes every new reading whenever it is free.", code: ["compose.yaml:44"] },
@@ -250,7 +250,7 @@ const SEQS = {
     rows: [
       { f: "U", to: "UI", t: "async", n: "paste text · press Listen", say: "The listener pastes an article on Compose and presses Listen.",
         d: "Compose (the home route) takes pasted text, the clipboard, an uploaded .txt/.md file, the sample, or a web address. A share from another app opens /read/new?title=&text=&url= instead — the installed PWA is a Web Share Target.",
-        code: [SRC + "routes/Compose.tsx:98", SRC + "routes/Compose.tsx:67", SRC + "routes/ReadNew.tsx:13", "apps/web/vite.config.ts:49"] },
+        code: [SRC + "routes/Compose.tsx:98", SRC + "routes/Compose.tsx:67", SRC + "routes/ReadNew.tsx:13", "apps/web/vite.config.ts:52"] },
       { op: "opt", id: "url", g: "a web address was entered or shared", rows: [
         { f: "UI", to: "SV", t: "call", n: "GET /api/fetch?url=…", say: "Most sites send no CORS headers, so the app server fetches the page for the browser.",
           d: "fetchReadable tries a direct fetch first, then the app server’s /api/fetch, then an optional reader proxy. Links to X posts are fetched from the FxTwitter API and turned into HTML on the server.",
@@ -291,7 +291,7 @@ const SEQS = {
       { f: "PL", to: "DB", t: "call", n: "positions.get(docId)", say: "The saved place is looked up.",
         d: "Restored only for the same variant (original or Patois), when less than 99.5 % was read, and when the narration hasn’t changed since it was saved. The record is then re-read; if its text changed meanwhile, opening stops.", code: [SRC + "state/player.ts:194"] },
       { f: "DB", to: "PL", t: "ret", n: "sentence index · offset" },
-      { f: "PL", to: "EN", t: "call", n: "load(doc, index, offset)", say: "The engine loads the document at that place.", code: [SRC + "state/player.ts:212", SRC + "engine/engine.ts:161"] },
+      { f: "PL", to: "EN", t: "call", n: "load(doc, index, offset)", say: "The engine loads the document at that place.", code: [SRC + "state/player.ts:212", SRC + "engine/engine.ts:164"] },
       { f: "EN", to: "EN", t: "self", n: "planPassages()", say: "Passages are planned: runs of sentences up to ~60 words, never across a paragraph.",
         d: "About 20 s each; long paragraphs are cut into equal shares. Passages are a pure function of the text, so cache keys stay stable across sessions.", code: [SRC + "lib/segment.ts:105"] },
       { f: "EN", to: "PL", t: "ret", n: "loaded" },
@@ -304,12 +304,12 @@ const SEQS = {
         d: "With autoplay, open() has already called engine.play() without awaiting it; the first passage is generated while the Reader appears.", code: [SRC + "lib/openDoc.ts:11"] },
       { op: "alt", id: "start", ops: [
         { g: "autoplay: Listen, Fetch, or a share with auto-play on", rows: [
-          { f: "PL", to: "EN", t: "async", n: "engine.play() (not awaited)", say: "Listen was a user gesture, so the browser lets audio start.", code: [SRC + "state/player.ts:219", SRC + "engine/engine.ts:254"] },
+          { f: "PL", to: "EN", t: "async", n: "engine.play() (not awaited)", say: "Listen was a user gesture, so the browser lets audio start.", code: [SRC + "state/player.ts:219", SRC + "engine/engine.ts:258"] },
         ] },
         { g: "else", rows: [
           { f: "U", to: "UI", t: "async", n: "press play, or tap a sentence", say: "The Reader opened paused. The listener presses play, or taps a sentence to read from there." },
           { f: "UI", to: "PL", t: "async", n: "play() · seek(i)" },
-          { f: "PL", to: "EN", t: "async", n: "engine.play() · seek(i)", code: [SRC + "engine/engine.ts:254", SRC + "engine/engine.ts:325"] },
+          { f: "PL", to: "EN", t: "async", n: "engine.play() · seek(i)", code: [SRC + "engine/engine.ts:258", SRC + "engine/engine.ts:331"] },
         ] },
       ] },
       { op: "opt", id: "visuals", g: "images without descriptions — in the background, while playback starts", rows: [
@@ -323,16 +323,16 @@ const SEQS = {
         { f: "PL", to: "DB", t: "call", n: "docs.put (with descriptions)" },
         { f: "DB", to: "PL", t: "ret", n: "saved" },
         { f: "PL", to: "EN", t: "call", n: "replaceText(doc)", say: "The descriptions are swapped into the reading without moving the listener.",
-          d: "Only if sentence and passage boundaries are unchanged. Cached chunks of changed passages are dropped (not the one playing) and prefetch refills. A running preparation restarts.", code: [SRC + "engine/engine.ts:189", SRC + "state/player.ts:139"] },
+          d: "Only if sentence and passage boundaries are unchanged. Cached chunks of changed passages are dropped (not the one playing) and prefetch refills. A running preparation restarts.", code: [SRC + "engine/engine.ts:193", SRC + "state/player.ts:139"] },
         { f: "EN", to: "PL", t: "ret", n: "replaced" },
       ] },
       { op: "loop", id: "passages", g: "each passage, until the last sentence", rows: [
         { f: "EN", to: "EN", t: "self", n: "ensureChunk(passage)", say: "The passage holding the current sentence needs audio. Until it arrives the player shows loading and the clock is frozen.",
           d: "At most one request per passage: the promise is kept in a map, and a failed one is dropped so the next try starts fresh. Waiting is not counted as listening time.",
-          code: [SRC + "engine/engine.ts:435", SRC + "engine/engine.ts:254"] },
+          code: [SRC + "engine/engine.ts:443", SRC + "engine/engine.ts:258"] },
         { f: "EN", to: "PR", t: "call", n: "synthesize(request)", say: "The engine asks the provider chain for the passage.",
           d: "The request carries the passage text, voice, engine, the words of each sentence, the word-timing setting, forceLocal (browser voice or offline) and fallbackLocal: false.",
-          code: [SRC + "engine/engine.ts:455", SRC + "engine/providers.ts:407"] },
+          code: [SRC + "engine/engine.ts:463", SRC + "engine/providers.ts:407"] },
         { ref: "synth", id: "refSynth", over: ["PR", "EX"], n: "Synthesize passage", say: "Cheapest source first: the device cache, older sentence clips, a server-prepared clip, then live generation." },
         { op: "alt", id: "result", ops: [
           { g: "audio ready", rows: [
@@ -343,37 +343,37 @@ const SEQS = {
                   { g: "the passage has a clip", rows: [
                     { f: "EN", to: "EN", t: "self", n: "startAudio(): reuse the one <audio>", say: "The clip plays at the listener’s speed, in the same audio element as before.",
                       d: "One reused <audio> element keeps the browser’s permission to play across passages. Clips are always generated at 1×, so speed (0.5–3×) is just playbackRate. Leading silence is skipped and volume brought down to the quietest passage so far (never below −6 dB). If the element fails, playback pauses: “Audio playback failed. Tap play to retry.”",
-                      code: [SRC + "engine/engine.ts:556", SRC + "engine/engine.ts:586", SRC + "engine/engine.ts:482"] },
+                      code: [SRC + "engine/engine.ts:564", SRC + "engine/engine.ts:594", SRC + "engine/engine.ts:490"] },
                   ] },
                   { g: "no clip: browser voice, or the iPhone’s voice", rows: [
                     { f: "EN", to: "EN", t: "self", n: "startLocal(): Web Speech · AVSpeechSynthesizer", say: "No audio file: the browser speaks it — in the iOS app, the iPhone’s own voice, whose boundary events move the word highlight.",
-                      code: [SRC + "engine/engine.ts:597", SRC + "engine/engine.ts:606", "apps/web/ios/App/App/AppDelegate.swift:58"] },
+                      code: [SRC + "engine/engine.ts:605", SRC + "engine/engine.ts:614", "apps/web/ios/App/App/AppDelegate.swift:58"] },
                   ] },
                 ] },
                 { op: "loop", id: "frames", g: "every animation frame (timeupdate in a background tab)", rows: [
                   { f: "EN", to: "EN", t: "self", n: "clock = audio.currentTime", say: "Each frame, the clip’s playhead is the clock. Crossing a sentence start moves the highlight without touching the audio.",
-                    d: "The word comes from word timings when present, otherwise a proportional estimate.", code: [SRC + "engine/engine.ts:760"] },
-                  { f: "EN", to: "PL", t: "async", n: "emit(snapshot)", say: "The engine publishes sentence, word and progress to the store…", code: [SRC + "engine/engine.ts:837", SRC + "state/player.ts:122"] },
+                    d: "The word comes from word timings when present, otherwise a proportional estimate.", code: [SRC + "engine/engine.ts:768"] },
+                  { f: "EN", to: "PL", t: "async", n: "emit(snapshot)", say: "The engine publishes sentence, word and progress to the store…", code: [SRC + "engine/engine.ts:845", SRC + "state/player.ts:122"] },
                   { f: "PL", to: "UI", t: "async", n: "re-render the highlight", say: "…and the Reader re-renders the highlight." },
-                  { f: "EN", to: "DB", t: "async", n: "positions.put + outbox, 800 ms after a change", say: "The place is saved 800 ms after it changes, and at once on pause — through the outbox, so other devices pick it up.", code: [SRC + "engine/engine.ts:823", SRC + "state/player.ts:99"] },
+                  { f: "EN", to: "DB", t: "async", n: "positions.put + outbox, 800 ms after a change", say: "The place is saved 800 ms after it changes, and at once on pause — through the outbox, so other devices pick it up.", code: [SRC + "engine/engine.ts:831", SRC + "state/player.ts:99"] },
                 ] },
               ] },
               { g: "prefetch about a minute ahead", rows: [
                 { op: "loop", id: "ahead", g: "until ~60 s of listening is ready · ≤ 2 requests in flight", rows: [
                   { f: "EN", to: "PR", t: "call", n: "ensureChunk(next) → synthesize()", say: "Meanwhile, upcoming passages are generated in the background.",
                     d: "Keeps ~60 s of listening (at the current speed) generated past the current passage: at least 2 passages, at most 2 requests in flight. OpenAI and Fish voices prefetch only the next passage — they keep up, and bill for audio a pause or skip never plays. A failure stops the refill; the next passage start tries again.",
-                    code: [SRC + "engine/engine.ts:522"] },
+                    code: [SRC + "engine/engine.ts:530"] },
                   { f: "PR", to: "EN", t: "ret", n: "Chunk, held for later" },
                 ] },
               ] },
             ] },
             { f: "EN", to: "EN", t: "self", n: "clip ended → advance()", say: "When the clip ends — or its trailing silence passes 0.25 s — reading moves on to the next passage.",
-              code: [SRC + "engine/engine.ts:583", SRC + "engine/engine.ts:798", SRC + "engine/engine.ts:804"] },
+              code: [SRC + "engine/engine.ts:591", SRC + "engine/engine.ts:806", SRC + "engine/engine.ts:812"] },
           ] },
           { g: "voice unavailable", rows: [
             { f: "PR", to: "EN", t: "ret", n: "throws ApiUnreachable · ApiBusy · ApiRejected", say: "The request failed. Playback stops instead of switching voices without asking.",
               d: "Server unreachable, still busy after retries, or the request was rejected.", code: [SRC + "engine/types.ts:47"] },
-            { f: "EN", to: "PL", t: "async", n: "onUnavailable(message)", code: [SRC + "engine/engine.ts:276", SRC + "state/player.ts:108"] },
+            { f: "EN", to: "PL", t: "async", n: "onUnavailable(message)", code: [SRC + "engine/engine.ts:281", SRC + "state/player.ts:108"] },
             { f: "PL", to: "UI", t: "async", n: "speechError → Retry · Use browser voice", say: "The Reader explains and offers Retry or Use browser voice." },
             { f: "U", to: "UI", t: "async", n: "Use browser voice", say: "The listener picks the browser voice." },
             { f: "UI", to: "PL", t: "async", n: "useBrowserVoice()", say: "The player is marked offline…", code: [SRC + "state/player.ts:251"] },
@@ -405,11 +405,11 @@ const SEQS = {
     ],
     rows: [
       { f: "EN", to: "PR", t: "call", n: "synthesize(opts)", say: "Playback, prefetch or preparation needs one passage.",
-        d: "opts: passage text, voice, engine, the words of each sentence, word timings on/off, profile voice, forceLocal, and fallbackLocal (false for playback).", code: [SRC + "engine/providers.ts:407", SRC + "engine/engine.ts:455"] },
+        d: "opts: passage text, voice, engine, the words of each sentence, word timings on/off, profile voice, forceLocal, and fallbackLocal (false for playback).", code: [SRC + "engine/providers.ts:407", SRC + "engine/engine.ts:463"] },
       { op: "alt", id: "src", ops: [
         { g: "forceLocal: browser voice, local engine, or offline", rows: [
           { f: "PR", to: "PR", t: "self", n: "localChunk(text)", say: "No audio file: the browser’s own speech engine — or the iPhone’s, in the iOS app — will read it.", code: [SRC + "engine/providers.ts:297"] },
-          { f: "PR", to: "EN", t: "ret", n: "Chunk {source: local, no audio}", say: "The engine speaks sentence by sentence with SpeechSynthesis; boundary events move the word highlight.", code: [SRC + "engine/engine.ts:597"] },
+          { f: "PR", to: "EN", t: "ret", n: "Chunk {source: local, no audio}", say: "The engine speaks sentence by sentence with SpeechSynthesis; boundary events move the word highlight.", code: [SRC + "engine/engine.ts:605"] },
         ] },
         { g: "else", rows: [
           { f: "PR", to: "DB", t: "call", n: "fromCache(engine + voice + text)", say: "Look up this exact passage on the device.",
@@ -442,8 +442,8 @@ const SEQS = {
                   { f: "SV", to: "PR", t: "ret", n: "stored clip" },
                   { f: "PR", to: "PR", t: "self", n: "check for noise (garbled → ask for a fresh take)", code: [SRC + "engine/providers.ts:429"] },
                 ] },
-                { g: "no speech server configured (iOS app)", rows: [
-                  { f: "PR", to: "PR", t: "self", n: "baseFor() is empty → ApiUnreachable", say: "The iOS app has no built-in proxy and no speech server was set, so there is nowhere to send the request.", code: [SRC + "engine/providers.ts:96", SRC + "lib/speechServer.ts:44"] },
+                { g: "no speech server configured (bundled iOS app)", rows: [
+                  { f: "PR", to: "PR", t: "self", n: "baseFor() is empty → ApiUnreachable", say: "An iOS app running its bundled files has no built-in proxy, and no speech server was set, so there is nowhere to send the request. (Loaded from the deployed server, the iOS app uses the proxy like the browser.)", code: [SRC + "engine/providers.ts:96", SRC + "lib/speechServer.ts:47"] },
                 ] },
                 { g: "else: generate it now", rows: [
                   { op: "loop", id: "busy", g: "429 busy → wait Retry-After or 400 ms × 2ⁿ, at most 5 s, up to 4 retries", rows: [
@@ -483,7 +483,7 @@ const SEQS = {
                 { f: "PR", to: "EN", t: "ret", n: "throws ApiUnreachable · ApiBusy · ApiRejected", say: "The error goes back to the caller — playback passes fallbackLocal: false, so there’s no silent voice switch.",
                   d: "Only when no server is configured for the engine does synthesize() quietly read with the browser voice instead.", code: [SRC + "engine/providers.ts:451", SRC + "engine/types.ts:47"] },
                   ] },
-                  { g: "no server configured (e.g. the iOS app)", rows: [
+                  { g: "no server configured (e.g. the bundled iOS app)", rows: [
                     { f: "PR", to: "PR", t: "self", n: "onOffline() · localChunk()", say: "Falling back is allowed: the player goes offline silently and this passage — and the next ones — use the device voice.", code: [SRC + "engine/providers.ts:451"] },
                     { f: "PR", to: "EN", t: "ret", n: "Chunk {source: local}" },
                   ] },
@@ -516,7 +516,7 @@ const SEQS = {
       { id: "words", n: "With word timings", pick: { src: 1, have: 2, clip: 2, words: 0 } },
       { id: "down", n: "Server unreachable", pick: { src: 1, have: 2, clip: 2, upstream: 2, fail: 0 } },
       { id: "garbled", n: "OmniVoice returns breathy noise", pick: { src: 1, have: 2, clip: 2, retake: 0 } },
-      { id: "ios", n: "iPhone app with no speech server", pick: { src: 1, have: 2, clip: 1, fail: 0, why: 1 } },
+      { id: "ios", n: "Bundled iPhone app, no speech server", pick: { src: 1, have: 2, clip: 1, fail: 0, why: 1 } },
       { id: "local", n: "Browser voice", pick: { src: 0 } },
     ],
   },
@@ -532,7 +532,7 @@ const SEQS = {
     ],
     rows: [
       { f: "PL", to: "EN", t: "call", n: "prerender() → engine.prepare()", say: "Preparation starts: from the player menu, from Compose for a slow VoiceStudio voice, or from the Library’s queue.",
-        d: "The Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:256", SRC + "engine/engine.ts:377", SRC + "state/preparation.ts:141"] },
+        d: "The Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:256", SRC + "engine/engine.ts:385", SRC + "state/preparation.ts:141"] },
       { f: "EN", to: "PR", t: "call", n: "prepareInBackground(passages, start)", say: "Every passage is listed, starting from the listener’s current one.", code: [SRC + "engine/providers.ts:372"] },
       { op: "loop", id: "check", g: "each passage", rows: [
         { f: "PR", to: "DB", t: "call", n: "fromCache()", say: "Passages already on this device are marked cached, so the server skips them." },
@@ -609,7 +609,7 @@ const SEQS = {
         { g: "job done", rows: [
           { f: "PR", to: "EN", t: "ret", n: "resolved", say: "The job is done." },
           { op: "loop", id: "hydrate", g: "each passage, from the current one, wrapping round", rows: [
-            { f: "EN", to: "PR", t: "call", n: "ensureChunk(i) → synthesize()", say: "Now every passage is pulled into the device cache.", code: [SRC + "engine/engine.ts:377"] },
+            { f: "EN", to: "PR", t: "call", n: "ensureChunk(i) → synthesize()", say: "Now every passage is pulled into the device cache.", code: [SRC + "engine/engine.ts:385"] },
             { f: "PR", to: "SV", t: "call", n: "GET /api/preparations/:id/audio/:i", say: "synthesize() finds the passage in the saved job and fetches the stored clip.", code: [SRC + "engine/preparation.ts:223"] },
             { f: "SV", to: "DK", t: "call", n: "read <key>.bin" },
             { f: "DK", to: "SV", t: "ret", n: "clip" },
@@ -706,7 +706,7 @@ const SEQS = {
       "Listening to a summary loads it as the reading in place of the article: read as written, never saving a position. “Read the full article” switches back.",
     ],
     rows: [
-      { f: "U", to: "UI", t: "async", n: "tap Summarize", say: "In the Reader, the listener taps the sparkles button.", code: [SRC + "routes/Reader.tsx:124"] },
+      { f: "U", to: "UI", t: "async", n: "tap Summarize", say: "In the Reader, the listener taps the sparkles button.", code: [SRC + "routes/Reader.tsx:136"] },
       { f: "UI", to: "SM", t: "call", n: "request(record)", code: [SRC + "state/summaries.ts:20"] },
       { op: "alt", id: "fresh", ops: [
         { g: "a summary of this exact text is saved", rows: [
@@ -741,7 +741,7 @@ const SEQS = {
       { f: "PL", to: "EN", t: "async", n: "engine.play()" },
       { ref: "play", id: "refPlay", over: ["EN", "EX"], n: "Play passage by passage (Open and play)", say: "It plays like any reading." },
       { op: "opt", id: "full", g: "the listener taps “Read the full article”", rows: [
-        { f: "U", to: "UI", t: "async", n: "Read the full article", code: [SRC + "routes/Reader.tsx:191"] },
+        { f: "U", to: "UI", t: "async", n: "Read the full article", code: [SRC + "routes/Reader.tsx:205"] },
         { f: "UI", to: "PL", t: "call", n: "open(record)", say: "The article itself is opened again, at its saved place." },
       ] },
       ] },
