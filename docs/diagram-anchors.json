@@ -123,7 +123,7 @@
  "apps/web/src/routes/ReadNew.tsx:17": "useEffect(() => {",
  "apps/web/src/routes/ReadNew.tsx:20": "const autoplay = useSettings.getState().autoplayShare;",
  "apps/web/src/state/categories.ts:28": "async suggest(rec, { quiet = false } = {}) {",
- "apps/web/src/state/library.ts:66": "async create({ text, title, source, domain, voice = null, meta, links = [] }) {",
+ "apps/web/src/state/library.ts:69": "async create({ text, title, source, domain, voice = null, meta, links = [] }) {",
  "apps/web/src/state/player.ts:76": "clearOffline: () => void;",
  "apps/web/src/state/player.ts:79": "export const engine = new PlaybackEngine({",
  "apps/web/src/state/player.ts:85": "openaiModel: () => useSettings.getState().openaiModel,",

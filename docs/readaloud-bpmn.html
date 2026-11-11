@@ -225,7 +225,7 @@ const DIAGRAMS = {
       { id: "G_merge", t: "gw", g: "x", n: "", x: 610, y: 235, lane: "L_ui", d: "Merge: text from Compose, a share, or a fetched page continues the same way." },
       { id: "T_create", t: "task", n: "Save the document to the Library", x: 735, y: 235, lane: "L_ui",
         d: "useLibrary.create stores a DocRecord — title, text, source, domain, page metadata, hyperlinks and an optional per-document voice — and the same transaction queues it in the outbox for library sync. If a TypeSafe key is set, Jev quietly suggests a shelf in the background. openDocument then hands it to the player and navigates to /read/:id.",
-        code: [SRC + "state/library.ts:66", SRC + "lib/db.ts:173", SRC + "state/categories.ts:28", SRC + "lib/openDoc.ts:7"] },
+        code: [SRC + "state/library.ts:69", SRC + "lib/db.ts:173", SRC + "state/categories.ts:28", SRC + "lib/openDoc.ts:7"] },
       { id: "G_patois", t: "gw", g: "x", n: "Patois voice?", lp: "l", x: 860, y: 400, lane: "L_player",
         d: "player.open resolves the effective voice (the document’s own, else the default — the Librarian once the server’s voices load). The Jamaican Patois voice reads a rewritten text. A summary opened from the Reader is read as written and skips this, the code step and resume.", code: [SRC + "state/player.ts:158", SRC + "state/player.ts:172"] },
       { id: "T_patois", t: "task", k: "service", n: "Rewrite into Jamaican Patois", x: 980, y: 400, lane: "L_player",
