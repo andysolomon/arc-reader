@@ -203,7 +203,7 @@ const SRC = "apps/web/src/";
 /* Participants, left to right. */
 const P = {
   U: { n: "Listener", kind: "actor", d: "The person using the app: pastes, shares, presses play, picks voices." },
-  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:48", SRC + "routes/Compose.tsx:98", SRC + "routes/ReadNew.tsx:13"] },
+  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:48", SRC + "routes/Compose.tsx:104", SRC + "routes/ReadNew.tsx:13"] },
   PL: { n: "usePlayer", s: "state/player.ts", d: "The Zustand player store. It owns the single PlaybackEngine, resolves the voice, rewrites Patois, restores the saved place, and turns engine callbacks into UI state (speechError, offline, toasts).", code: [SRC + "state/player.ts:79", SRC + "state/player.ts:121"] },
   EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:98"] },
   PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:407", SRC + "engine/preparation.ts:166"] },
@@ -250,7 +250,7 @@ const SEQS = {
     rows: [
       { f: "U", to: "UI", t: "async", n: "paste text · press Listen", say: "The listener pastes an article on Compose and presses Listen.",
         d: "Compose (the home route) takes pasted text, the clipboard, an uploaded .txt/.md file, the sample, or a web address. A share from another app opens /read/new?title=&text=&url= instead — the installed PWA is a Web Share Target.",
-        code: [SRC + "routes/Compose.tsx:98", SRC + "routes/Compose.tsx:67", SRC + "routes/ReadNew.tsx:13", "apps/web/vite.config.ts:52"] },
+        code: [SRC + "routes/Compose.tsx:104", SRC + "routes/Compose.tsx:73", SRC + "routes/ReadNew.tsx:13", "apps/web/vite.config.ts:52"] },
       { op: "opt", id: "url", g: "a web address was entered or shared", rows: [
         { f: "UI", to: "SV", t: "call", n: "GET /api/fetch?url=…", say: "Most sites send no CORS headers, so the app server fetches the page for the browser.",
           d: "fetchReadable tries a direct fetch first, then the app server’s /api/fetch, then an optional reader proxy. Links to X posts are fetched from the FxTwitter API and turned into HTML on the server.",

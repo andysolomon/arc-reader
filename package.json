@@ -12,7 +12,9 @@
     "storybook": "pnpm --filter @readaloud/ui storybook",
     "contrast": "pnpm --filter @readaloud/tokens contrast",
     "ios:sync": "pnpm --filter @readaloud/web ios:sync",
-    "ios:open": "pnpm --filter @readaloud/web ios:open"
+    "ios:open": "pnpm --filter @readaloud/web ios:open",
+    "diagrams:refs": "node apps/web/scripts/diagrams.mjs refs",
+    "diagrams:stale": "node apps/web/scripts/diagrams.mjs stale"
   },
   "devDependencies": {
     "typescript": "~5.9.3"

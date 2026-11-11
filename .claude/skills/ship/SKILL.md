@@ -32,6 +32,19 @@ git merge-base --is-ancestor main HEAD || git merge --no-ff --no-edit main
 
 Resolve conflicts if any, keeping both sides' intent.
 
+## 2a. Keep the diagram pages in step
+
+`docs/readaloud-bpmn.html` and `docs/readaloud-sequence.html` cite code by line. From the worktree root:
+
+```sh
+pnpm diagrams:refs    # re-points references at the lines in docs/diagram-anchors.json
+pnpm diagrams:stale   # diagrams whose cited code this branch changed
+```
+
+- If `diagrams:refs` changed the pages, commit them with the anchors file ("Re-point diagram code references").
+- If it reports a broken reference, the cited line is gone or changed beyond its name. Point that reference at the code it describes on the page, then run it again. A conflict in these three files resolves the same way: take either side and rerun `diagrams:refs`.
+- `diagrams:stale` is a reminder, not a gate. When it lists diagrams and the change alters the behaviour they describe, update what they say before merging. Mention any you left as they were in the report.
+
 ## 3. Verify before merging
 
 From `apps/web`:
@@ -40,6 +53,8 @@ From `apps/web`:
 pnpm typecheck
 pnpm vitest run
 ```
+
+`pnpm vitest run` includes `scripts/diagrams.test.ts`, which fails on a broken diagram: an unresolvable code reference, a flow or walkthrough step pointing at nothing, or a BPMN export with warnings.
 
 Then run the Playwright specs that cover the changed area, for example `pnpm playwright test tests/e2e/library.spec.ts`.
 
