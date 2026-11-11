@@ -411,6 +411,14 @@ Categories come from [Jev](https://docs.typesafe.ai), TypeSafe's classification 
 
 Paste a TypeSafe API key in **Settings → Library** (from console.typesafe.ai/keys). Like the OpenCode key, the server checks it, saves it as `typesafe.json` (mode 600) in `LIBRARY_DATA_DIR`, and only ever shows the browser its last four characters; a saved key takes precedence over `TYPESAFE_API_KEY`. `/api/jev` forwards `POST /v1/systemone` only, to `TYPESAFE_URL` (default `https://api.typesafe.ai`). Without a key, documents can still be categorized by hand.
 
+## Links
+
+Every document keeps the hyperlinks it came with: the links inside a fetched article, and any Markdown or bare URLs in pasted or uploaded text. When playback finishes the word or phrase a link was attached to, the link appears as a toast for five seconds; selecting it opens the address in a new tab. Skipping past a link with a seek does not show it. Turn the toasts off with **Settings → Playback → Show links as they are read**.
+
+The Reader's **Links** button (chain icon, in the header) opens the links table beside the text, or in a sheet on a phone. **Read** fills in as links are read, newest first; **All** lists every link in reading order and ticks the ones behind your place. Both follow the saved position, so they are the same after a reload or on another device.
+
+Links are stored with their text, not a position, so each is matched to the place its words are read (`src/lib/linkPlaces.ts`). When the same words also appear unlinked just before the link, the toast can come at that earlier mention. A link whose words are not in the reading, such as most links while the Jamaican Patois adaptation is read, is listed under **All** and counted as read once the reading ends. Summaries have no links table.
+
 ## Themes
 
 `packages/tokens/src/themes.css` defines `--bg … --danger` on `html[data-theme]` for dark, light, tokyo-night, catppuccin, gruvbox, nord, everforest and kanagawa. The Tailwind preset maps `bg-bg2`, `text-fg2`, `border-line`, `bg-hl`, `rounded-card`, `shadow-overlay` and so on to those variables. First visit follows `prefers-color-scheme`; the rail and reader header cycle themes.

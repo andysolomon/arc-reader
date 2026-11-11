@@ -107,6 +107,26 @@ describe("prepared audio playback", () => {
     e.unload();
   });
 
+  it("counts a jump when the place is set, not when playback reads on to the next passage", async () => {
+    const { e } = make();
+    e.load(doc(3));
+    await e.prepare();
+    await e.play();
+    const { seeks } = e.getSnapshot();
+    elements.at(-1)!.finish();
+    await tick();
+    expect(e.getSnapshot()).toMatchObject({ index: 1, seeks });
+    e.next();
+    await tick();
+    expect(e.getSnapshot()).toMatchObject({ index: 2, seeks: seeks + 1 });
+    elements.at(-1)!.finish();
+    expect(e.getSnapshot()).toMatchObject({ ended: true, seeks: seeks + 1 });
+    // Playing again after the end starts over.
+    await e.play();
+    expect(e.getSnapshot()).toMatchObject({ index: 0, seeks: seeks + 2 });
+    e.unload();
+  });
+
   it("trims trailing silence and keeps sentence position in the background without animation frames", async () => {
     synth.mockResolvedValueOnce(chunk({ source: "cache", duration: 10, starts: [0, 2], tail: 6 }))
       .mockResolvedValue(chunk({ source: "cache", duration: 10 }));

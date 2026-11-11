@@ -11,10 +11,12 @@ import { useShortcuts } from "../hooks/useShortcuts";
 import { useBreakpoint } from "../hooks/useMedia";
 import { usePlayer } from "../state/player";
 import { useToast } from "../state/toast";
+import { useLinkToasts } from "../state/links";
 import { ClipboardImportContext, useClipboardImportController } from "../hooks/useClipboardImport";
 
 export function Shell() {
   useShortcuts();
+  useLinkToasts();
   const bp = useBreakpoint();
   const focus = usePlayer((s) => s.focus);
   const hasDoc = usePlayer((s) => !!s.doc);
@@ -22,6 +24,7 @@ export function Shell() {
   const preparationError = usePlayer((s) => s.preparationError);
   const speechError = usePlayer((s) => s.speechError);
   const toastMsg = useToast((s) => s.message);
+  const toastHref = useToast((s) => s.href);
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const isAuth = pathname === "/auth";
@@ -58,7 +61,7 @@ export function Shell() {
       </div>
       {showTabs && <TabBar />}
       <ShortcutsDialog />
-      <Toast message={toastMsg} offset={playerOffset} />
+      <Toast message={toastMsg} href={toastHref} offset={playerOffset} />
     </div>
     </ClipboardImportContext.Provider>
   );
