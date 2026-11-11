@@ -43,7 +43,7 @@ describe("X posts", () => {
       },
     };
     const page = htmlToText(xPostHtml(tweet), POST);
-    expect(page.title).toBe('Vaishnavi on X: "Agent Harness: The Code That Can Make or Break Your Agent"');
+    expect(page.title).toBe("Agent Harness: The Code That Can Make or Break Your Agent");
     expect(page.meta).toMatchObject({ author: "Vaishnavi", published: "2026-11-09", site: "X" });
     expect(page.text).toContain("First, What Is a Harness?");
     expect(page.text).toContain("Tools: shell access & file edits.");
@@ -61,7 +61,8 @@ describe("X posts", () => {
       quote: { text: "The quoted words", author: { name: "Biz" } },
     });
     const page = htmlToText(html, "https://x.com/jack/status/20");
-    expect(page.title).toBe('@jack on X: "First line <b>not markup</b>"');
+    expect(page.title).toBe("First line <b>not markup</b>");
+    expect(page.meta.author).toBe("@jack");
     expect(page.text).toContain("First line <b>not markup</b>");
     expect(page.text).toContain("Second paragraph");
     expect(page.text).toContain("A cat");

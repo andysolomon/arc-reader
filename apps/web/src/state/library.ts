@@ -11,6 +11,7 @@ import { readsOf } from "../lib/libraryProtocol";
 import { linksInMarkdown, uniqueLinks, type DocLink } from "../lib/links";
 import { updateDocument, type DocPatch } from "./documents";
 import { useCategories } from "./categories";
+import { catalogue } from "../lib/postTitle";
 
 export interface LibraryItem {
   rec: DocRecord;
@@ -67,9 +68,12 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     const now = Date.now();
     // Page links come from the HTML; links written into the text itself count too.
     const allLinks = uniqueLinks([...links, ...linksInMarkdown(text)]);
+    // X's page title carries the author and site; keep them in their own fields instead.
+    const named = title?.trim() ? catalogue({ title, domain, meta }) : null;
+    if (named?.author && !meta?.author) meta = { ...meta, author: named.author };
     const rec: DocRecord = {
       id: uid(),
-      title: title?.trim() || titleFrom(text),
+      title: named?.title || titleFrom(text),
       text,
       source,
       domain: domain ?? (source === "paste" ? "Pasted text" : source === "sample" ? "Sample" : source === "share" ? "Shared" : "Text"),

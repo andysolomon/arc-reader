@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star } from "lucide-react";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star, UserRound } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -23,6 +23,7 @@ import { usePremiumContext } from "../state/premium";
 import { estimatePremium, type PremiumEstimate } from "../lib/premiumEstimate";
 import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
+import { catalogue } from "../lib/postTitle";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
@@ -304,6 +305,18 @@ function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate
   );
 }
 
+/** Who wrote it, on its own line under the title. */
+function Author({ it, className }: { it: LibraryItem; className?: string }) {
+  const { author } = catalogue(it.rec);
+  if (!author) return null;
+  return (
+    <p className={cn("m-0 flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px] text-fg2", className)}>
+      <UserRound size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
+      <span className="truncate">{author}</span>
+    </p>
+  );
+}
+
 function Fact({ children, title, className }: { children: ReactNode; title?: string; className?: string }) {
   return (
     <span title={title} className={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 pl-4", className)}>
@@ -442,9 +455,12 @@ function Row(props: ItemProps & { touch: boolean }) {
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
       >
         <DocumentSelection {...props} className="col-start-1 row-start-1 mt-1" />
-        <button type="button" onClick={() => props.open(it)} className="col-start-2 row-start-1 line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
-          {it.rec.title}
-        </button>
+        <div className="col-start-2 row-start-1 min-w-0">
+          <button type="button" onClick={() => props.open(it)} className="line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
+            {catalogue(it.rec).title}
+          </button>
+          <Author it={it} className="mt-1" />
+        </div>
         <Meta it={it} estimate={props.estimate} withDate className="col-start-2 row-start-2" />
         <div className="col-span-2 col-start-2 row-start-3 mt-1.5 sm:col-span-1 sm:col-start-2"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
         <ReadProgress value={it.progress} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3 sm:row-start-1" />
@@ -464,8 +480,9 @@ function CardItem(props: ItemProps) {
       </div>
       <div className="flex-1">
         <button type="button" onClick={() => props.open(it)} className="line-clamp-3 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
-          {it.rec.title}
+          {catalogue(it.rec).title}
         </button>
+        <Author it={it} className="mt-1.5" />
       </div>
       <div className="flex flex-col gap-2.5 border-t border-line pt-3">
         <Meta it={it} estimate={props.estimate} />
@@ -476,5 +493,5 @@ function CardItem(props: ItemProps) {
 }
 
 function DocumentSelection({ it, selected, toggleSelected, className }: ItemProps & { className?: string }) {
-  return <input type="checkbox" aria-label={`Select ${it.rec.title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} onPointerDown={(e) => e.stopPropagation()} className={cn("size-4 shrink-0 cursor-pointer accent-[var(--accent)]", className)} />;
+  return <input type="checkbox" aria-label={`Select ${catalogue(it.rec).title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} onPointerDown={(e) => e.stopPropagation()} className={cn("size-4 shrink-0 cursor-pointer accent-[var(--accent)]", className)} />;
 }
