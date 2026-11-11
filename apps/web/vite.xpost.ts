@@ -124,7 +124,8 @@ export function xPostHtml(tweet: FxTweet): string {
   const article = tweet.article;
   const firstLine = (tweet.text ?? "").split("\n")[0].trim();
   const headline = article?.title || (firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine);
-  const title = headline ? `${name} on X: "${headline}"` : `${name} on X`;
+  // The author has its own field; the title is the post's own words.
+  const title = headline || `Post by ${name}`;
   const published = tweet.created_timestamp ? new Date(tweet.created_timestamp * 1000).toISOString() : "";
   const description = article?.preview_text || tweet.text || "";
   const body = article

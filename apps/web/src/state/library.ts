@@ -12,6 +12,7 @@ import { readsOf } from "../lib/libraryProtocol";
 import { linksInMarkdown, uniqueLinks, type DocLink } from "../lib/links";
 import { updateDocument, type DocPatch } from "./documents";
 import { useCategories } from "./categories";
+import { catalogue } from "../lib/postTitle";
 
 export interface LibraryItem {
   rec: DocRecord;
@@ -55,10 +56,13 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
         if (id && !voices.some((v) => v.id === id)) voices.push({ id, name: id, engine: engine.split(":")[0], kind: "preset", lang: "", hue: null, tags: [] });
       }
       set({
-        items: all.map((rec) => {
-          const p = byId.get(rec.id);
-          return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
-        }),
+        items: all
+          .map((rec) => {
+            const p = byId.get(rec.id);
+            return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
+          })
+          // Newest first by when the document was added: filing, editing or opening it doesn't move it.
+          .sort((a, b) => b.rec.createdAt - a.rec.createdAt),
         loaded: true,
       });
     } catch {
@@ -69,9 +73,12 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     const now = Date.now();
     // Page links come from the HTML; links written into the text itself count too.
     const allLinks = uniqueLinks([...links, ...linksInMarkdown(text)]);
+    // X's page title carries the author and site; keep them in their own fields instead.
+    const named = title?.trim() ? catalogue({ title, domain, meta }) : null;
+    if (named?.author && !meta?.author) meta = { ...meta, author: named.author };
     const rec: DocRecord = {
       id: uid(),
-      title: title?.trim() || titleFrom(text),
+      title: named?.title || titleFrom(text),
       text,
       source,
       domain: domain ?? (source === "paste" ? "Pasted text" : source === "sample" ? "Sample" : source === "share" ? "Shared" : "Text"),

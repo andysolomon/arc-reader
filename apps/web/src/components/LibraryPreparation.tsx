@@ -12,6 +12,7 @@ import { getVoice, isLocalVoice, useVoices } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 import type { LibraryItem } from "../state/library";
+import { catalogue } from "../lib/postTitle";
 
 export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryItem; defaultVoice: string; onPrepare: () => void }) {
   const jobs = usePreparation((s) => s.jobs);
@@ -108,7 +109,7 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
   };
   return (
     <Dialog open onClose={onClose} title="Prepare audio" initialFocus="dialog" className="max-h-[calc(100dvh-48px)]">
-      <p className="m-0 text-sm text-fg2">Choose voices for {documents.length === 1 ? `“${documents[0].rec.title}”` : `${documents.length} documents`}. Saved audio is reused. Preparation continues as you browse; keep this tab open.</p>
+      <p className="m-0 text-sm text-fg2">Choose voices for {documents.length === 1 ? `“${catalogue(documents[0].rec).title}”` : `${documents.length} documents`}. Saved audio is reused. Preparation continues as you browse; keep this tab open.</p>
       <p className="m-0 text-[12px] text-fg2">VoiceStudio prepares one reading at a time on each configured machine and queues the rest. Cloud providers run independently, with up to {PREPARATION_CONCURRENCY} readings each.</p>
       {available.length > 0 ? <>
         <Input leading={<Search size={16} aria-hidden />} aria-label="Search preparation voices" placeholder="Find a voice or provider" value={query} onChange={(e) => setQuery(e.target.value)} />

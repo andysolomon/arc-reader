@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star } from "lucide-react";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, UserRound } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -23,6 +23,7 @@ import { usePremiumContext } from "../state/premium";
 import { estimatePremium, type PremiumEstimate } from "../lib/premiumEstimate";
 import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
+import { catalogue } from "../lib/postTitle";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
@@ -36,6 +37,7 @@ export function LibraryPage() {
   const touch = useIsTouch();
   const { items, loaded, refresh, remove } = useLibrary();
   const libView = useSettings((s) => s.libView);
+  const libSort = useSettings((s) => s.libSort);
   const set = useSettings((s) => s.set);
   const defaultVoice = useSettings((s) => s.voice);
   const openaiModel = useSettings((s) => s.openaiModel);
@@ -92,6 +94,8 @@ export function LibraryPage() {
       return searchable(it).includes(needle);
     });
   }, [items, q, vf, cf, favoritesOnly, defaultVoice]);
+  // Items arrive newest first; equal durations keep that order.
+  const sorted = useMemo(() => libSort === "created" ? filtered : [...filtered].sort((a, b) => libSort === "shortest" ? a.duration - b.duration : b.duration - a.duration), [filtered, libSort]);
   const fileUncategorized = async () => {
     setFiling(true);
     try {
@@ -135,6 +139,15 @@ export function LibraryPage() {
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="m-0 flex-1 font-serif text-[26px] font-medium">Library</h1>
           <Input ref={searchRef} leading={<Search size={16} strokeWidth={1.5} aria-hidden />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search  /" aria-label="Search library" wrapperClassName="w-full sm:w-[240px]" />
+          <div className="flex overflow-hidden rounded-control border border-line bg-bg2" role="group" aria-label="Sort">
+            <IconButton label="Newest first" active={libSort === "created"} onClick={() => set("libSort", "created")} className="rounded-none">
+              <CalendarArrowDown size={16} strokeWidth={1.5} />
+            </IconButton>
+            {/* Duration flips between shortest and longest first on each press. */}
+            <IconButton label={libSort === "longest" ? "Longest first" : "Shortest first"} active={libSort !== "created"} onClick={() => set("libSort", libSort === "shortest" ? "longest" : "shortest")} className="rounded-none">
+              {libSort === "longest" ? <ArrowDownWideNarrow size={16} strokeWidth={1.5} /> : <ArrowDownNarrowWide size={16} strokeWidth={1.5} />}
+            </IconButton>
+          </div>
           {bp !== "md" && (
             <div className="flex overflow-hidden rounded-control border border-line bg-bg2" role="group" aria-label="View">
               <IconButton label="List" active={!grid} onClick={() => set("libView", "list")} className="rounded-none">
@@ -219,14 +232,14 @@ export function LibraryPage() {
         )}
         {filtered.length > 0 && !grid && (
           <ul className="-mx-5 m-0 flex list-none flex-col overflow-hidden border-y border-line bg-bg2 p-0 sm:mx-0 sm:rounded-card sm:border-x">
-            {filtered.map((it) => (
+            {sorted.map((it) => (
               <Row key={it.rec.id} it={it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
             ))}
           </ul>
         )}
         {filtered.length > 0 && grid && (
           <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 p-0">
-            {filtered.map((it) => (
+            {sorted.map((it) => (
               <CardItem key={it.rec.id} it={it} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
             ))}
           </ul>
@@ -290,7 +303,7 @@ function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate
           <span className="truncate">{it.rec.domain}</span>
         </Fact>
         <Fact className="tabular-nums">{fmtTime(it.duration)}</Fact>
-        {withDate && <Fact>{dateLabel(it.rec.updatedAt)}</Fact>}
+        {withDate && <Fact title="Added">{dateLabel(it.rec.createdAt)}</Fact>}
         {it.reads > 0 && <Fact><ReadBadge reads={it.reads} /></Fact>}
         {it.rec.category && (
           <Fact title={it.rec.category.by === "jev" ? "Filed by Jev" : "Category"}>
@@ -301,6 +314,18 @@ function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate
         {it.rec.favoritedAt && <Fact><PremiumBadge it={it} estimate={estimate} /></Fact>}
       </div>
     </div>
+  );
+}
+
+/** Who wrote it, on its own line under the title. */
+function Author({ it, className }: { it: LibraryItem; className?: string }) {
+  const { author } = catalogue(it.rec);
+  if (!author) return null;
+  return (
+    <p className={cn("m-0 flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px] text-fg2", className)}>
+      <UserRound size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
+      <span className="truncate">{author}</span>
+    </p>
   );
 }
 
@@ -442,9 +467,12 @@ function Row(props: ItemProps & { touch: boolean }) {
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
       >
         <DocumentSelection {...props} className="col-start-1 row-start-1 mt-1" />
-        <button type="button" onClick={() => props.open(it)} className="col-start-2 row-start-1 line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
-          {it.rec.title}
-        </button>
+        <div className="col-start-2 row-start-1 min-w-0">
+          <button type="button" onClick={() => props.open(it)} className="line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
+            {catalogue(it.rec).title}
+          </button>
+          <Author it={it} className="mt-1" />
+        </div>
         <Meta it={it} estimate={props.estimate} withDate className="col-start-2 row-start-2" />
         <div className="col-span-2 col-start-2 row-start-3 mt-1.5 sm:col-span-1 sm:col-start-2"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
         <ReadProgress value={it.progress} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3 sm:row-start-1" />
@@ -464,8 +492,9 @@ function CardItem(props: ItemProps) {
       </div>
       <div className="flex-1">
         <button type="button" onClick={() => props.open(it)} className="line-clamp-3 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
-          {it.rec.title}
+          {catalogue(it.rec).title}
         </button>
+        <Author it={it} className="mt-1.5" />
       </div>
       <div className="flex flex-col gap-2.5 border-t border-line pt-3">
         <Meta it={it} estimate={props.estimate} />
@@ -476,5 +505,5 @@ function CardItem(props: ItemProps) {
 }
 
 function DocumentSelection({ it, selected, toggleSelected, className }: ItemProps & { className?: string }) {
-  return <input type="checkbox" aria-label={`Select ${it.rec.title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} onPointerDown={(e) => e.stopPropagation()} className={cn("size-4 shrink-0 cursor-pointer accent-[var(--accent)]", className)} />;
+  return <input type="checkbox" aria-label={`Select ${catalogue(it.rec).title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} onPointerDown={(e) => e.stopPropagation()} className={cn("size-4 shrink-0 cursor-pointer accent-[var(--accent)]", className)} />;
 }

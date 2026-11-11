@@ -1,5 +1,6 @@
 import { docs, type DocRecord } from "../lib/db";
 import { usePlayer } from "./player";
+import { catalogue } from "../lib/postTitle";
 
 export type DocPatch = Partial<Pick<DocRecord, "title" | "meta" | "category" | "favoritedAt" | "premium">>;
 
@@ -15,7 +16,7 @@ export async function updateDocument(id: string, patch: DocPatch): Promise<DocRe
     usePlayer.setState({
       record: { ...player.record, title: next.title, meta: next.meta, category: next.category, favoritedAt: next.favoritedAt, premium: next.premium },
       // A new doc object restarts playback work, so replace it only for a new title.
-      doc: player.doc?.id === id && player.doc.title !== next.title ? { ...player.doc, title: next.title } : player.doc,
+      doc: player.doc?.id === id && player.doc.title !== catalogue(next).title ? { ...player.doc, title: catalogue(next).title } : player.doc,
     });
   }
   return next;
