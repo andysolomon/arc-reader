@@ -12,6 +12,7 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { fetchReadable, hostOf, looksLikeUrl, normalizeUrl } from "../lib/fetchUrl";
 import { openDocument } from "../lib/openDoc";
+import { importPage, isContentsPage } from "../state/books";
 import { SPEED_STEPS } from "@readaloud/ui";
 import { useClipboardImport } from "../hooks/useClipboardImport";
 import { useIsTouch } from "../hooks/useMedia";
@@ -78,8 +79,10 @@ export function Compose() {
     toast(`Fetching ${host}…`);
     try {
       const f = await fetchReadable(input);
-      const rec = await create({ text: f.text, title: f.title, source: "url", domain: f.domain, meta: f.meta, links: f.links });
-      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
+      const rec = await importPage(f, { source: "url" });
+      // A contents page is there to be swapped for its chapters, so it opens without reading itself out.
+      const listen = !isContentsPage(f);
+      await openDocument(rec, navigate, { autoplay: listen, resume: false, prepare: listen });
     } catch {
       toast(`Couldn't read ${host} — try pasting the text`);
       linkRef.current?.focus();

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { audioCache, docs as docStore, positions, type DocMeta, type DocRecord, type DocSource } from "../lib/db";
+import { audioCache, docs as docStore, positions, type DocBook, type DocMeta, type DocRecord, type DocSource } from "../lib/db";
 import { estimateTotal, titleFrom } from "../lib/segment";
 import { uid } from "../lib/hash";
 import { preparedVoices, type PreparedVoice } from "../lib/prepared";
@@ -29,7 +29,7 @@ interface LibraryState {
   items: LibraryItem[];
   loaded: boolean;
   refresh: () => Promise<void>;
-  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null; meta?: DocMeta; links?: DocLink[] }) => Promise<DocRecord>;
+  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null; meta?: DocMeta; links?: DocLink[]; book?: DocBook }) => Promise<DocRecord>;
   /** Edit catalogue fields: title, metadata, category. */
   update: (id: string, patch: DocPatch) => Promise<DocRecord | undefined>;
   remove: (id: string) => Promise<void>;
@@ -69,7 +69,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       set({ loaded: true });
     }
   },
-  async create({ text, title, source, domain, voice = null, meta, links = [] }) {
+  async create({ text, title, source, domain, voice = null, meta, links = [], book }) {
     const now = Date.now();
     // Page links come from the HTML; links written into the text itself count too.
     const allLinks = uniqueLinks([...links, ...linksInMarkdown(text)]);
@@ -84,6 +84,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       domain: domain ?? (source === "paste" ? "Pasted text" : source === "sample" ? "Sample" : source === "share" ? "Shared" : "Text"),
       voice,
       ...(meta && Object.keys(meta).length ? { meta } : {}),
+      ...(book ? { book } : {}),
       chars: text.length,
       ...(allLinks.length ? { links: allLinks } : {}),
       createdAt: now,

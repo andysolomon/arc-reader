@@ -4,6 +4,7 @@ import { articleVisual } from "./articleVisuals";
 import type { DocMeta } from "./db";
 
 import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
+import { bookContents, type BookContents } from "./book";
 
 /** Fetch a web page and extract readable text. Direct fetch first, then the built-in /api/fetch route, then an optional readability proxy. */
 export interface Fetched {
@@ -14,6 +15,8 @@ export interface Fetched {
   meta: DocMeta;
   /** Hyperlinks in the readable part of the page */
   links: DocLink[];
+  /** The book this page is a chapter of, or the contents page for */
+  book?: BookContents;
 }
 
 const PROXY = import.meta.env.VITE_FETCH_PROXY as string | undefined;
@@ -92,10 +95,47 @@ export function pageMeta(doc: Document, url: string): DocMeta {
   return Object.fromEntries(Object.entries(meta).filter(([, value]) => value)) as DocMeta;
 }
 
+/** Notes set beside the text ("Tip", "Warning") are part of the article; sidebars are not. */
+const NOTE = "note|notice|tip|hint|info|warning|caution|important|danger";
+const CALLOUT = new RegExp(`callout|admonition|notecard|^(?:${NOTE})$|--(?:${NOTE})$`, "i");
+function isCallout(aside: Element): boolean {
+  if (aside.querySelector("nav,form")) return false;
+  return aside.getAttribute("role") === "note" || (aside.getAttribute("class") ?? "").split(/\s+/).some((name) => CALLOUT.test(name));
+}
+
+const endsSentence = (text: string) => /[.!?…:;]["'”’)]?$/.test(text);
+const cellText = (cell: Element) => (cell.textContent ?? "").replace(/\s+/g, " ").trim();
+
+/**
+ * A table as it would be read out: one paragraph per row, the row's first cell as its name and
+ * the other cells under their column headings. Two-column tables read as "name: value".
+ */
+export function tableRows(table: Element): string[] {
+  const rows = Array.from(table.querySelectorAll("tr")).filter((row) => row.closest("table") === table)
+    .map((row) => Array.from(row.children).filter((cell) => /^T[HD]$/.test(cell.tagName)));
+  const first = rows[0];
+  const headed = !!first?.length && rows.length > 1 && (first.every((cell) => cell.tagName === "TH") || !!first[0].closest("thead"));
+  const headings = headed ? first.map(cellText) : [];
+  const sentence = (text: string) => endsSentence(text) ? text : `${text}.`;
+  return rows.slice(headed ? 1 : 0).flatMap((row) => {
+    const cells = row.map(cellText);
+    if (!cells.some(Boolean)) return [];
+    if (!headed || cells.length !== headings.length) return [cells.filter(Boolean).map(sentence).join(" ")];
+    const [name, ...rest] = cells;
+    if (rest.length === 1) return [name && rest[0] ? sentence(`${name}: ${rest[0]}`) : sentence(name || rest[0])];
+    const facts = rest.flatMap((cell, i) => cell ? [sentence(headings[i + 1] ? `${headings[i + 1]}: ${cell}` : cell)] : []);
+    return [[...(name ? [sentence(name)] : []), ...facts].join(" ")];
+  });
+}
+
 export function htmlToText(html: string, url: string): Fetched {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const meta = pageMeta(doc, url);
-  doc.querySelectorAll("script,noscript,nav,footer,header,aside,form,iframe,[aria-hidden='true']").forEach((n) => n.remove());
+  // The chapter list usually sits in the navigation, which is dropped next.
+  const book = bookContents(doc, url);
+  doc.querySelectorAll("script,noscript,nav,footer,header,aside,form,iframe,[aria-hidden='true']").forEach((n) => {
+    if (n.tagName !== "ASIDE" || !isCallout(n)) n.remove();
+  });
   doc.querySelectorAll("style").forEach((style) => { if (!style.closest("svg")) style.remove(); });
   const root = doc.querySelector("article") ?? doc.querySelector("main") ?? doc.querySelector('[role="main"]') ?? doc.body;
   root.querySelectorAll("pre").forEach((pre) => {
@@ -138,7 +178,18 @@ export function htmlToText(html: string, url: string): Fetched {
       return;
     }
     if (node.tagName === "PRE") { flush(); blocks.push(node.textContent ?? ""); return; }
-    const boundary = /^(?:H[1-6]|P|LI|BLOCKQUOTE|DIV|SECTION|BR|UL|OL|FIGURE|FIGCAPTION)$/.test(node.tagName);
+    if (node.tagName === "TABLE") { flush(); blocks.push(...tableRows(node)); return; }
+    const heading = node.tagName.match(/^H([1-6])$/);
+    if (heading) {
+      flush();
+      node.childNodes.forEach(walk);
+      const title = inline.replace(/\s+/g, " ").trim();
+      inline = "";
+      // Marked the way Markdown marks them, so the reading keeps its outline.
+      if (title) blocks.push(`${"#".repeat(Number(heading[1]))} ${title}`);
+      return;
+    }
+    const boundary = /^(?:P|LI|BLOCKQUOTE|DIV|SECTION|ASIDE|BR|UL|OL|DL|DT|DD|FIGURE|FIGCAPTION)$/.test(node.tagName);
     if (boundary) flush();
     node.childNodes.forEach(walk);
     if (boundary) flush();
@@ -151,7 +202,7 @@ export function htmlToText(html: string, url: string): Fetched {
     const href = absoluteUrl(a.getAttribute("href") ?? "", base);
     return href ? [{ url: href, text: a.textContent ?? "" }] : [];
   });
-  return { title, text, domain: hostOf(url), meta, links: uniqueLinks(links) };
+  return { title, text, domain: hostOf(url), meta, links: uniqueLinks(links), ...(book ? { book } : {}) };
 }
 
 export function markdownToText(md: string, base?: string): string {
@@ -161,7 +212,6 @@ export function markdownToText(md: string, base?: string): string {
     .replace(/^Published Time:.*$/m, "")
     .replace(/^Markdown Content:\s*$/m, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
     .replace(/[*_`>]+/g, "")
     .trim()).filter(Boolean).join("\n\n");
 }

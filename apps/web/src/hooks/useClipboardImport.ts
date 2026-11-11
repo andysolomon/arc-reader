@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { fetchReadable, hostOf } from "../lib/fetchUrl";
 import { openDocument } from "../lib/openDoc";
 import { useLibrary } from "../state/library";
+import { importPage, isContentsPage } from "../state/books";
 import { toast } from "../state/toast";
 
 export interface ClipboardImport {
@@ -33,15 +34,17 @@ export function useClipboardImportController(enabled: boolean): ClipboardImport 
       if (!text) return;
       const create = useLibrary.getState().create;
       let rec;
+      let listen = true;
       if (/^https?:\/\/\S+$/i.test(text)) {
         failure = `Couldn't read ${hostOf(text)} — try copying the article text`;
         toast(`Fetching ${hostOf(text)}…`);
         const article = await fetchReadable(text);
-        rec = await create({ ...article, source: "url" });
+        rec = await importPage(article, { source: "url" });
+        listen = !isContentsPage(article);
       } else {
         rec = await create({ text, source: "paste" });
       }
-      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
+      await openDocument(rec, navigate, { autoplay: listen, resume: false, prepare: listen });
     } catch {
       toast(failure);
     } finally {

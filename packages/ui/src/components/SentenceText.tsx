@@ -132,6 +132,16 @@ export const SentenceText = memo(function SentenceText({
             </details>
           </section>
         );
+        if (p.heading) {
+          // The document's title is the page's h1, so its own headings start at h2.
+          const Heading = p.heading <= 2 ? "h2" : p.heading === 3 ? "h3" : "h4";
+          return (
+            <Heading key={pi} data-heading={p.heading} className={cn(
+              "mb-[0.6em] mt-[1.7em] font-medium leading-[1.25] [text-wrap:balance] first:mt-0",
+              p.heading <= 2 ? "text-[1.45em] tracking-[-0.015em]" : p.heading === 3 ? "text-[1.2em] tracking-[-0.01em]" : "text-[1.05em]",
+            )}>{content}</Heading>
+          );
+        }
         return <p key={pi} className="mb-[1.35em] mt-0 last:mb-0">{content}</p>;
       })}
     </article>

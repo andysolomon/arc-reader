@@ -27,6 +27,27 @@ export function splitParagraphs(text: string): string[] {
     .filter(Boolean);
 }
 
+/** A Markdown heading on a line of its own: "## Why databases exist". */
+const HEADING = /^ {0,3}(#{1,6})[ \t]+(\S.*?)(?:[ \t]+#+)?[ \t]*$/;
+
+/** Paragraphs of prose, with headings kept apart from the text under them. */
+export function proseParts(text: string): { text: string; heading?: number }[] {
+  const parts: { text: string; heading?: number }[] = [];
+  let lines: string[] = [];
+  const flush = () => {
+    for (const p of splitParagraphs(lines.join("\n"))) parts.push({ text: p });
+    lines = [];
+  };
+  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
+    const heading = line.match(HEADING);
+    if (!heading) { lines.push(line); continue; }
+    flush();
+    parts.push({ text: heading[2], heading: heading[1].length });
+  }
+  flush();
+  return parts;
+}
+
 /** Split on . ! ? … followed by whitespace. */
 export function splitSentences(text: string): string[] {
   return text
@@ -44,8 +65,8 @@ export function segment(text: string, summaries: CodeSummaries = {}, description
   const paragraphs: ParagraphLike[] = [];
   for (const block of readingBlocks(text)) {
     const narration = block.kind === "visual" ? visualNarration(block.visual, descriptions) : null;
-    const parts = narration ? [narration.text] : block.kind === "code" ? [codeNarration(block, summaries)] : splitParagraphs(block.text);
-    for (const p of parts) {
+    const parts = narration ? [{ text: narration.text }] : block.kind === "code" ? [{ text: codeNarration(block, summaries) }] : proseParts(block.text);
+    for (const { text: p, heading } of parts) {
       const start = sentences.length;
       // One seek target per code block or visual, even when its explanation has several sentences.
       const ss = (block.kind !== "prose" ? [p] : splitSentences(p)).map((t) => {
@@ -55,7 +76,7 @@ export function segment(text: string, summaries: CodeSummaries = {}, description
       });
       if (ss.length) paragraphs.push({ sentences: ss, start, ...(block.kind === "code" ? {
         code: { text: block.text, language: block.language, summarized: safeCodeSummary(summaries[codeKey(block)]) },
-      } : block.kind === "visual" ? { visual: { ...block.visual, source: narration!.source } } : {}) });
+      } : block.kind === "visual" ? { visual: { ...block.visual, source: narration!.source } } : heading ? { heading } : {}) });
     }
   }
   return { sentences, paragraphs };
