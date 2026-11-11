@@ -1,6 +1,7 @@
 import { MorphIcon } from "morphicons/react";
 import { Play, AudioLines } from "lucide";
-import { Check, Undo2 } from "lucide-react";
+import { Check } from "lucide-react";
+import type { ReactNode } from "react";
 import { cn } from "../lib/cn";
 import type { Voice } from "../lib/types";
 import { Card } from "./Card";
@@ -20,16 +21,22 @@ export interface VoiceCardProps {
   source?: VoiceSource;
   onPreview: () => void;
   onSelect: () => void;
-  /** Offers to take the voice out of this list (e.g. send a gallery voice back to Studio). */
-  onRemove?: () => void;
-  /** Accessible name for the remove control; defaults to "Remove <name>". */
-  removeLabel?: string;
+  /** Icon buttons for managing the voice, e.g. send a gallery voice back to Studio, re-record or delete a clone. */
+  actions?: VoiceCardAction[];
   /** Short status under the language, e.g. how much of a document this voice has prepared. */
   note?: string;
   className?: string;
 }
 
-export function VoiceCard({ voice, selected, previewing, generating, source, onPreview, onSelect, onRemove, removeLabel, note, className }: VoiceCardProps) {
+export interface VoiceCardAction {
+  /** Accessible name and tooltip, e.g. "Delete My narrator". */
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+}
+
+export function VoiceCard({ voice, selected, previewing, generating, source, onPreview, onSelect, actions, note, className }: VoiceCardProps) {
   const waiting = !!previewing && !!generating;
   return (
     <Card interactive selected={selected} className={cn("flex min-h-[200px] flex-col gap-3.5", className)} data-voice={voice.id}>
@@ -42,17 +49,18 @@ export function VoiceCard({ voice, selected, previewing, generating, source, onP
               Selected
             </span>
           ) : null}
-          {onRemove ? (
+          {actions?.map((action) => (
             <button
+              key={action.label}
               type="button"
-              onClick={onRemove}
-              aria-label={removeLabel ?? `Remove ${voice.name}`}
-              title={removeLabel ?? `Remove ${voice.name}`}
-              className="grid size-8 place-items-center rounded-control border-0 bg-transparent text-fg2 hover:bg-bg3 hover:text-fg"
+              onClick={action.onClick}
+              aria-label={action.label}
+              title={action.label}
+              className={cn("grid size-8 place-items-center rounded-control border-0 bg-transparent text-fg2 hover:bg-bg3", action.danger ? "hover:text-danger" : "hover:text-fg")}
             >
-              <Undo2 size={16} strokeWidth={1.5} aria-hidden />
+              {action.icon}
             </button>
-          ) : null}
+          ))}
         </div>
       </div>
       <div className="flex flex-col gap-0.5">

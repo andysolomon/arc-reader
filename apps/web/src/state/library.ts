@@ -7,6 +7,7 @@ import { useVoices } from "./voices";
 import { useSettings } from "./settings";
 import { usePreparation } from "./preparation";
 import { serverPreparedKeys } from "../engine/preparation";
+import { voiceIdOfKeyPart } from "../engine/voiceRevisions";
 import { readsOf } from "../lib/libraryProtocol";
 import { linksInMarkdown, uniqueLinks, type DocLink } from "../lib/links";
 import { updateDocument, type DocPatch } from "./documents";
@@ -50,7 +51,8 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       const voices = [...useVoices.getState().voices];
       // Saved voices can outlive a catalogue page or an unavailable speech server.
       for (const key of allKeys) {
-        const [engine, id] = key.split("|");
+        const [engine, part] = key.split("|");
+        const id = part && voiceIdOfKeyPart(part);
         if (id && !voices.some((v) => v.id === id)) voices.push({ id, name: id, engine: engine.split(":")[0], kind: "preset", lang: "", hue: null, tags: [] });
       }
       set({

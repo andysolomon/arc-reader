@@ -11,6 +11,7 @@ import { OPENAI_ACCENTS, STEADY_NARRATION } from "../data/voices";
 import { isBundledApp, isNativeApp } from "../lib/native";
 import { resolveApiBase, speechEndpoint, withSpeechAuth } from "../lib/speechServer";
 import { hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest, type PreparationStatus } from "./preparation";
+import { voiceRevision } from "./voiceRevisions";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
@@ -264,11 +265,13 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
 /**
  * Cache key: engine + voice + text. Switching engines never replays another engine's audio.
  * OpenAI's steady model keeps the plain engine key that its clips were cached under before the model could change.
+ * A re-recorded clone adds its recording's revision, so clips of the old recording no longer match.
  */
 export function cacheKey(req: Pick<TtsRequest, "text" | "voice" | "engine" | "openaiModel">): string {
   const openai = req.engine === OPENAI_ENGINE ? openaiModelFor(req) : "";
   const engine = req.engine === FISH_ENGINE ? `${FISH_ENGINE}:${FISH_MODEL}` : openai && !isTokenSpeechModel(openai) ? `${OPENAI_ENGINE}:${openai}` : req.engine;
-  return `${engine}|${req.voice}|${hash(req.text)}`;
+  const revision = voiceRevision(req.voice);
+  return `${engine}|${revision ? `${req.voice}@${revision}` : req.voice}|${hash(req.text)}`;
 }
 
 export async function fromCache(req: TtsRequest): Promise<Chunk | null> {
