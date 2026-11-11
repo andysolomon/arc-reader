@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { AlignLeft, ChevronDown, Clipboard, Link2, Upload } from "lucide-react";
+import { AlignLeft, ChevronDown, Link2, Upload } from "lucide-react";
 import { Button, Chip, TextArea, VoiceAvatar, VoiceServiceName, formatSpeed, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
-import { PLACEHOLDERS, SAMPLE, SAMPLE_TITLE } from "../data/sample";
+import { PLACEHOLDERS } from "../data/sample";
 import { getVoice } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
@@ -86,7 +86,7 @@ export function Compose() {
   const readText = async (t: string) => {
     setBusy("listen");
     try {
-      const rec = await create({ text: t, title, source: t === SAMPLE ? "sample" : "paste", domain: t === SAMPLE ? "Sample" : undefined });
+      const rec = await create({ text: t, title, source: "paste" });
       sessionStorage.removeItem(DRAFT_KEY);
       await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
     } finally {
@@ -205,9 +205,6 @@ export function Compose() {
         </form>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button leading={<Clipboard size={16} strokeWidth={1.5} />} onClick={() => void clipboard.readClipboard()} loading={clipboard.busy} disabled={busy !== null}>
-            Read clipboard
-          </Button>
           <label className="inline-flex h-[34px] cursor-pointer items-center gap-1.5 rounded-control border border-line bg-bg2 px-3 text-[13px] text-fg hover:bg-bg3 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
             <span className="grid text-fg2">
               <Upload size={16} strokeWidth={1.5} aria-hidden />
@@ -270,16 +267,6 @@ export function Compose() {
             <span className="rounded-[6px] bg-black/15 px-2 py-1 font-mono text-[12px] font-medium" aria-hidden>
               ⌘↵
             </span>
-          </Button>
-          <Button
-            variant="link"
-            onClick={() => {
-              setText(SAMPLE);
-              setTitle(SAMPLE_TITLE);
-              openText();
-            }}
-          >
-            Try a sample
           </Button>
         </div>
       </div>
