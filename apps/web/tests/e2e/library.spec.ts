@@ -38,10 +38,17 @@ test("Library identifies voice services in both views even outside the available
       const item = library.getByRole("listitem").filter({ has: page.getByRole("button", { name: `${document} document`, exact: true }) });
       await expect(item.locator(`[data-voice-source="${source}"]`).first()).toBeVisible();
       await expect(item).toContainText(voice);
+      // The voice a document is read in leads its prepared audio.
+      if (source !== "Browser") await expect(item.getByRole("group", { name: "Prepared audio" }).getByRole("button").first()).toHaveAttribute("data-reading-voice", "true");
     }
   }
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  // On a phone the text starts beside the checkbox instead of behind a wide gutter.
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  const title = page.getByRole("button", { name: "First document", exact: true });
+  const row = library.getByRole("listitem").filter({ has: title });
+  expect((await title.boundingBox())!.x - (await row.boundingBox())!.x).toBeLessThan(64);
 });
 
 test("prepares multiple documents in multiple voices, reuses saved audio, and shows persisted coverage in both views", async ({ page }) => {

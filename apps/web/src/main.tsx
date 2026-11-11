@@ -1,18 +1,20 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import { reloadWhenIdle } from "./lib/appUpdate";
-import { isNativeApp } from "./lib/native";
+import { reloadOnNewBuild, reloadWhenIdle } from "./lib/appUpdate";
+import { isBundledApp, isNativeApp } from "./lib/native";
 import { usePlayer } from "./state/player";
 import "./styles.css";
 
-// The service worker caches the site for the browser PWA. Inside the iOS shell
-// the assets are already in the bundle, and a worker on the capacitor scheme
-// can intercept them and leave a blank screen. Never register one there.
+// The service worker caches the site for the browser PWA. The iOS shell never
+// registers one: on its bundled files a worker can intercept them and leave a
+// blank screen, and loaded from the server the shell should show each deploy,
+// not a cached copy.
 if (isNativeApp()) {
   void navigator.serviceWorker?.getRegistrations().then((regs) => {
     for (const reg of regs) void reg.unregister();
   });
+  if (!isBundledApp()) reloadOnNewBuild(usePlayer);
 } else {
   void import("virtual:pwa-register").then(({ registerSW }) => {
     registerSW({ immediate: true, onNeedReload: () => reloadWhenIdle(usePlayer) });

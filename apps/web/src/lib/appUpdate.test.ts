@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { create } from "zustand";
-import { reloadWhenIdle } from "./appUpdate";
+import { entryScript, reloadWhenIdle, serverHasNewBuild } from "./appUpdate";
 
 const store = (playing: boolean) => create(() => ({ playing, loading: false, preparing: null as string | null }));
 
@@ -24,5 +24,26 @@ describe("reloadWhenIdle", () => {
     s.setState({ playing: true });
     s.setState({ playing: false });
     expect(reload).toHaveBeenCalledOnce();
+  });
+});
+
+describe("serverHasNewBuild", () => {
+  const page = (script: string) => `<!doctype html><head><link rel="modulepreload" href="/assets/vendor-1.js"><script type="module" crossorigin src="${script}"></script></head>`;
+
+  it("reads the entry script whether the page is the file or the parsed document", () => {
+    expect(entryScript(page("/assets/index-aaa.js"))).toBe("/assets/index-aaa.js");
+    expect(entryScript('<script type="module" crossorigin="" src="/assets/index-aaa.js"></script>')).toBe("/assets/index-aaa.js");
+    expect(entryScript("<h1>502 Bad Gateway</h1>")).toBeNull();
+  });
+
+  it("is true only when the server serves another build", async () => {
+    expect(await serverHasNewBuild("/assets/index-aaa.js", async () => page("/assets/index-bbb.js"))).toBe(true);
+    expect(await serverHasNewBuild("/assets/index-aaa.js", async () => page("/assets/index-aaa.js"))).toBe(false);
+  });
+
+  it("stays put when the server is unreachable or mid-deploy", async () => {
+    expect(await serverHasNewBuild("/assets/index-aaa.js", async () => { throw new TypeError("Load failed"); })).toBe(false);
+    expect(await serverHasNewBuild("/assets/index-aaa.js", async () => "<h1>502 Bad Gateway</h1>")).toBe(false);
+    expect(await serverHasNewBuild(null, async () => page("/assets/index-bbb.js"))).toBe(false);
   });
 });

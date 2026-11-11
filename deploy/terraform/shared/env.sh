@@ -9,3 +9,5 @@ done
 # .env names these differently.
 [ -z "${VOICESTUDIO_REMOTE_URL:-}" ] || export TF_VAR_voicestudio_remote_url=$VOICESTUDIO_REMOTE_URL
 [ -z "${VOICESTUDIO_SECONDARY_REMOTE_URL:-}" ] || export TF_VAR_voicestudio_secondary_remote_url=$VOICESTUDIO_SECONDARY_REMOTE_URL
+# The kind deployment serves the app at this address (deploy/kind/terraform/app/public-url.tf).
+[ -z "${READALOUD_PUBLIC_URL:-}" ] || export TF_VAR_public_url=$READALOUD_PUBLIC_URL

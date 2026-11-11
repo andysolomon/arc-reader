@@ -2,10 +2,11 @@
  * Where speech requests go.
  *
  * The web build talks to the same-origin Vite proxy (`/api/vs`), which holds
- * the VoiceStudio key. The iOS bundle has no proxy: a relative base is ignored
- * and the on-device voice reads instead, unless Settings stores an absolute
- * server (a ReadAloud proxy such as `https://host.ts.net:8449/api/vs`, or
- * VoiceStudio itself at `https://mac.ts.net:3900`).
+ * the VoiceStudio key. So does an iOS shell that loads the app from a ReadAloud
+ * server. An iOS app running its bundled files has no proxy: a relative base
+ * is ignored and the on-device voice reads instead, unless Settings stores an
+ * absolute server (a ReadAloud proxy such as `https://host.ts.net:8449/api/vs`,
+ * or VoiceStudio itself at `https://mac.ts.net:3900`).
  */
 
 export interface SpeechEndpoint {
@@ -40,14 +41,14 @@ export function normalizeSpeechServer(value: string): string {
 
 /**
  * The base a speech client should call.
- * An absolute override wins. On the native shell, a relative build-time base
- * (the Vite proxy) is not a server, so it becomes empty.
+ * An absolute override wins. In the bundled iOS app, a relative build-time
+ * base (the Vite proxy) is not a server, so it becomes empty.
  */
-export function resolveApiBase(configured: string, native: boolean, override = ""): string {
+export function resolveApiBase(configured: string, bundled: boolean, override = ""): string {
   const custom = normalizeSpeechServer(override);
   if (custom) return custom;
   const base = configured.replace(/\/$/, "");
-  if (native && base.startsWith("/")) return "";
+  if (bundled && base.startsWith("/")) return "";
   return base;
 }
 

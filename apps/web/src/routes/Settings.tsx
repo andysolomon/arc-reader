@@ -13,7 +13,7 @@ import { ShortcutsGrid } from "../components/ShortcutsDialog";
 import { studioJson, jsonBody } from "../lib/studio";
 import { DEFAULT_ENGINE, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL, hasApi, hasOpenAI } from "../engine/providers";
 import { writeClipboardText } from "../lib/clipboard";
-import { isNativeApp } from "../lib/native";
+import { isBundledApp } from "../lib/native";
 import { normalizeSpeechServer } from "../lib/speechServer";
 import { LOCAL_ENGINE } from "../engine/types";
 import { SUMMARY_MODELS } from "../lib/summary";
@@ -58,7 +58,8 @@ export function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const [speechServer, setSpeechServer] = useState(s.speechServer);
   const [speechKey, setSpeechKey] = useState(s.speechServerKey);
-  const native = isNativeApp();
+  // Loaded from a ReadAloud server, the shell uses that server's speech proxy like any browser.
+  const bundled = isBundledApp();
   useEffect(() => {
     setSpeechServer(s.speechServer);
     setSpeechKey(s.speechServerKey);
@@ -129,6 +130,9 @@ export function SettingsPage() {
             <RowItem label="Auto-play on share" hint="When text arrives from the share sheet, open the Reader already playing.">
               <Switch checked={s.autoplayShare} onChange={(v) => s.set("autoplayShare", v)} label="Auto-play on share" />
             </RowItem>
+            <RowItem label="Show links as they are read" hint="When a linked word or phrase has been read, its link appears for a few seconds. Every link is also listed under Links in the Reader.">
+              <Switch checked={s.linkToasts} onChange={(v) => s.set("linkToasts", v)} label="Show links as they are read" />
+            </RowItem>
             {hasOpenAI() && (
               <RowItem label="OpenAI model" hint="Steady follows a narration prompt for an even delivery and powers accent voices. Standard costs about a third less per passage but ignores the prompt; accent voices stay on Steady.">
                 <Segmented
@@ -168,7 +172,7 @@ export function SettingsPage() {
           </Section>
         )}
 
-        {native && (
+        {bundled && (
           <Section title="Speech server">
             <p className="m-0 text-[13px] text-fg2">
               Leave this empty to read with the iPhone’s own voice. To use VoiceStudio, paste its address, for example <span className="font-mono">https://mac.tailnet.ts.net:3900</span>. To use a ReadAloud server that already holds the key, paste its proxy, for example <span className="font-mono">https://host.ts.net:8449/api/vs</span>. A key is sent only to an absolute address, and only from this device.

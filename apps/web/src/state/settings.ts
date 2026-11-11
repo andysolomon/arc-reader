@@ -22,6 +22,8 @@ export interface Settings {
   voiceChosen: boolean;
   defaultSpeed: number;
   autoplayShare: boolean;
+  /** Show a toast for each link once the words it was attached to have been read */
+  linkToasts: boolean;
   /** TTS engine id from the speech server, or "local" for the browser voice */
   engine: EngineId;
   /** Phase 4: derive word timings from the server's transcription endpoint (extra request per passage) */
@@ -72,6 +74,7 @@ export const useSettings = create<Settings & Actions>()(
       voiceChosen: false,
       defaultSpeed: 1,
       autoplayShare: true,
+      linkToasts: true,
       engine: DEFAULT_ENGINE,
       wordTimings: false,
       openaiModel: OPENAI_MODEL,
