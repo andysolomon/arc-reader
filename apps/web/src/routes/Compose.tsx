@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { AlignLeft, ChevronDown, Clipboard, Link2, Upload } from "lucide-react";
 import { Button, Chip, TextArea, VoiceAvatar, VoiceSourceBadge, formatSpeed, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
-import { PLACEHOLDERS, SAMPLE, SAMPLE_TITLE } from "../data/sample";
+import { PLACEHOLDERS } from "../data/sample";
 import { getVoice } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
@@ -86,7 +86,7 @@ export function Compose() {
   const readText = async (t: string) => {
     setBusy("listen");
     try {
-      const rec = await create({ text: t, title, source: t === SAMPLE ? "sample" : "paste", domain: t === SAMPLE ? "Sample" : undefined });
+      const rec = await create({ text: t, title, source: "paste" });
       sessionStorage.removeItem(DRAFT_KEY);
       await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
     } finally {
@@ -271,16 +271,6 @@ export function Compose() {
             <span className="rounded-[6px] bg-black/15 px-2 py-1 font-mono text-[12px] font-medium" aria-hidden>
               ⌘↵
             </span>
-          </Button>
-          <Button
-            variant="link"
-            onClick={() => {
-              setText(SAMPLE);
-              setTitle(SAMPLE_TITLE);
-              openText();
-            }}
-          >
-            Try a sample
           </Button>
         </div>
       </div>
