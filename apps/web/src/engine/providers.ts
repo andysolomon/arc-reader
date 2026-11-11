@@ -239,7 +239,7 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
         if (!chunk.audio?.size) throw new ApiRejected(502, "Empty audio from the speech server");
         chunk.renderSeconds = (Date.now() - started) / 1000;
         await addUsage({ engine: req.engine, model: req.engine === OPENAI_ENGINE ? openaiModelFor(req) : req.engine === FISH_ENGINE ? FISH_MODEL : req.engine,
-          text: req.text, audioSeconds: chunk.duration, tokens: chunk.tokens });
+          text: req.text, audioSeconds: chunk.duration, tokens: chunk.tokens, docId: req.docId });
         if (!checksVoicing(req.engine)) return chunk;
         chunk.voiced = await clipVoicedShare(chunk.audio);
         if (!garbled(chunk.voiced)) return chunk;

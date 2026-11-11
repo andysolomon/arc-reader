@@ -200,6 +200,7 @@ test("selects filtered documents and offers explicit paid voice preparation", as
   await dialog.getByRole("textbox", { name: "Search preparation voices" }).fill("Alloy");
   await dialog.getByRole("checkbox", { name: "Alloy ChatGPT" }).check();
   await expect(dialog).toContainText("bill uncached audio for the full document");
+  await expect(dialog.getByLabel("Estimated cost")).toContainText(/Estimated cost ≈<?\$\d/);
   await dialog.getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
   await expect(page.getByRole("img", { name: "Alloy: 100% prepared", exact: true })).toHaveCount(1);
   await page.getByRole("textbox", { name: "Search library" }).fill("");

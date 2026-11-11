@@ -460,6 +460,7 @@ export class PlaybackEngine {
       voice: doc.voice,
       engine: this.opts.engine(doc.voice),
       openaiModel: this.opts.openaiModel?.(),
+      docId: doc.id,
       profile: this.opts.isProfileVoice(doc.voice),
       wordTimings: this.opts.wordTimings(),
       words: g.parts.flat(),
