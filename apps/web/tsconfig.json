@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "types": ["vite/client", "vite-plugin-pwa/client"], "baseUrl": ".", "paths": { "@/*": ["src/*"] } },
-  "include": ["src", "capacitor.config.ts", "vite.config.ts", "vite.tailnet.ts", "vite.proxy.ts", "vite.fetch.ts", "vite.prepare.ts", "vite.library.ts", "tests", "playwright.config.ts", "vitest.config.ts"]
+  "include": ["src", "capacitor.config.ts", "vite.config.ts", "vite.tailnet.ts", "vite.proxy.ts", "vite.fetch.ts", "vite.prepare.ts", "vite.library.ts", "vite.shell.ts", "tests", "playwright.config.ts", "vitest.config.ts"]
 }

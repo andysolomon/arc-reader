@@ -43,7 +43,10 @@ while [ -z "$bundle" ]; do
   fi
 done
 echo "served bundle: $bundle"
-status=$(curl -s -o /dev/null -w '%{http_code}' https://omarchy.tail1b9428.ts.net:8449/ || true)
-echo "https://omarchy.tail1b9428.ts.net:8449 -> HTTP $status"
+# The address the deploy serves (and the iOS app loads from), when .env names one.
+public=$(sed -n 's/^READALOUD_PUBLIC_URL=//p' "$main/.env" 2>/dev/null | tail -1 | tr -d "\"'")
+public=${public:-https://omarchy.tail1b9428.ts.net:8449}
+status=$(curl -s -o /dev/null -w '%{http_code}' "${public%/}/" || true)
+echo "${public%/} -> HTTP $status"
 echo "local main vs origin/main: $(git -C "$main" rev-list --left-right --count origin/main...main | awk '{print $2 " ahead, " $1 " behind"}')"
 [ "$result" = "exit 0" ] && [ "$status" = 200 ]

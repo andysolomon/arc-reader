@@ -8,7 +8,7 @@ import { readSpeechStream } from "./speechStream";
 import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE, type Chunk, type TtsRequest } from "./types";
 import type { WordTiming } from "../lib/db";
 import { OPENAI_ACCENTS, STEADY_NARRATION } from "../data/voices";
-import { isNativeApp } from "../lib/native";
+import { isBundledApp, isNativeApp } from "../lib/native";
 import { resolveApiBase, speechEndpoint, withSpeechAuth } from "../lib/speechServer";
 import { hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest, type PreparationStatus } from "./preparation";
 
@@ -21,12 +21,12 @@ export const OPENAI_ENGINE = "openai";
 export const FISH_ENGINE = "fish";
 export const FISH_BASE = ((import.meta.env.VITE_FISH_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const FISH_MODEL = (import.meta.env.VITE_FISH_TTS_MODEL as string | undefined) || "s2.1-pro";
-/** Base actually called. On iOS a relative proxy is dropped unless Settings has an absolute server. */
-export const activeApiBase = () => resolveApiBase(API_BASE, isNativeApp(), speechEndpoint().override);
-export const activeOpenAIBase = () => resolveApiBase(OPENAI_BASE, isNativeApp());
-export const activeFishBase = () => resolveApiBase(FISH_BASE, isNativeApp());
-/** The Vite server on this origin. It also serves preparation, library, and auth routes. The iOS bundle does not. */
-export const usesBuiltInProxy = () => API_BASE === "/api/vs" && !isNativeApp();
+/** Base actually called. In the bundled iOS app a relative proxy is dropped unless Settings has an absolute server. */
+export const activeApiBase = () => resolveApiBase(API_BASE, isBundledApp(), speechEndpoint().override);
+export const activeOpenAIBase = () => resolveApiBase(OPENAI_BASE, isBundledApp());
+export const activeFishBase = () => resolveApiBase(FISH_BASE, isBundledApp());
+/** The Vite server on this origin. It also serves preparation, library, and auth routes. The bundled iOS app has none. */
+export const usesBuiltInProxy = () => API_BASE === "/api/vs" && !isBundledApp();
 export const hasApi = () => activeApiBase().length > 0;
 export const hasOpenAI = () => activeOpenAIBase().length > 0;
 export const hasFish = () => activeFishBase().length > 0;

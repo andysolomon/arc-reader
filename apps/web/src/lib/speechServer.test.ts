@@ -16,7 +16,7 @@ describe("speech server address", () => {
     expect(normalizeSpeechServer("file:///tmp/voices")).toBe("");
   });
 
-  it("uses the build-time base on the web, and ignores a relative proxy in the iOS shell", () => {
+  it("uses the build-time base on the web, and ignores a relative proxy in the bundled iOS app", () => {
     expect(resolveApiBase("/api/vs", false)).toBe("/api/vs");
     expect(resolveApiBase("/api/vs", true)).toBe("");
     expect(resolveApiBase("https://voices.example/v1", true)).toBe("https://voices.example/v1");
