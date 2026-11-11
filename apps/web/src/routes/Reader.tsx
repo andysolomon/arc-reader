@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ChevronLeft, Library, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon } from "lucide-react";
+import { ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon, X } from "lucide-react";
 import { Button, IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
@@ -18,6 +18,8 @@ import { useLlm } from "../state/llm";
 import { useSummaries } from "../state/summaries";
 import { ArticleSummary } from "../components/ArticleSummary";
 import { DocumentDetails } from "../components/DocumentDetails";
+import { DocumentLinks } from "../components/DocumentLinks";
+import { docLinks, linksRead } from "../state/links";
 
 export function Reader() {
   const { id } = useParams();
@@ -46,6 +48,9 @@ export function Reader() {
   const [sheet, setSheet] = useState(false);
   const [missing, setMissing] = useState(false);
   const [details, setDetails] = useState(false);
+  const links = usePlayer(docLinks);
+  const read = usePlayer(linksRead);
+  const [linksOpen, setLinksOpen] = useState(false);
 
   // Pull the shared library first so deep links also work on a new device.
   useEffect(() => {
@@ -81,6 +86,8 @@ export function Reader() {
     set("showSummary", !showSummary);
   };
   const detailsRecord = ready && record?.id === id ? record : null;
+  const hasLinks = !!ready && links.length > 0;
+  const showLinks = hasLinks && linksOpen && !focus;
 
   const textControls = (
     <>
@@ -118,6 +125,11 @@ export function Reader() {
           {detailsRecord && !readingSummary && (
             <IconButton label={details ? "Hide details" : "Details"} active={details} onClick={() => setDetails(!details)}>
               <Library size={20} strokeWidth={1.5} />
+            </IconButton>
+          )}
+          {hasLinks && (
+            <IconButton label={linksOpen ? "Hide links" : "Links"} active={linksOpen} onClick={() => setLinksOpen(!linksOpen)}>
+              <Link2 size={20} strokeWidth={1.5} />
             </IconButton>
           )}
           {summaryRecord && !readingSummary && (
@@ -165,7 +177,8 @@ export function Reader() {
           <span className="summary-processing-track" aria-hidden><i /></span>
         </div>
       )}
-      <div ref={scrollRef} className={cn("relative min-h-0 flex-1 overflow-y-auto px-6 pb-[200px]", focus ? "pt-16" : "pt-12")}>
+      <div className="flex min-h-0 flex-1">
+      <div ref={scrollRef} className={cn("relative min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pb-[200px]", focus ? "pt-16" : "pt-12")}>
         {focus && (
           <IconButton label="Exit focus mode" title="Exit focus (Esc)" onClick={() => setFocus(false)} className="fixed right-3 top-3 z-20">
             <Minimize2 size={20} strokeWidth={1.5} />
@@ -222,6 +235,22 @@ export function Reader() {
           )}
         </motion.div>
       </div>
+      {showLinks && bp !== "sm" && (
+        <aside aria-label="Links" className="flex w-[340px] shrink-0 flex-col overflow-y-auto border-l border-line bg-bg2 px-5 pb-[200px] pt-3 animate-fadein">
+          <div className="mb-3 flex items-center gap-2">
+            <Link2 size={16} strokeWidth={1.5} className="text-fg2" aria-hidden />
+            <h2 className="m-0 flex-1 text-[13px] font-normal text-fg2">Links</h2>
+            <IconButton label="Hide links" size={32} onClick={() => setLinksOpen(false)}>
+              <X size={16} strokeWidth={1.5} />
+            </IconButton>
+          </div>
+          <DocumentLinks links={links} read={read} />
+        </aside>
+      )}
+      </div>
+      <Sheet open={showLinks && bp === "sm"} onClose={() => setLinksOpen(false)} title="Links">
+        <DocumentLinks links={links} read={read} />
+      </Sheet>
       <Sheet open={sheet} onClose={() => setSheet(false)} title="Text">
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
