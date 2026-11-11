@@ -1,6 +1,7 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { publicUrl } from "./capacitor.config";
-import { shellFallback, unreachablePage } from "./vite.shell";
+import { PROBE_IMAGE, shellFallback, unreachablePage } from "./vite.shell";
 
 describe("iOS shell loading from a server", () => {
   it("reduces the setting to an origin, and treats empty as bundled", () => {
@@ -19,6 +20,10 @@ describe("iOS shell loading from a server", () => {
     const html = unreachablePage("https://host.tailnet.ts.net:8449");
     expect(html).toContain("host.tailnet.ts.net:8449</span>");
     expect(html).toContain('var server = "https://host.tailnet.ts.net:8449";');
+  });
+
+  it("checks for the server with a file the web app really serves", () => {
+    expect(existsSync(`public${PROBE_IMAGE}`)).toBe(true);
   });
 
   it("builds the fallback page only when a server is set", () => {

@@ -32,10 +32,13 @@ for (const width of [390, 1440]) {
       if (request.url().endsWith("/v1/audio/speech")) spoken.push(request.postDataJSON().input);
       if (request.url().endsWith("/api/preparations")) spoken.push(...request.postDataJSON().requests.map((r: { text: string }) => r.text));
     });
-    // Clipboard URL import uses the same fetch path as the composer and share target.
-    await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { readText: async () => "https://example.com/story" } }));
+    // Pasted URL import uses the same fetch path as the composer and share target.
     await page.goto("/");
-    await page.locator('[data-screen="compose"]').getByRole("button", { name: "Read clipboard", exact: true }).click();
+    await page.locator('[data-screen="compose"]').evaluate((target) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/plain", "https://example.com/story");
+      target.dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }));
+    });
     await page.waitForURL(/\/read\/[a-z0-9-]+$/);
     const photo = page.getByRole("region", { name: "Image explanation" });
     const diagram = page.getByRole("region", { name: "Diagram explanation" });
