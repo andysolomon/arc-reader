@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button, Dialog, Input, ProgressRing, VoiceServiceName, cn } from "@readaloud/ui";
-import { Search, Zap } from "lucide-react";
+import { Search, Volume2, Zap } from "lucide-react";
 import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
 import { FISH_ENGINE, FISH_MODEL, baseFor, isPaidEngine, openaiModelFor } from "../engine/providers";
 import { readingCost } from "../lib/premiumEstimate";
@@ -8,7 +8,7 @@ import { formatUsd } from "../lib/usage";
 import { usePremiumContext } from "../state/premium";
 import { LOCAL_ENGINE } from "../engine/types";
 import { isPreparing, PREPARATION_CONCURRENCY, usePreparation } from "../state/preparation";
-import { getVoice, useVoices } from "../state/voices";
+import { getVoice, isLocalVoice, useVoices } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 import type { LibraryItem } from "../state/library";
@@ -22,13 +22,24 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
   for (const job of jobs) {
     if (job.docId === it.rec.id && isPreparing(job) && !prepared.some((v) => v.voiceId === job.voice.id)) prepared.push({ voiceId: job.voice.id, name: job.voice.name, engine: job.voice.engine, fraction: 0 });
   }
-  if (!prepared.some((v) => v.voiceId === voiceId) && voiceId !== "local") {
+  // The voice this document is read in leads, whether or not it has audio saved.
+  const reading = prepared.find((v) => v.voiceId === voiceId);
+  const live = !reading && isLocalVoice(voiceId);
+  if (!reading && !live) {
     const voice = getVoice(voiceId);
     prepared.unshift({ voiceId, name: voice.name, engine: voice.engine, fraction: 0 });
+  } else if (reading) {
+    prepared.unshift(...prepared.splice(prepared.indexOf(reading), 1));
   }
   return (
     <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Prepared audio">
-      {prepared.length === 0 && <span className="text-[12px] text-fg2">Browser voice · live audio</span>}
+      {live && (
+        <span className="mr-1 inline-flex h-7 items-center gap-1.5 whitespace-nowrap text-[12px] text-fg2" title="Reading voice">
+          <Volume2 size={13} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
+          <span className="sr-only">Reading voice</span>
+          <span><VoiceServiceName source={voiceSource(getVoice(voiceId))}>{getVoice(voiceId).name}</VoiceServiceName> · live audio</span>
+        </span>
+      )}
       {prepared.map((voice) => {
         const job = jobs.find((j) => j.docId === it.rec.id && j.voice.id === voice.voiceId && j.voice.engine === voice.engine && (voice.engine !== "openai" || j.openaiModel === openaiModel) && isPreparing(j));
         // Server generation precedes downloading into the browser's audio cache.
@@ -37,18 +48,22 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
         const percent = Math.floor(fraction * 100);
         const stage = job && (job.message ?? (job.status === "queued" ? (job.waitingFor ? `Waiting for ${job.waitingFor}` : "Queued") : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing"));
         const progress = job && job.total > 0 ? `${percent}% generated · ${job.done}/${job.total} passages` : `${percent}% prepared`;
+        const isReading = voice.voiceId === voiceId;
         const label = `${voice.name}: ${progress}${stage ? ` · ${stage}` : ""}`;
-        // A full ring already says "ready"; only partial audio needs words.
-        const detail = job ? (job.total > 0 ? `${percent}% · ${job.done}/${job.total}` : null) : percent === 0 ? "Not prepared" : percent < 100 ? `${percent}%` : null;
+        // The ring and outline carry the two ends: full is ready, empty and dashed is not prepared. Only partial audio needs words.
+        const empty = !job && percent === 0;
+        const detail = job ? (job.total > 0 ? `${percent}% · ${job.done}/${job.total}` : null) : percent > 0 && percent < 100 ? `${percent}%` : null;
         return (
           <button
             key={voice.voiceId}
             type="button"
             onClick={onPrepare}
-            title={label}
-            className={cn("inline-flex h-7 max-w-full items-center gap-1.5 rounded-pill border bg-bg pl-1.5 pr-2.5 text-left text-[12px] text-fg2 transition-colors duration-fast hover:border-fg3 hover:text-fg", job ? "border-[color-mix(in_oklch,var(--accent)_45%,var(--line))]" : "border-line")}
+            title={`${isReading ? "Reading voice · " : ""}${empty ? `${voice.name}: not prepared` : label}`}
+            data-reading-voice={isReading || undefined}
+            className={cn("inline-flex h-7 max-w-full items-center gap-1.5 rounded-pill border bg-bg pl-1.5 pr-2.5 text-left text-[12px] text-fg2 transition-colors duration-fast hover:border-fg3 hover:text-fg", job ? "border-[color-mix(in_oklch,var(--accent)_45%,var(--line))]" : "border-line", empty && "border-dashed bg-transparent")}
           >
             <ProgressRing value={fraction} size={18} stroke={2} label={label} />
+            {isReading && <><Volume2 size={13} strokeWidth={1.5} className="-mr-0.5 shrink-0" aria-hidden /><span className="sr-only">Reading voice</span></>}
             <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
             {detail && <span className="whitespace-nowrap tabular-nums">{detail}</span>}
             {stage && <span className="min-w-0 truncate text-accent">{stage}</span>}

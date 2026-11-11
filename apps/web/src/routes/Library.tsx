@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
@@ -218,7 +218,7 @@ export function LibraryPage() {
           </EmptyState>
         )}
         {filtered.length > 0 && !grid && (
-          <ul className="m-0 flex list-none flex-col overflow-hidden rounded-card border border-line bg-bg2 p-0">
+          <ul className="-mx-5 m-0 flex list-none flex-col overflow-hidden border-y border-line bg-bg2 p-0 sm:mx-0 sm:rounded-card sm:border-x">
             {filtered.map((it) => (
               <Row key={it.rec.id} it={it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
             ))}
@@ -276,33 +276,40 @@ function Actions({ it, resume, revoice, prepare, favorite, del, size = 36, class
   );
 }
 
-function Meta({ it, defaultVoice, withDate, estimate }: { it: LibraryItem; defaultVoice: string; withDate?: boolean; estimate?: PremiumEstimate }) {
-  const voiceId = it.rec.voice ?? defaultVoice;
-  const voice = getVoice(voiceId);
-  const prepared = it.prepared.find((v) => v.voiceId === voiceId);
+/**
+ * Facts about a document, shortest first so a narrow row breaks before the long ones.
+ * Each separator belongs to the fact after it and the one starting a line is clipped,
+ * so a wrap never strands a dot. The reading voice is in the prepared-audio chips.
+ */
+function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate?: boolean; estimate?: PremiumEstimate; className?: string }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-fg2">
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        <SourceIcon rec={it.rec} />
-        <span className="truncate">{it.rec.domain}</span>
-      </span>
-      {it.rec.category && (
-        <>
-          <Dot />
-          <span className="inline-flex min-w-0 items-center gap-1" title={it.rec.category.by === "jev" ? "Filed by Jev" : "Category"}>
+    <div className={cn("min-w-0 overflow-hidden text-[12px] leading-[18px] text-fg2", className)}>
+      <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
+        <Fact>
+          <SourceIcon rec={it.rec} />
+          <span className="truncate">{it.rec.domain}</span>
+        </Fact>
+        <Fact className="tabular-nums">{fmtTime(it.duration)}</Fact>
+        {withDate && <Fact>{dateLabel(it.rec.updatedAt)}</Fact>}
+        {it.reads > 0 && <Fact><ReadBadge reads={it.reads} /></Fact>}
+        {it.rec.category && (
+          <Fact title={it.rec.category.by === "jev" ? "Filed by Jev" : "Category"}>
             <Tag size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
             <span className="truncate">{it.rec.category.name}</span>
-          </span>
-        </>
-      )}
-      <Dot />
-      <span className="tabular-nums">{fmtTime(it.duration)}</span>
-      <Dot />
-      <VoiceServiceName source={voiceSource(prepared ?? voice)}>{prepared?.name ?? voice.name}</VoiceServiceName>
-      {withDate && <><Dot /><span>{dateLabel(it.rec.updatedAt)}</span></>}
-      {it.reads > 0 && <><Dot /><ReadBadge reads={it.reads} /></>}
-      {it.rec.favoritedAt && <><Dot /><PremiumBadge it={it} estimate={estimate} /></>}
+          </Fact>
+        )}
+        {it.rec.favoritedAt && <Fact><PremiumBadge it={it} estimate={estimate} /></Fact>}
+      </div>
     </div>
+  );
+}
+
+function Fact({ children, title, className }: { children: ReactNode; title?: string; className?: string }) {
+  return (
+    <span title={title} className={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 pl-4", className)}>
+      <span aria-hidden className="absolute left-0 w-4 text-center text-fg3">·</span>
+      {children}
+    </span>
   );
 }
 
@@ -350,10 +357,6 @@ function FavoritesBar({ count, selected, onSelect, estimates }: { count: number;
   );
 }
 
-function Dot() {
-  return <span aria-hidden className="text-fg3">·</span>;
-}
-
 /** Finished readings stay on record while the ring tracks the current pass. */
 function ReadBadge({ reads }: { reads: number }) {
   const label = reads === 1 ? "Read once" : `Read ${reads} times`;
@@ -366,10 +369,10 @@ function ReadBadge({ reads }: { reads: number }) {
 }
 
 /** Listening progress: a ring with the percentage inside, or a check once finished. */
-function ReadProgress({ value, size = 40 }: { value: number; size?: 36 | 40 }) {
+function ReadProgress({ value, size = 40, className }: { value: number; size?: 36 | 40; className?: string }) {
   const percent = Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
   return (
-    <div className="relative grid shrink-0 place-items-center" style={{ width: size, height: size }}>
+    <div className={cn("relative grid shrink-0 place-items-center", className)} style={{ width: size, height: size }}>
       <ProgressRing value={value} size={size} />
       <span aria-hidden className="absolute inset-0 grid place-items-center text-[10px] font-medium tabular-nums text-fg2">
         {percent >= 100 ? <Check size={14} strokeWidth={2} className="text-accent" /> : `${percent}%`}
@@ -433,20 +436,19 @@ function Row(props: ItemProps & { touch: boolean }) {
           <Actions {...props} size={44} />
         </div>
       )}
+      {/* The checkbox hangs in a narrow margin and the progress ring trails the title, so text runs the width of the row. */}
       <div
-        className={cn("relative grid grid-cols-[auto_40px_minmax(0,1fr)] items-start gap-x-3.5 bg-bg2 px-5 py-4 transition-[background-color,transform] duration-fast group-hover:bg-bg3 sm:grid-cols-[auto_40px_minmax(0,1fr)_auto]", props.selected && "!bg-bg3")}
+        className={cn("relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 bg-bg2 px-5 py-4 transition-[background-color,transform] duration-fast group-hover:bg-bg3 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:gap-x-3.5", props.selected && "!bg-bg3")}
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
       >
-        <DocumentSelection {...props} className="mt-3" />
-        <ReadProgress value={it.progress} />
-        <div className="flex min-w-0 flex-col gap-1">
-          <button type="button" onClick={() => props.open(it)} className="truncate border-0 bg-transparent p-0 text-left font-serif text-[16px] leading-6 text-fg hover:text-accent">
-            {it.rec.title}
-          </button>
-          <Meta it={it} defaultVoice={props.defaultVoice} estimate={props.estimate} withDate />
-          <div className="mt-1.5"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
-        </div>
-        {!touch && <Actions {...props} className="col-start-3 sm:col-start-auto sm:-my-0.5 sm:opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100" />}
+        <DocumentSelection {...props} className="col-start-1 row-start-1 mt-1" />
+        <button type="button" onClick={() => props.open(it)} className="col-start-2 row-start-1 line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
+          {it.rec.title}
+        </button>
+        <Meta it={it} estimate={props.estimate} withDate className="col-start-2 row-start-2" />
+        <div className="col-span-2 col-start-2 row-start-3 mt-1.5 sm:col-span-1 sm:col-start-2"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
+        <ReadProgress value={it.progress} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3 sm:row-start-1" />
+        {!touch && <Actions {...props} className="col-span-2 col-start-2 row-start-4 -ml-2 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 sm:col-span-1 sm:col-start-3 sm:row-span-3 sm:row-start-1 sm:-my-0.5 sm:ml-0 sm:opacity-0" />}
       </div>
     </li>
   );
@@ -466,7 +468,7 @@ function CardItem(props: ItemProps) {
         </button>
       </div>
       <div className="flex flex-col gap-2.5 border-t border-line pt-3">
-        <Meta it={it} defaultVoice={props.defaultVoice} estimate={props.estimate} />
+        <Meta it={it} estimate={props.estimate} />
         <PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} />
       </div>
     </li>
