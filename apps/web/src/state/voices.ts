@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { DEFAULT_VOICE_ID, isDefaultArchetype, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
 import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
-import { archetypeOf, idPath, studioFetch, studioJson, type Profile } from "../lib/studio";
+import { archetypeOf, idPath, recordingRevision, studioFetch, studioJson, type Profile } from "../lib/studio";
+import { setVoiceRevision, setVoiceRevisions } from "../engine/voiceRevisions";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "./settings";
 
@@ -27,6 +28,8 @@ interface VoicesState {
   loadServer: () => Promise<void>;
   /** Delete a saved VoiceStudio profile. A gallery voice reappears in Studio; a clone's reference is gone for good. */
   remove: (id: string) => Promise<void>;
+  /** Replace a clone's reference recording, keeping its id. A blank transcript is transcribed by VoiceStudio. */
+  rerecord: (id: string, recording: File, words: string, name?: string) => Promise<Profile>;
 }
 
 const ENGINE_LABELS: Record<string, string> = {
@@ -92,6 +95,9 @@ export const useVoices = create<VoicesState>()((set, get) => ({
         studioJson<{ tts: { active: string } }>("/engines"),
       ]);
       const profileMap = new Map(metadata.status === "fulfilled" ? metadata.value.map((p) => [p.id, p]) : []);
+      if (metadata.status === "fulfilled") {
+        setVoiceRevisions(Object.fromEntries(metadata.value.flatMap((p) => { const revision = recordingRevision(p); return revision ? [[p.id, revision]] : []; })));
+      }
       const activeEngine = capabilities.status === "fulfilled" ? capabilities.value.tts.active : null;
       const profileEngine = activeEngine ?? "omnivoice";
       const available = new Set((engines as ServerEngine[]).filter((e) => e.available !== false).map((e) => e.id));
@@ -116,6 +122,18 @@ export const useVoices = create<VoicesState>()((set, get) => ({
     await studioFetch(`/profiles/${idPath(id)}`, { method: "DELETE" });
     set({ voices: get().voices.filter((v) => v.id !== id) });
     await get().loadServer();
+  },
+  async rerecord(id, recording, words, name) {
+    const body = new FormData();
+    body.set("ref_audio", recording);
+    body.set("ref_text", words.trim());
+    if (name?.trim()) body.set("name", name.trim());
+    const profile = await studioJson<Profile>(`/profiles/${idPath(id)}/audio`, { method: "PUT", body });
+    // Adopt the new revision at once so nothing replays the old recording while the list reloads.
+    const revision = recordingRevision(profile);
+    if (revision) setVoiceRevision(id, revision);
+    await get().loadServer();
+    return profile;
   },
 }));
 

@@ -5,6 +5,7 @@ import { clipVoicedShare, joinClips } from "./audio";
 import { addUsage } from "../lib/usage";
 import { audioCache } from "../lib/db";
 import { preparedAudio } from "./preparation";
+import { setVoiceRevision, setVoiceRevisions, voiceIdOfKeyPart } from "./voiceRevisions";
 
 vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
 vi.mock("./preparation", () => ({ preparedAudio: vi.fn(async () => null) }));
@@ -93,6 +94,19 @@ describe("openaiSpeechSynthesize", () => {
 
   it("cache keys include the engine", async () => {
     expect(cacheKey({ text: "t", voice: "v", engine: "kittentts" })).not.toBe(cacheKey({ text: "t", voice: "v", engine: "supertonic3" }));
+  });
+
+  it("cache keys follow a re-recorded clone's recording, keeping first-recording keys unchanged", () => {
+    const first = cacheKey({ text: "t", voice: "ab12cd34", engine: "omnivoice" });
+    expect(first).toBe(`omnivoice|ab12cd34|${first.split("|")[2]}`);
+    setVoiceRevision("ab12cd34", "9f8e7d6c");
+    const second = cacheKey({ text: "t", voice: "ab12cd34", engine: "omnivoice" });
+    expect(second).not.toBe(first);
+    expect(voiceIdOfKeyPart(second.split("|")[1])).toBe("ab12cd34");
+    // Accent ids keep their own separator.
+    expect(voiceIdOfKeyPart("coral~georgia")).toBe("coral~georgia");
+    setVoiceRevisions({});
+    expect(cacheKey({ text: "t", voice: "ab12cd34", engine: "omnivoice" })).toBe(first);
   });
 
   it("cache keys separate OpenAI models, keeping the steady model on the key its clips already use", () => {

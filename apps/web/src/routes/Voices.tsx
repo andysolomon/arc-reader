@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Chip, Input, VoiceCard, VoiceSourceBadge } from "@readaloud/ui";
+import { Button, Chip, Dialog, Input, VoiceCard, VoiceSourceBadge, type VoiceCardAction } from "@readaloud/ui";
 import type { VoiceSource } from "@readaloud/tokens";
-import { Search } from "lucide-react";
+import { Mic, Search, Trash2, Undo2 } from "lucide-react";
 import { useVoices, getVoice, voiceLang, isLocalVoice } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
@@ -12,7 +12,7 @@ import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
 import { ApiBusy, ApiRejected, ApiUnreachable } from "../engine/types";
-import { DEFAULT_VOICE_ID, JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource } from "../data/voices";
+import { DEFAULT_VOICE_ID, JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource, type Voice } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
 import { ClearFilters, FilterSelect } from "../components/Filters";
@@ -51,6 +51,8 @@ export function VoicesPage() {
   const [docTitle, setDocTitle] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [deleting, setDeleting] = useState<Voice | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [filters, setFilters] = useState<VoiceFilters>(NO_VOICE_FILTERS);
   const setFilter = (key: keyof VoiceFilters, value: string) => setFilters((f) => ({ ...f, [key]: value }));
   const current = forDoc ? (loadedDoc?.id === forDoc ? docVoice : selected) : selected;
@@ -175,19 +177,37 @@ export function VoicesPage() {
     toast(`${v.name} selected`);
   };
 
-  // Only voices added from the Studio gallery can go back: the recipe lives on in the gallery,
-  // whereas deleting a clone would discard its reference recording.
-  const demote = async (id: string) => {
-    const v = getVoice(id);
-    if (previewing === id) stopPreview();
+  /** Remove a saved VoiceStudio voice; false when VoiceStudio refused, which the toast explains. */
+  const removeProfile = async (v: Voice, failure: string) => {
+    if (previewing === v.id) stopPreview();
     try {
-      await useVoices.getState().remove(id);
+      await useVoices.getState().remove(v.id);
     } catch (error) {
-      toast(error instanceof Error ? error.message : `Could not send ${v.name} back to Studio`);
-      return;
+      toast(error instanceof Error ? error.message : failure);
+      return false;
     }
-    if (useSettings.getState().voice === id) useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
-    toast(`${v.name} sent back to the Studio gallery`);
+    if (useSettings.getState().voice === v.id) useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
+    return true;
+  };
+  // A gallery voice goes back to Studio: its recipe lives on there. Clones and voices designed
+  // in Studio are deleted for good (the reference recording or recipe goes too), so ask first.
+  const demote = async (v: Voice) => {
+    if (await removeProfile(v, `Could not send ${v.name} back to Studio`)) toast(`${v.name} sent back to the Studio gallery`);
+  };
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    const ok = await removeProfile(deleting, `Could not delete ${deleting.name}`);
+    setDeleteBusy(false);
+    if (ok) toast(`${deleting.name} deleted`);
+    setDeleting(null);
+  };
+  const actionsFor = (v: Voice): VoiceCardAction[] | undefined => {
+    if (v.kind !== "profile") return undefined;
+    if (v.archetype) return [{ label: `Send ${v.name} back to Studio`, icon: <Undo2 size={16} strokeWidth={1.5} aria-hidden />, onClick: () => void demote(v) }];
+    const remove: VoiceCardAction = { label: `Delete ${v.name}`, icon: <Trash2 size={16} strokeWidth={1.5} aria-hidden />, onClick: () => setDeleting(v), danger: true };
+    if (!v.tags.includes("cloned")) return [remove];
+    return [{ label: `Re-record ${v.name}`, icon: <Mic size={16} strokeWidth={1.5} aria-hidden />, onClick: () => { stopPreview(); navigate(`/studio/clone?voice=${encodeURIComponent(v.id)}`); } }, remove];
   };
 
   // Group by the service that renders each voice. Sections keep a fixed order:
@@ -245,12 +265,23 @@ export function VoicesPage() {
               {voices.map((v) => (
                 <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} generating={previewing === v.id && generating} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)}
                   note={preparedOnly ? preparedNote(prepared.find((p) => p.voiceId === v.id)?.fraction) : undefined}
-                  onRemove={v.archetype ? () => void demote(v.id) : undefined} removeLabel={`Send ${v.name} back to Studio`} />
+                  actions={actionsFor(v)} />
               ))}
             </div>
           </section>
         ))}
       </div>
+      <Dialog open={!!deleting} onClose={() => { if (!deleteBusy) setDeleting(null); }} title={`Delete ${deleting?.name ?? "voice"}?`}>
+        <p className="text-sm text-fg2">
+          {deleting?.tags.includes("cloned") ? "Its reference recording is removed from VoiceStudio and can't be recovered." : "Its recipe is removed from VoiceStudio and can't be recovered."}{" "}
+          Documents set to this voice will need another one.
+          {deleting?.tags.includes("cloned") && <> To keep the voice but change how it sounds, re-record it instead.</>}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={() => setDeleting(null)} disabled={deleteBusy}>Cancel</Button>
+          <Button variant="danger" loading={deleteBusy} onClick={() => void confirmDelete()}>Delete voice</Button>
+        </div>
+      </Dialog>
     </section>
   );
 }

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import { Mic, Trash2, Undo2 } from "lucide-react";
 import { VoiceCard } from "../components/VoiceCard";
 import { VOICES } from "./fixtures";
 
@@ -9,7 +10,17 @@ type S = StoryObj<typeof VoiceCard>;
 export const Idle: S = { render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Selected: S = { args: { selected: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Previewing: S = { args: { previewing: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
-export const Demotable: S = { args: { voice: { ...VOICES[0], tags: ["designed"] }, onRemove: () => {}, removeLabel: "Send Ava back to Studio" }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
+export const Demotable: S = { args: { voice: { ...VOICES[0], tags: ["designed"] }, actions: [{ label: "Send Ava back to Studio", icon: <Undo2 size={16} strokeWidth={1.5} aria-hidden />, onClick: () => {} }] }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
+export const Cloned: S = {
+  args: {
+    voice: { ...VOICES[0], name: "My narrator", tags: ["cloned"] },
+    actions: [
+      { label: "Re-record My narrator", icon: <Mic size={16} strokeWidth={1.5} aria-hidden />, onClick: () => {} },
+      { label: "Delete My narrator", icon: <Trash2 size={16} strokeWidth={1.5} aria-hidden />, onClick: () => {}, danger: true },
+    ],
+  },
+  render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div>,
+};
 export const Generating: S = { args: { previewing: true, generating: true }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Local: S = { args: { voice: VOICES[2] }, render: (a) => <div className="w-[240px]"><VoiceCard {...a} /></div> };
 export const Grid: S = {
