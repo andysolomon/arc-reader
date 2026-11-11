@@ -104,10 +104,10 @@
 <body>
 <div class="plan" id="plan">
   <h1>ReadAloud × VoiceStudio</h1>
-  <p class="sub">Integration record. Runtime architecture and request flow updated 6 Nov 2026; the original scope, estimates, engine table and checklist remain planning history.</p>
+  <p class="sub">Integration record. Runtime architecture and request flow updated 10 Nov 2026; the original scope, estimates, engine table and checklist remain planning history.</p>
   <div class="meta"><span>Drafted <b>4 Nov 2026</b></span><span>Target <b>9 working days</b></span><span>Hosting <b>kind on Omarchy · private AWS target</b></span><span>Status <b>Terraform-managed kind · Traefik ingress · AWS not provisioned</b></span></div>
 
-  <p class="note">Current operations: <a href="../../README.md">README</a> · <a href="../kind-cluster-explainer.html">Hosting, Terraform and AWS diagrams</a> · <a href="../voicestudio-studio.md">Studio guide</a>. The original scope exclusions below have since been expanded by Studio.</p>
+  <p class="note">Current operations: <a href="../../README.md">README</a> · <a href="../kind-cluster-explainer.html">Hosting, Terraform and AWS diagrams</a> · <a href="../voicestudio-studio.md">Studio guide</a>. The original scope exclusions below have since been expanded by Studio, and the GPU exclusion is reversed: OmniVoice on the Mac mini’s GPU is now the main engine. Diagrams of the whole app: <a href="../readaloud-bpmn.html">BPMN</a> · <a href="../readaloud-sequence.html">sequence</a>.</p>
   <nav role="tablist" aria-label="Plan sections">
     <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
     <button role="tab" aria-selected="false" data-tab="arch">Architecture</button>
@@ -127,6 +127,18 @@
       <div class="kpi"><div class="v">4</div><div class="l">CPU engines that fit this laptop</div></div>
       <div class="kpi"><div class="v">0</div><div class="l">new browser dependencies</div></div>
     </div>
+    <div class="card" style="margin-bottom:14px">
+      <h3>Shipped since the plan</h3>
+      <ul>
+        <li>Phase 4 word timings, behind the word-timings setting (default off).</li>
+        <li>Voices listed from the server; the Librarian profile becomes the default voice once the server lists it, unless the listener has picked one.</li>
+        <li>Durable background preparation on two machines: the Mac mini first, the local container as overflow only for voices synced byte for byte from the Mac.</li>
+        <li>A shared catalogue of prepared readings across devices; a device uploads clips it already holds so others needn’t render them.</li>
+        <li>Breathy-noise retakes: a take with under 20 % voiced speech is asked again up to 2 times, in the browser and in preparation.</li>
+        <li>Busy (429) retries wait at most 5 s; background preparation pauses until live speech has been quiet for 15 s.</li>
+        <li>The iOS app loads the web app from the deployed server (READALOUD_PUBLIC_URL), so it uses the same proxy and every deploy reaches the phone. A bundled build has no proxy: it reads with the iPhone’s voice, or with a speech server and key set in Settings.</li>
+      </ul>
+    </div>
     <div class="two">
       <div class="card">
         <h3>Goal</h3>
@@ -136,7 +148,7 @@
           <li>Run VoiceStudio locally in Docker on the CPU, with KittenTTS as the first engine.</li>
           <li>A proxy that adds the API key and satisfies VoiceStudio's origin and host checks.</li>
           <li>A provider adapter for its OpenAI-style speech endpoint.</li>
-          <li>Voices listed from the server instead of the hard-coded eight.</li>
+          <li>Voices listed from the server instead of the hard-coded eight (the fallback list now has 15).</li>
           <li>Tests that run without VoiceStudio, plus a tagged live suite.</li>
         </ul>
       </div>
@@ -145,11 +157,11 @@
         <ul>
           <li>Voice cloning UI. The server's own app covers it; ReadAloud only lists resulting profiles.</li>
           <li>Dubbing, transcription, dictation and the mobile apps.</li>
-          <li>GPU engines. OmniVoice wants about 6 GB of graphics memory and its weights are non-commercial.</li>
+          <li>GPU engines. OmniVoice wants about 6 GB of graphics memory and its weights are non-commercial. <em>Reversed: OmniVoice on the Mac mini’s GPU is now the main engine.</em></li>
           <li>Forking VoiceStudio. Calling it over HTTP keeps ReadAloud's licence independent of its AGPL terms.</li>
         </ul>
         <h3 style="margin-top:14px">Why this shape</h3>
-        <p>The adapter is small because ReadAloud already synthesizes one sentence per request, prefetches upcoming passages and caches audio in IndexedDB. The only missing piece on the server side is word timings, which stay estimated unless phase 4 ships.</p>
+        <p>The adapter is small because ReadAloud already synthesized one sentence per request (now one passage of up to ~60 words), prefetched upcoming passages and cached audio in IndexedDB. The only missing piece on the server side was word timings, which stay estimated unless the word-timings setting is on.</p>
       </div>
     </div>
   </section>
@@ -159,7 +171,7 @@
     <div class="card">
       <h2>Where each piece runs now</h2>
       <p class="sub">Hover or tap a box. Tailscale and Traefik route to the web server. VoiceStudio can run on the Mac or in kind; AWS hosts only the web app. Persistent data stays with the web host.</p>
-      <div class="diagram-container"><svg id="arch" viewBox="0 0 700 480" role="img" aria-labelledby="integration-arch-title integration-arch-desc"><title id="integration-arch-title">ReadAloud and VoiceStudio runtime</title><desc id="integration-arch-desc">Tailnet ingress reaches the web server, which keeps durable server data and calls remote or local VoiceStudio; the browser separately caches audio in IndexedDB.</desc><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs><path class="edge" data-a="app" data-b="ingress" d="M200,76 H260" marker-end="url(#arr)"/><path class="edge" data-a="ingress" data-b="proxy" d="M440,76 H500" marker-end="url(#arr)"/><path class="edge" data-a="app" data-b="idb" d="M110,112 V208" marker-end="url(#arr)"/><path class="edge" data-a="proxy" data-b="vs" d="M620,112 V208" marker-end="url(#arr)"/><path class="edge" data-a="proxy" data-b="files" d="M548,112 V152 Q548,160 540,160 H358 Q350,160 350,168 V208" marker-end="url(#arr)"/><path class="edge" data-a="vs" data-b="eng" d="M590,280 V376" marker-end="url(#arr)"/><rect x="207.0" y="48" width="46" height="16" fill="var(--bg)"/><text x="230" y="60" text-anchor="middle" class="el">HTTPS</text><rect x="450.0" y="48" width="40" height="16" fill="var(--bg)"/><text x="470" y="60" text-anchor="middle" class="el">HTTP</text><rect x="118.0" y="152" width="46" height="16" fill="var(--bg)"/><text x="141" y="164" text-anchor="middle" class="el">CACHE</text><rect x="628.0" y="152" width="52" height="16" fill="var(--bg)"/><text x="654" y="164" text-anchor="middle" class="el">SPEECH</text><rect x="385.0" y="134" width="46" height="16" fill="var(--bg)"/><text x="408" y="146" text-anchor="middle" class="el">FILES</text><rect x="598.0" y="316" width="64" height="16" fill="var(--bg)"/><text x="630" y="328" text-anchor="middle" class="el">GENERATE</text><g class="node" data-node-id="app" tabindex="0" role="button" aria-label="Browser PWA"><title>Browser PWA: player · /api/vs</title><rect x="20" y="40" width="180" height="72" rx="6"/><text x="32" y="68" class="t">Browser PWA</text><text x="32" y="90" class="d">player · /api/vs</text></g><g class="node" data-node-id="ingress" tabindex="0" role="button" aria-label="Tailnet ingress"><title>Tailnet ingress: Serve → Traefik</title><rect x="260" y="40" width="180" height="72" rx="6"/><text x="272" y="68" class="t">Tailnet ingress</text><text x="272" y="90" class="d">Serve → Traefik</text></g><g class="node" data-node-id="proxy" tabindex="0" role="button" aria-label="Web server"><title>Web server: Vite preview · :4173</title><rect x="500" y="40" width="180" height="72" rx="6"/><text x="512" y="68" class="t">Web server</text><text x="512" y="90" class="d">Vite preview · :4173</text></g><g class="node" data-node-id="idb" tabindex="0" role="button" aria-label="IndexedDB"><title>IndexedDB: audio · docs · positions</title><rect x="20" y="208" width="180" height="72" rx="6"/><text x="32" y="236" class="t">IndexedDB</text><text x="32" y="258" class="d">audio · docs · positions</text></g><g class="node" data-node-id="files" tabindex="0" role="button" aria-label="Server data"><title>Server data: library · prepared audio</title><rect x="260" y="208" width="180" height="72" rx="6"/><text x="272" y="236" class="t">Server data</text><text x="272" y="258" class="d">library · prepared audio</text></g><g class="node" data-node-id="vs" tabindex="0" role="button" aria-label="VoiceStudio"><title>VoiceStudio: Mac primary · kind backup</title><rect x="500" y="208" width="180" height="72" rx="6"/><text x="512" y="236" class="t">VoiceStudio</text><text x="512" y="258" class="d">Mac primary · kind backup</text></g><g class="node" data-node-id="eng" tabindex="0" role="button" aria-label="TTS engine"><title>TTS engine: selected on speech host</title><rect x="500" y="376" width="180" height="72" rx="6"/><text x="512" y="404" class="t">TTS engine</text><text x="512" y="426" class="d">selected on speech host</text></g></svg></div>
+      <div class="diagram-container"><svg id="arch" viewBox="0 0 700 480" role="img" aria-labelledby="integration-arch-title integration-arch-desc"><title id="integration-arch-title">ReadAloud and VoiceStudio runtime</title><desc id="integration-arch-desc">Tailnet ingress reaches the web server, which keeps durable server data and calls remote or local VoiceStudio; the browser separately caches audio in IndexedDB.</desc><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs><path class="edge" data-a="app" data-b="ingress" d="M200,76 H260" marker-end="url(#arr)"/><path class="edge" data-a="ingress" data-b="proxy" d="M440,76 H500" marker-end="url(#arr)"/><path class="edge" data-a="app" data-b="idb" d="M110,112 V208" marker-end="url(#arr)"/><path class="edge" data-a="proxy" data-b="vs" d="M620,112 V208" marker-end="url(#arr)"/><path class="edge" data-a="proxy" data-b="files" d="M548,112 V152 Q548,160 540,160 H358 Q350,160 350,168 V208" marker-end="url(#arr)"/><path class="edge" data-a="vs" data-b="eng" d="M590,280 V376" marker-end="url(#arr)"/><rect x="207.0" y="48" width="46" height="16" fill="var(--bg)"/><text x="230" y="60" text-anchor="middle" class="el">HTTPS</text><rect x="450.0" y="48" width="40" height="16" fill="var(--bg)"/><text x="470" y="60" text-anchor="middle" class="el">HTTP</text><rect x="118.0" y="152" width="46" height="16" fill="var(--bg)"/><text x="141" y="164" text-anchor="middle" class="el">CACHE</text><rect x="628.0" y="152" width="52" height="16" fill="var(--bg)"/><text x="654" y="164" text-anchor="middle" class="el">SPEECH</text><rect x="385.0" y="134" width="46" height="16" fill="var(--bg)"/><text x="408" y="146" text-anchor="middle" class="el">FILES</text><rect x="598.0" y="316" width="64" height="16" fill="var(--bg)"/><text x="630" y="328" text-anchor="middle" class="el">GENERATE</text><g class="node" data-node-id="app" tabindex="0" role="button" aria-label="Browser PWA"><title>Browser PWA: player · /api/vs</title><rect x="20" y="40" width="180" height="72" rx="6"/><text x="32" y="68" class="t">Browser PWA</text><text x="32" y="90" class="d">player · /api/vs</text></g><g class="node" data-node-id="ingress" tabindex="0" role="button" aria-label="Tailnet ingress"><title>Tailnet ingress: Serve → Traefik</title><rect x="260" y="40" width="180" height="72" rx="6"/><text x="272" y="68" class="t">Tailnet ingress</text><text x="272" y="90" class="d">Serve → Traefik</text></g><g class="node" data-node-id="proxy" tabindex="0" role="button" aria-label="Web server"><title>Web server: Vite preview · :4173</title><rect x="500" y="40" width="180" height="72" rx="6"/><text x="512" y="68" class="t">Web server</text><text x="512" y="90" class="d">Vite preview · :4173</text></g><g class="node" data-node-id="idb" tabindex="0" role="button" aria-label="IndexedDB"><title>IndexedDB: audio · docs · positions</title><rect x="20" y="208" width="180" height="72" rx="6"/><text x="32" y="236" class="t">IndexedDB</text><text x="32" y="258" class="d">audio · docs · positions</text></g><g class="node" data-node-id="files" tabindex="0" role="button" aria-label="Server data"><title>Server data: library · prepared audio</title><rect x="260" y="208" width="180" height="72" rx="6"/><text x="272" y="236" class="t">Server data</text><text x="272" y="258" class="d">library · prepared audio</text></g><g class="node" data-node-id="vs" tabindex="0" role="button" aria-label="VoiceStudio"><title>VoiceStudio: Mac primary · kind overflow</title><rect x="500" y="208" width="180" height="72" rx="6"/><text x="512" y="236" class="t">VoiceStudio</text><text x="512" y="258" class="d">Mac primary · kind overflow</text></g><g class="node" data-node-id="eng" tabindex="0" role="button" aria-label="TTS engine"><title>TTS engine: selected on speech host</title><rect x="500" y="376" width="180" height="72" rx="6"/><text x="512" y="404" class="t">TTS engine</text><text x="512" y="426" class="d">selected on speech host</text></g></svg></div>
       <div class="panel" id="arch-panel"><b>Pick a component</b><span class="sub">Details appear here.</span></div>
     </div>
   </section>
@@ -168,7 +180,7 @@
   <section id="tab-flow" role="tabpanel" hidden>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-        <h2 style="margin:0">One sentence, end to end</h2>
+        <h2 style="margin:0">One passage, end to end</h2>
         <div class="seg" role="group" aria-label="Scenario">
           <button aria-pressed="true" data-flow="happy">Happy path</button>
           <button aria-pressed="false" data-flow="cached">Cache hit</button>
@@ -215,8 +227,8 @@
       <table>
         <thead><tr><th>Need</th><th>VoiceStudio</th><th>Plan</th></tr></thead>
         <tbody>
-          <tr><td>Per-sentence MP3</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td><code>POST /v1/audio/speech</code>, up to 4096 characters, formats mp3, opus, wav, pcm.</td></tr>
-          <tr><td>Voice list</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td><code>GET /profiles</code> for cloned voices plus engine preset names.</td></tr>
+          <tr><td>Per-passage MP3</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td><code>POST /v1/audio/speech</code>, up to 4096 characters, formats mp3, opus, wav, pcm.</td></tr>
+          <tr><td>Voice list</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td><code>GET /v1/audio/voices</code>, plus <code>/profiles</code> for profile kinds and <code>/engines</code> for the active engine.</td></tr>
           <tr><td>Word timings</td><td><span class="st"><i style="background:var(--serious)"></i>No</span></td><td>Speech endpoint is audio only. Phase 4 derives timings from the transcription endpoint.</td></tr>
           <tr><td>Browser calls</td><td><span class="st"><i style="background:var(--warn)"></i>Gated</span></td><td>Needs bearer key, listed origin and known host. Proxy handles all three.</td></tr>
           <tr><td>Streaming</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td>Chunked audio or a WebSocket. Not needed: sentences are short and prefetched.</td></tr>
@@ -250,7 +262,7 @@
   <!-- DECISIONS -->
   <section id="tab-decisions" role="tabpanel" hidden>
     <div class="card">
-      <h2>Decisions needed before phase 1</h2>
+      <h2>Decisions taken</h2>
       <p class="sub">Choices are saved in this browser so the plan can be revisited.</p>
       <div id="decisions"></div>
     </div>
@@ -281,7 +293,7 @@
   const hover = (node, html) => { node.addEventListener("pointerenter", (e) => tipOn(html, e)); node.addEventListener("pointermove", tipMove); node.addEventListener("pointerleave", tipOff); };
 
   // ---- architecture (static diagram, with optional detail selection)
-  const detailsById = {"app": "<b>Browser</b>Playback, IndexedDB cache and browser speech fallback. Calls the same-origin /api/vs routes. No provider key is bundled.", "ingress": "<b>Ingress</b>kind: HTTPS :8449 \u2192 loopback :4179 \u2192 Traefik NodePort 30179 \u2192 web Ingress and ClusterIP Service. AWS target: HTTPS :443 \u2192 loopback :30179 \u2192 the same routing module. Dev uses Vite directly.", "proxy": "<b>Web server</b>Vite preview runs server middleware and proxies /api/vs/v1/audio/speech to VoiceStudio /v1/audio/speech, injecting the server-side key. Library, preparation and LLM APIs run here too.", "idb": "<b>Browser storage</b>Cached audio and document state support offline reading. Shared library and preparation state also live on the server.", "files": "<b>Persistent server data</b>kind mounts the existing Docker volumes through the node. AWS mounts encrypted EBS under /data. Preparation runs in one web process; Vercel needs durable storage and a worker before it can host these APIs.", "vs": "<b>Speech servers</b>The Mac mini is the configured primary over the tailnet. kind can run the local VoiceStudio as secondary. AWS omits the local server; a second remote URL must be explicit.", "eng": "<b>Engine</b>VoiceStudio hosts the selected synthesis engine and model files. EC2 runs no speech models. The current runtime options and Studio behavior are documented in the README and Studio guide."};
+  const detailsById = {"app": "<b>Browser</b>Playback, IndexedDB cache and the browser voice on request. Calls the same-origin /api/vs routes. No provider key is bundled. The iOS app loads from the deployed server and uses the same routes. A bundled iOS build has no proxy: it reads with the iPhone\u2019s voice unless Settings holds an absolute speech server URL, whose key stays on the device; preparation and the shared catalogue need the built-in proxy.", "ingress": "<b>Ingress</b>kind: HTTPS :8449 \u2192 loopback :4179 \u2192 Traefik NodePort 30179 \u2192 web Ingress and ClusterIP Service. AWS target: HTTPS :443 \u2192 loopback :30179 \u2192 the same routing module. Dev uses Vite directly.", "proxy": "<b>Web server</b>Vite preview runs server middleware and proxies /api/vs/* (speech, voices, Studio) to VoiceStudio, and /api/oa and /api/fish when keyed, injecting the server-side key. Live speech requests are tracked, and background preparation on that server waits until it has been quiet for 15 s. Library, preparation and LLM APIs run here too.", "idb": "<b>Browser storage</b>Cached audio and document state support offline reading. Shared library and preparation state also live on the server, which keeps a catalogue of prepared readings; devices upload clips they already hold so other devices can play them.", "files": "<b>Persistent server data</b>kind mounts the existing Docker volumes through the node. AWS mounts encrypted EBS under /data. Preparation runs in one web process; Vercel needs durable storage and a worker before it can host these APIs.", "vs": "<b>Speech servers</b>The Mac mini is the configured primary over the tailnet; live listening and Studio use it only. kind can run the local VoiceStudio as a secondary that prepares whole readings as overflow, only while the Mac is busy and only for voices synced byte for byte from the Mac; the Mac takes readings only it can prepare first. AWS omits the local server; a second remote URL must be explicit.", "eng": "<b>Engine</b>VoiceStudio hosts the selected synthesis engine and model files. EC2 runs no speech models. The current runtime options and Studio behavior are documented in the README and Studio guide."};
   const arch = $("#arch"), panel = $("#arch-panel");
   $$("[data-node-id]", arch).forEach(g => {
     const on = () => {
@@ -297,12 +309,12 @@
   // ---- sequence
   const lanes = [["Player", 70], ["Cache", 250], ["Web server", 430], ["VoiceStudio", 610]];
   const flows = {
-    happy: { title: "Happy path", note: "Cold sentence. Everything after the first chunk is hidden by the playback prefetch.", steps: [
+    happy: { title: "Happy path", note: "Cold passage. Before generating, the client asks for a server-prepared clip (GET /api/preparations/:id/audio/:i). A 429 is retried up to 4 times, waiting at most 5 s; a take that is mostly breathy noise is asked again up to 2 times. Everything after the first passage is hidden by the playback prefetch.", steps: [
       [0, 1, "get(key: engine|voice|hash)"], [1, 0, "miss", true], [0, 2, "POST /api/vs/…/speech"], [2, 3, "POST /v1/audio/speech + Bearer"], [3, 2, "200 audio/mpeg", true], [2, 0, "mp3 bytes", true], [0, 1, "put(mp3, duration)"], [0, 0, "decode → duration · play at speed×"]] },
     cached: { title: "Cache hit", note: "Replays and offline listening never touch the network. Word underline uses the stored duration.", steps: [
       [0, 1, "get(key)"], [1, 0, "hit: blob + duration", true], [0, 0, "play immediately"]] },
-    down: { title: "VoiceStudio unreachable", note: "Same path the app takes today when no API is configured: banner plus the browser speech engine. Retries on the next document.", steps: [
-      [0, 1, "get(key)"], [1, 0, "miss", true], [0, 2, "POST /api/vs/…/speech"], [2, 3, "connect", false, "fail"], [2, 0, "502 / network error", true, "fail"], [0, 0, "offline = true · banner"], [0, 0, "speechSynthesis fallback"]] },
+    down: { title: "VoiceStudio unreachable", note: "Playback stops instead of switching voices silently: a banner offers Retry or Use browser voice. Only when no speech server is configured at all does the app read with the browser voice directly.", steps: [
+      [0, 1, "get(key)"], [1, 0, "miss", true], [0, 2, "POST /api/vs/…/speech"], [2, 3, "connect", false, "fail"], [2, 0, "502 / network error", true, "fail"], [0, 0, "onUnavailable · playback paused"], [0, 0, "banner: Retry / Use browser voice"]] },
   };
   const seq = $("#seq"), seqPanel = $("#seq-panel");
   const drawSeq = (key) => {
@@ -375,6 +387,8 @@
     ["Inaudible watermark in generated audio", "good", "Acceptable for personal listening. Note it in the README so downloads aren't a surprise."],
     ["AGPL licence of VoiceStudio", "good", "Called over HTTP as a separate service; ReadAloud ships no VoiceStudio code. Model weights carry their own terms; all four engines allow personal use."],
     ["Disk and memory on a 15 GB laptop", "warning", "KittenTTS weights are under 100 MB. Defer Supertonic-3 and cloning engines until the first engine is proven. Cap the IndexedDB audio cache, which already exists."],
+    ["Speech pool saturated (429) while preparing", "good", "Live requests are serialized in the browser, busy retries wait at most 5 s, and background preparation waits until live speech has been quiet for 15 s."],
+    ["OmniVoice renders a passage as breathy noise", "good", "Each take’s voiced share is measured; under 20 % it is asked again up to 2 times, in the browser and in preparation."],
     ["Tailnet exposure", "good", "kind exposes local VoiceStudio through a dedicated Traefik entrypoint; the Mac is reachable over the tailnet. Tailnet policy controls access. AWS does not run a local speech server."],
   ];
   const sev = { good: ["Low", "var(--good)", "✓"], warning: ["Medium", "var(--warn)", "!"], serious: ["High", "var(--serious)", "!!"], critical: ["Critical", "var(--critical)", "✕"] };
@@ -385,7 +399,7 @@
     ["A 20-word sentence returns MP3 from the proxy in under 1 s on this laptop", "P0–P1 · measured with curl, recorded in README"],
     ["Compose → Listen plays a VoiceStudio voice with sentence highlighting", "P2"],
     ["Replaying a document with the network off still plays from cache", "P2 · DevTools offline"],
-    ["Stopping the container shows the offline banner and falls back to the browser voice", "P2"],
+    ["Stopping the server pauses playback with a banner offering Retry or Use browser voice", "P2"],
     ["Voices page lists the server's voices; Preview plays a real sample", "P3"],
     ["Switching engines never replays audio cached from another engine", "P2–P3 · cache key includes engine"],
     ["Speed chip changes playback without a new request", "P2 · clips cached at 1×"],
@@ -406,10 +420,10 @@
 
   // ---- decisions
   const decisions = [
-    { q: "First engine", opts: ["KittenTTS (English, 8 presets, smallest install)", "Supertonic-3 (31 languages, 7 presets, sidecar)", "Decide after P0 measurements"], note: "Affects which voice names appear first and how much disk P0 needs." },
+    { q: "First engine", opts: ["KittenTTS (English, 8 presets, smallest install)", "Supertonic-3 (31 languages, 7 presets, sidecar)", "Decide after P0 measurements"], note: "Outcome: KittenTTS was the first engine and is still the container’s default; the app’s default voice is now the Librarian profile on the Mac." },
     { q: "Hosting implementation", opts: ["kind: Serve → Traefik → Vite preview and middleware", "AWS target: Serve → Traefik → the same web image", "Vercel: requires durable storage, workers and function routes"], note: "Current design uses the shared Terraform module for kind and AWS; the AWS target is not yet provisioned. These are documented deployment choices, not actions triggered by this control." },
-    { q: "Word timings", opts: ["Skip P4; keep the estimate", "Build P4 behind a flag, default off", "Build P4 and enable it if alignment adds under 300 ms per sentence"], note: "P4 is two days and is the only phase that adds a second request per sentence." },
-    { q: "Keep the browser voice fallback", opts: ["Yes, as today, with the banner", "No; show an error and stop"], note: "Keeping it preserves the Linux client story: unreachable API falls back to a local voice." },
+    { q: "Word timings", opts: ["Skip P4; keep the estimate", "Build P4 behind a flag, default off", "Build P4 and enable it if alignment adds under 300 ms per sentence"], note: "Outcome: built behind a flag, default off (Settings → word timings)." },
+    { q: "Keep the browser voice fallback", opts: ["Yes, as today, with the banner", "No; show an error and stop"], note: "Outcome: neither as written. An unreachable server stops playback with Retry and Use browser voice; the browser voice is used directly only when no server is configured." },
   ];
   $("#decisions").innerHTML = decisions.map((d, i) => `<div class="card" style="margin-bottom:10px"><b>${d.q}</b><div class="q" style="margin-top:8px">${d.opts.map((o, j) => `<label><input type="radio" name="d${i}" value="${j}" ${store("plan:dec:" + i) === String(j) ? "checked" : ""}>${o}</label>`).join("")}</div><p class="note">${d.note}</p></div>`).join("");
   $$("#decisions input").forEach(r => r.addEventListener("change", () => store("plan:dec:" + r.name.slice(1), r.value)));
