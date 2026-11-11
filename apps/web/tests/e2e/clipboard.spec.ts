@@ -1,18 +1,8 @@
 import { test, expect, type Page } from "./fixtures";
 import { TEXT, composeText } from "./helpers";
 
-async function clipboard(page: Page, text: string, mode: "ok" | "denied" | "unavailable" = "ok") {
-  await page.addInitScript(({ text, mode }) => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: mode === "unavailable" ? undefined : {
-        readText: async () => {
-          if (mode === "denied") throw new DOMException("Permission denied", "NotAllowedError");
-          return text;
-        },
-      },
-    });
-  }, { text, mode });
+async function withoutClipboardApi(page: Page) {
+  await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined }));
 }
 
 async function paste(page: Page, text: string, selector = "body") {
@@ -29,27 +19,8 @@ async function expectReading(page: Page, text = "The quick brown fox") {
   await expect(page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Pause/ })).toHaveAttribute("data-playing", "true");
 }
 
-test("read clipboard from the library without opening the composer", async ({ page }) => {
-  await clipboard(page, TEXT);
-  await page.goto("/library");
-  await page.getByRole("button", { name: "Read clipboard", exact: true }).click();
-  await expectReading(page);
-  await page.getByRole("link", { name: "Library", exact: true }).click();
-  await expect(page.locator("li")).toHaveCount(1);
-});
-
-test("the composer clipboard action reads immediately and preserves an existing draft", async ({ page }) => {
-  await clipboard(page, TEXT);
-  await page.goto("/");
-  await composeText(page, "Keep this unfinished draft.");
-  await page.locator('[data-screen="compose"]').getByRole("button", { name: "Read clipboard", exact: true }).click();
-  await expectReading(page);
-  await page.getByRole("link", { name: "Compose", exact: true }).click();
-  await expect(page.getByLabel("Text to read")).toHaveValue("Keep this unfinished draft.");
-});
-
 test("pasting outside fields imports text even without the clipboard API", async ({ page }) => {
-  await clipboard(page, "", "unavailable");
+  await withoutClipboardApi(page);
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await paste(page, TEXT);
@@ -85,54 +56,29 @@ test("pasting in text fields and editable content leaves normal editing alone", 
   await expect(page.getByText("Nothing here yet.", { exact: false })).toBeVisible();
 });
 
-test("a copied article URL imports the article instead of reading its address", async ({ page }) => {
-  await clipboard(page, "https://example.com/story");
+test("a pasted article URL imports the article instead of reading its address", async ({ page }) => {
   await page.route("https://example.com/story", (route) => route.fulfill({
     contentType: "text/html",
     headers: { "Access-Control-Allow-Origin": "*" },
     body: `<html><head><title>Clipboard article</title></head><body><article><p>${TEXT}</p></article></body></html>`,
   }));
   await page.goto("/library");
-  await page.getByRole("button", { name: "Read clipboard", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
+  await paste(page, "https://example.com/story");
   await expectReading(page);
   await expect(page.getByRole("heading", { name: "Clipboard article", exact: true })).toBeVisible();
 });
 
-test("an unreadable copied URL reports the failure and allows another import", async ({ page }) => {
-  await clipboard(page, "https://example.com/story");
+test("an unreadable pasted URL reports the failure and allows another import", async ({ page }) => {
   await page.route("https://example.com/story", (route) => route.abort());
   await page.route("**/api/fetch?**", (route) => route.fulfill({ status: 502, body: "Unavailable" }));
   await page.goto("/library");
-  const read = page.getByRole("button", { name: "Read clipboard", exact: true });
-  await read.click();
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
+  await paste(page, "https://example.com/story");
   await expect(page.getByRole("status").filter({ hasText: "Couldn't read example.com" })).toBeVisible();
-  await expect(read).toBeEnabled();
   await expect(page.getByText("Nothing here yet.", { exact: false })).toBeVisible();
   await paste(page, TEXT);
   await expectReading(page);
-});
-
-for (const mode of ["denied", "unavailable"] as const) {
-  test(`clipboard ${mode} explains the paste fallback and remains usable`, async ({ page }) => {
-    await clipboard(page, TEXT, mode);
-    await page.goto("/library");
-    const read = page.getByRole("button", { name: "Read clipboard", exact: true });
-    await read.click();
-    await expect(page.getByRole("status").filter({ hasText: /outside a text field/ })).toBeVisible();
-    await expect(read).toBeEnabled();
-    await expect(page).toHaveURL(/\/library$/);
-    await paste(page, TEXT);
-    await expectReading(page);
-  });
-}
-
-test("an empty clipboard does not create a document", async ({ page }) => {
-  await clipboard(page, " \n ");
-  await page.goto("/library");
-  await page.getByRole("button", { name: "Read clipboard", exact: true }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Clipboard is empty" })).toBeVisible();
-  await expect(page).toHaveURL(/\/library$/);
-  await expect(page.getByText("Nothing here yet.", { exact: false })).toBeVisible();
 });
 
 test("repeated paste while fetching imports only one document", async ({ page }) => {
@@ -145,18 +91,9 @@ test("repeated paste while fetching imports only one document", async ({ page })
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await paste(page, "https://example.com/story");
-  await expect(page.getByRole("button", { name: "Read clipboard", exact: true })).toBeDisabled();
   await paste(page, TEXT);
   finishFetch();
   await expectReading(page);
   await page.getByRole("link", { name: "Library", exact: true }).click();
   await expect(page.locator("li")).toHaveCount(1);
-});
-
-test("phone exposes Read clipboard without opening Compose", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await clipboard(page, TEXT);
-  await page.goto("/library");
-  await page.getByRole("button", { name: "Read clipboard", exact: true }).click();
-  await expectReading(page);
 });

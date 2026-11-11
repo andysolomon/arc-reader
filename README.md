@@ -83,7 +83,7 @@ The audio session is playback, and the app declares the audio background mode, s
 
 The service worker is registered only in the browser. The native shell unregisters any worker, so a cached PWA shell cannot intercept the bundled files or hide a deploy from an app that loads from the server.
 
-Paste into the composer works as a normal text paste. **Read clipboard** uses the system pasteboard, which asks for permission on iOS 16 and later.
+Paste into the composer works as a normal text paste.
 
 ### Build on a Mac
 
@@ -433,9 +433,9 @@ Links are stored with their text, not a position, so each is matched to the plac
 
 ## Keyboard
 
-Space play/pause · ← → sentences · [ ] speed ±0.25 · ⌘↵ Listen · Ctrl/⌘V read clipboard · F focus · / search library · ? shortcuts · Esc exit/close. Ignored while typing, except Esc and ⌘↵. Pasting in text fields keeps its normal editing behavior.
+Space play/pause · ← → sentences · [ ] speed ±0.25 · ⌘↵ Listen · Ctrl/⌘V paste to read · F focus · / search library · ? shortcuts · Esc exit/close. Ignored while typing, except Esc and ⌘↵. Pasting in text fields keeps its normal editing behavior.
 
-Use **Read clipboard** from the sidebar, composer, or mobile toolbar to open copied text directly in the reader and start listening. A copied HTTP(S) article link fetches the article first. You can also paste anywhere outside a text field without opening Compose; this works even when the browser blocks clipboard reading. Clipboard contents are read only after clicking the button or pasting, and existing composer drafts are preserved.
+Paste anywhere outside a text field to open copied text directly in the reader and start listening, without opening Compose. A pasted HTTP(S) article link fetches the article first. This works even when the browser blocks clipboard reading, and existing composer drafts are preserved.
 
 ## PWA
 
