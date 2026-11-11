@@ -1,3 +1,4 @@
+import { serverFetch } from "./appServer";
 import { readingBlocks, fencedCode } from "./codeBlocks";
 import { visualNarration } from "./visuals";
 import type { DocRecord } from "./db";
@@ -35,7 +36,7 @@ export async function summarize(rec: DocRecord, model: SummaryModel): Promise<No
     : rec.text.trim();
   if (!text) throw new Error("There is no text to summarize.");
   if (text.length > MAX_CHARS) throw new Error("This document is too long to summarize in one go.");
-  const response = await fetch("/api/llm/v1/chat/completions", {
+  const response = await serverFetch("/api/llm/v1/chat/completions", {
     method: "POST",
     // A stable session per document lets OpenCode Go route and cache repeat requests.
     headers: { "Content-Type": "application/json", "x-opencode-session": `readaloud-summary-${rec.id}` },

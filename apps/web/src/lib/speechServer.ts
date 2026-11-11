@@ -1,11 +1,9 @@
 /**
  * Where speech requests go.
  *
- * The web build talks to the same-origin Vite proxy (`/api/vs`), which holds
- * the VoiceStudio key. The iOS bundle has no proxy: a relative base is ignored
- * and the on-device voice reads instead, unless Settings stores an absolute
- * server (a ReadAloud proxy such as `https://host.ts.net:8449/api/vs`, or
- * VoiceStudio itself at `https://mac.ts.net:3900`).
+ * The web build uses its Vite proxy; native clients use the selected app
+ * server's proxy. An optional absolute VoiceStudio override takes precedence
+ * for that provider alone. The other providers retain their app-server routes.
  */
 
 export interface SpeechEndpoint {
@@ -51,10 +49,11 @@ export function resolveApiBase(configured: string, native: boolean, override = "
   return base;
 }
 
-/** Attach the device-held key only when the request leaves the device. */
+/** A VoiceStudio key belongs only to its configured endpoint, never the app's other proxies. */
 export function withSpeechAuth(url: string, init: RequestInit = {}): RequestInit {
   const key = current.key;
-  if (!key || !/^https?:\/\//i.test(url)) return init;
+  const base = current.override;
+  if (!key || !base || !(url === base || url.startsWith(`${base}/`) || url.startsWith(`${base}?`))) return init;
   const headers = new Headers(init.headers);
   if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${key}`);
   return { ...init, headers };

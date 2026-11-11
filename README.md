@@ -49,22 +49,23 @@ ReadAloud is the name on the web app's home screen and window title. The bundle 
 
 The shell pads `env(safe-area-inset-*)`: the status bar overlays the web view, the top of every screen clears the notch, and the home indicator is owned by the tab bar (or by the player, when focus mode hides the tab bar). The status-bar text follows the theme.
 
-### Voices on device
+### Server features on iOS
 
-The browser build sends speech to the Vite proxy at `/api/vs`, which holds the VoiceStudio key. That proxy is not in the iOS bundle, so a relative `/api/vs` is ignored and passages are read with **AVSpeechSynthesizer** (the iPhone's installed voices) through a small plugin in the app target. WKWebView's Web Speech API is not used for this: it often stays silent, and it stops when the app leaves the foreground. Word highlighting follows the synthesizer's word ranges, with the same estimated clock the browser voice uses between ranges.
+**Settings → Arc Reader server** connects the bundled app to the same website as your computer. It defaults to `https://omarchy.tail1b9428.ts.net:8449`; keep Tailscale connected on the phone. The connection covers the shared library and progress, VoiceStudio profiles and engines, OpenAI voices and accents, Fish voices, generated and prepared audio, Studio (gallery, cloning, design, transcription, dictation and dubbing), summaries, code/image descriptions, Jev categories, Patois adaptation, article import and favicons. The server must have the corresponding providers configured, just as on the web. Provider credentials remain on the server.
 
-To use VoiceStudio or a ReadAloud server instead, open Settings → Speech server and paste an absolute URL:
+The **Speech server** field is an optional override for VoiceStudio alone. Leave it empty to use the app server's `/api/vs` proxy. A direct VoiceStudio can use `https://<mac>.<tailnet>.ts.net:3900` and its key. That key is sent only to that endpoint, never to OpenAI, Fish or library requests. Background preparation uses the app server when its VoiceStudio proxy is selected.
 
-- VoiceStudio itself: `https://<mac>.<tailnet>.ts.net:3900`, plus the API key if the server requires one. The key is stored on the device and sent only to that absolute URL.
-- A ReadAloud server that already proxies VoiceStudio and holds the key: `https://<host>.<tailnet>.ts.net:8449/api/vs`. Leave the key empty.
+Native HTTP handles the `capacitor://` origin, JSON, multipart uploads and binary audio. POST audio responses are decoded as bytes, not text. Native HTTP buffers SSE responses until completion, so Studio task completion works but intermediate progress arrives together; cancelling stops the UI waiting, and Studio's explicit cancel action still cancels its server task. Native transport itself may finish an already-submitted operation after the UI stops waiting.
 
-Those requests use Capacitor's native HTTP stack, so the server does not need to allow the `capacitor://` origin. `localhost` is the phone, not the Mac. Background preparation and OpenAI/Fish proxies stay on the web server; they are not part of the bundled shell. Cached clips still play offline.
+Microphone access is requested when recording. Transcripts, subtitles and dubbed media export through the iOS share sheet (including Save to Files). Large dub downloads go directly to the native cache instead of passing through JavaScript memory. Generated speech and completed downloads still need device validation on a Mac/iPhone after installing the build.
+
+Choose the device voice in Voices to read with **AVSpeechSynthesizer** (the iPhone's installed voices). WKWebView's Web Speech API is not used for on-device narration. Cached readings and audio remain available offline.
 
 ### Shared library on iOS
 
-The iOS app syncs documents and listening progress with `https://omarchy.tail1b9428.ts.net:8449` by default, using native HTTP. Keep Tailscale connected on the phone. **Settings → Library server** lets you change the website root and **Save and sync** immediately connects; this is separate from the speech-server setting, so the iPhone's own voice still works. Local documents merge into the selected shared library. Failed requests retain local readings and queued changes for retry.
+Local documents and listening progress merge with the selected shared library. Failed requests retain local readings and queued changes for retry. Library errors link to the server settings. Changing the server restarts the app so its screens and catalogues use the new connection.
 
-Set `VITE_LIBRARY_SERVER` before `pnpm ios:sync` to bake in a different default (an empty value requires setup). Existing installations without this setting inherit the default on update; a saved address takes precedence. Browser builds continue to sync with their own origin. Library errors link to Settings instead of leaving you with only a retry button. Rebuild and install the iOS app after code changes; updating the website alone does not update the bundled app.
+Set `VITE_APP_SERVER` before `pnpm ios:sync` to bake in a different default (an empty value requires setup). The previous `VITE_LIBRARY_SERVER` variable and saved library-server address are accepted for migration; a saved app-server address takes precedence. Browser builds continue using their existing provider configuration and same-origin APIs. Rebuild and install the iOS app after changes; updating the website alone does not update the bundled app.
 
 The audio session is playback, and the app declares the audio background mode, so the current passage keeps playing when the screen locks. There is no lock-screen play/pause button. iOS can suspend the app in a gap between sentences, and the orange background-audio indicator is the cost of letting a reader continue while locked. The browser PWA is unchanged.
 

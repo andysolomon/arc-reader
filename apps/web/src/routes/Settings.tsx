@@ -20,7 +20,7 @@ import { SUMMARY_MODELS } from "../lib/summary";
 import { useJev, useLlm } from "../state/llm";
 import { CATEGORIES } from "../lib/category";
 import { LlmKeyField } from "../components/LlmKeyField";
-import { LibraryServerSettings } from "../components/LibraryServerSettings";
+import { AppServerSettings } from "../components/AppServerSettings";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -87,8 +87,8 @@ export function SettingsPage() {
         <h1 className="m-0 font-serif text-[26px] font-medium">Settings</h1>
 
         {native && (
-          <Section title="Library server">
-            <LibraryServerSettings />
+          <Section title="Arc Reader server">
+            <AppServerSettings />
           </Section>
         )}
 
@@ -178,7 +178,7 @@ export function SettingsPage() {
         {native && (
           <Section title="Speech server">
             <p className="m-0 text-[13px] text-fg2">
-              Leave this empty to read with the iPhone’s own voice. To use VoiceStudio, paste its address, for example <span className="font-mono">https://mac.tailnet.ts.net:3900</span>. To use a ReadAloud server that already holds the key, paste its proxy, for example <span className="font-mono">https://host.ts.net:8449/api/vs</span>. A key is sent only to an absolute address, and only from this device.
+              Optional override for VoiceStudio. Leave empty to use your Arc Reader server’s voices and Studio. To use another VoiceStudio, enter its address and key here. OpenAI and Fish still use the Arc Reader server. Choose the device voice in Voices to read without a server.
             </p>
             <div className="flex flex-col gap-2">
               <Input

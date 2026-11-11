@@ -19,6 +19,7 @@ import { PreparationQueue, PrepareDialog, PreparedStatus } from "../components/L
 import { useCategories } from "../state/categories";
 import { useJev } from "../state/llm";
 import { isNativeApp } from "../lib/native";
+import { appApiUrl, appServer } from "../lib/appServer";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
@@ -138,7 +139,7 @@ export function LibraryPage() {
           {sync.status === "synced" && <span aria-label="Synced document count">· {sync.documents} {sync.documents === 1 ? "document" : "documents"}</span>}
           <button type="button" disabled={sync.status === "syncing"} className="ml-1.5 text-accent hover:text-fg disabled:opacity-50" onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}>{sync.status === "offline" ? "Retry sync" : "Sync now"}</button>
           {sync.status === "offline" && sync.error && <span className="basis-full">{sync.error}</span>}
-          {sync.status === "offline" && isNativeApp() && <Link to="/settings" className="text-accent hover:text-fg">Library server settings</Link>}
+          {sync.status === "offline" && isNativeApp() && <Link to="/settings" className="text-accent hover:text-fg">Arc Reader server settings</Link>}
         </div>
         {items.length > 0 && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by voice">
@@ -315,8 +316,8 @@ function ReadProgress({ value, size = 40 }: { value: number; size?: 36 | 40 }) {
 function SourceIcon({ rec }: { rec: LibraryItem["rec"] }) {
   const [failed, setFailed] = useState(false);
   const site = (rec.source === "url" || rec.source === "share") && rec.domain.includes(".") && !/[\s/]/.test(rec.domain);
-  if (site && !failed) {
-    return <img src={`/api/favicon?host=${encodeURIComponent(rec.domain)}`} alt="" width={14} height={14} loading="lazy" decoding="async" onError={() => setFailed(true)} className="size-3.5 shrink-0 rounded-[3px]" />;
+  if (site && !failed && (!isNativeApp() || appServer())) {
+    return <img src={appApiUrl(`/api/favicon?host=${encodeURIComponent(rec.domain)}`)} alt="" width={14} height={14} loading="lazy" decoding="async" onError={() => setFailed(true)} className="size-3.5 shrink-0 rounded-[3px]" />;
   }
   const Icon = site ? Globe : rec.source === "file" ? FileText : ClipboardList;
   return <Icon size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />;

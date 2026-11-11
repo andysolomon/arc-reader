@@ -1,3 +1,4 @@
+import { serverFetch } from "../lib/appServer";
 import { hash } from "../lib/hash";
 import { audioCache } from "../lib/db";
 
@@ -51,7 +52,7 @@ export async function refreshPreparationCatalog(): Promise<SharedPreparation[]> 
   for (const [key, target] of [...uploads].slice(0, 8)) {
     const clip = await audioCache.get(key);
     if (!clip) continue;
-    const response = await fetch(`${BASE}/${target.id}/audio/${target.index}`, {
+    const response = await serverFetch(`${BASE}/${target.id}/audio/${target.index}`, {
       method: "PUT", headers: { "content-type": clip.mime, "x-duration": String(clip.duration), ...(clip.words ? { "x-word-timings": JSON.stringify(clip.words) } : {}) },
       body: clip.blob, signal: AbortSignal.timeout(30_000),
     });
@@ -111,7 +112,7 @@ export function hasActivePreparation(requests: PreparationRequest[]): boolean {
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, init);
+  const response = await serverFetch(`${BASE}${path}`, init);
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string } | null;
     throw new PreparationHttpError(response.status, detail?.error || `Audio preparation failed (HTTP ${response.status}).`);
@@ -182,7 +183,7 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
     session.cancelled = true;
     if (sessions.get(fingerprint) === session) sessions.delete(fingerprint);
     save(saved().map((job) => job.id === id ? { ...job, active: false } : job));
-    void fetch(`${BASE}/${id}`, { method: "DELETE", keepalive: true }).catch(() => {});
+    void serverFetch(`${BASE}/${id}`, { method: "DELETE", keepalive: true }).catch(() => {});
   };
   signal?.addEventListener("abort", cancel, { once: true });
   try {
@@ -225,7 +226,7 @@ export async function preparedAudio(key: string, signal?: AbortSignal): Promise<
   const running = shared.find((job) => job.state === "running" && job.keys.includes(key));
   const entry = ready || saved().slice().reverse().find((job) => job.keys.includes(key)) || running;
   if (!entry) return null;
-  const response = await fetch(`${BASE}/${entry.id}/audio/${entry.keys.indexOf(key)}`, { signal });
+  const response = await serverFetch(`${BASE}/${entry.id}/audio/${entry.keys.indexOf(key)}`, { signal });
   // The server cache may have expired. Ordinary generation remains available.
   if (response.status === 404 || response.status === 410) return null;
   if (!response.ok) {

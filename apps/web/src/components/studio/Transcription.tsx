@@ -30,8 +30,8 @@ export function Transcription({ dictate }: { dictate: boolean }) {
       <div className="flex flex-wrap gap-3"><Button disabled={!text.trim() || op.busy} onClick={() => void op.run(async () => {
         await useLibrary.getState().create({ text, title: file?.name.replace(/\.[^.]+$/, "") || "Dictation", source: "file", domain: file?.name || "Microphone" });
         navigate("/library");
-      })}>Save to Library</Button><Button disabled={!text.trim()} onClick={() => downloadText(text, "transcript.txt")}>Download text</Button>
-      {!!result.segments?.length && <Button disabled={dirty} title={dirty ? "Subtitles use the original timed transcript. Transcribe again to reset edits." : undefined} onClick={() => downloadText(subtitles(result.segments!), "transcript.srt", "application/x-subrip")}>Download subtitles</Button>}</div>
+      })}>Save to Library</Button><Button disabled={!text.trim() || op.busy} onClick={() => void op.run(() => downloadText(text, "transcript.txt"))}>Download text</Button>
+      {!!result.segments?.length && <Button disabled={dirty || op.busy} title={dirty ? "Subtitles use the original timed transcript. Transcribe again to reset edits." : undefined} onClick={() => void op.run(() => downloadText(subtitles(result.segments!), "transcript.srt", "application/x-subrip"))}>Download subtitles</Button>}</div>
       {dirty && !!result.segments?.length && <p className="text-xs text-fg2">Text edits do not update subtitle timings. Download text to keep your edits.</p>}
     </>}
   </div>;

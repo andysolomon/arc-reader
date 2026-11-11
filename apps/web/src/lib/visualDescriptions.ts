@@ -1,3 +1,4 @@
+import { serverFetch } from "./appServer";
 import type { DocRecord } from "./db";
 import { readingBlocks } from "./codeBlocks";
 import { safeVisualDescription, visualKey, type ArticleVisual, type VisualDescriptions } from "./visuals";
@@ -45,7 +46,7 @@ async function describe(rec: DocRecord, visual: ArticleVisual, context: string, 
   const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
   const image = await imageForVision(visual.src, requestSignal);
   if (!image) return null;
-  const response = await fetch("/api/llm/v1/responses", {
+  const response = await serverFetch("/api/llm/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-opencode-session": `readaloud-visual-${rec.id}` },
     signal: requestSignal,
@@ -103,7 +104,7 @@ export async function prepareVisualDescriptions(rec: DocRecord, text: string, si
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
   const descriptions: VisualDescriptions = {};
   try {
-    const config = await fetch("/api/llm/config", { signal: AbortSignal.any([deadline, AbortSignal.timeout(8000)]) });
+    const config = await serverFetch("/api/llm/config", { signal: AbortSignal.any([deadline, AbortSignal.timeout(8000)]) });
     if (!config.ok || !(await config.json() as { configured?: boolean }).configured) return rec;
     const queue = [...missing.entries()];
     let done = 0;

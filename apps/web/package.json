@@ -16,7 +16,10 @@
   "dependencies": {
     "@capacitor/clipboard": "^8.0.1",
     "@capacitor/core": "^8.6.0",
+    "@capacitor/file-transfer": "^2.0.6",
+    "@capacitor/filesystem": "^8.1.5",
     "@capacitor/ios": "^8.6.0",
+    "@capacitor/share": "^8.0.3",
     "@capacitor/status-bar": "^8.0.4",
     "@readaloud/tokens": "workspace:*",
     "@readaloud/ui": "workspace:*",

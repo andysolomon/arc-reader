@@ -1,9 +1,10 @@
+import { serverFetch } from "../lib/appServer";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Input } from "@readaloud/ui";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
-import { API_BASE, usesBuiltInProxy } from "../engine/providers";
+import { activeApiBase, usesBuiltInProxy } from "../engine/providers";
 
 export function AuthPage() {
   const navigate = useNavigate();
@@ -16,7 +17,7 @@ export function AuthPage() {
     setBusy(true);
     try {
       if (usesBuiltInProxy()) {
-        const r = await fetch(`${API_BASE}/auth/magic-link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+        const r = await serverFetch(`${activeApiBase()}/auth/magic-link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
       }
       setSent(true);
@@ -29,7 +30,7 @@ export function AuthPage() {
 
   const google = () => {
     if (usesBuiltInProxy()) {
-      location.assign(`${API_BASE}/auth/google?redirect=${encodeURIComponent(location.origin)}`);
+      location.assign(`${activeApiBase()}/auth/google?redirect=${encodeURIComponent(location.origin)}`);
       return;
     }
     toast("Google sign-in needs the cloud API");

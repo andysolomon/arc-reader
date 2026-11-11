@@ -1,3 +1,4 @@
+import { serverFetch } from "./appServer";
 import { readingBlocks } from "./codeBlocks";
 import { visualNarration } from "./visuals";
 import type { DocCategory, DocRecord } from "./db";
@@ -75,7 +76,7 @@ interface ChoiceAnswer { choice?: string; confidence?: number }
 export async function suggestCategory(rec: DocRecord, used: Iterable<string>): Promise<DocCategory> {
   if (!rec.text.trim() && !rec.title.trim()) throw new Error("There is nothing to categorize.");
   const request = categoryRequest(rec, used);
-  const response = await fetch("/api/jev/v1/systemone", {
+  const response = await serverFetch("/api/jev/v1/systemone", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal: AbortSignal.timeout(60_000),

@@ -1,3 +1,4 @@
+import { serverFetch } from "../lib/appServer";
 import { create } from "zustand";
 import type { LlmConfig } from "../../vite.llm";
 
@@ -13,7 +14,7 @@ export interface KeyState {
 /** A provider key saved on this ReadAloud server; the browser only learns whether it is set. */
 function keyStore(path: string) {
   async function request(init?: RequestInit): Promise<LlmConfig> {
-    const response = await fetch(path, { ...init, headers: { "Content-Type": "application/json" } });
+    const response = await serverFetch(path, { ...init, headers: { "Content-Type": "application/json" } });
     const data = await response.json().catch(() => null) as (LlmConfig & { error?: { message?: string } }) | null;
     if (!response.ok || !data) throw new Error(data?.error?.message || `The server couldn't update the key (HTTP ${response.status}).`);
     return data;

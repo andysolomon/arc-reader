@@ -1,33 +1,13 @@
 import { CapacitorHttp } from "@capacitor/core";
 import { isNativeApp } from "./native";
 import type { LibraryChange, LibrarySnapshot } from "./libraryProtocol";
+import { appApiUrl } from "./appServer";
 
 /** The existing shared library; builds for another server can override this. */
-export const DEFAULT_LIBRARY_SERVER = (import.meta.env.VITE_LIBRARY_SERVER as string | undefined)
-  ?? "https://omarchy.tail1b9428.ts.net:8449";
-
-/** Library settings accept the website's root address, not a speech API URL. */
-export function normalizeLibraryServer(value: string): string {
-  try {
-    const url = new URL(value.trim());
-    if (!/^https?:$/.test(url.protocol) || url.username || url.password
-      || url.pathname !== "/" || url.search || url.hash) return "";
-    return url.origin;
-  } catch {
-    return "";
-  }
-}
-
-let server = normalizeLibraryServer(DEFAULT_LIBRARY_SERVER);
-
-export function setLibraryServer(value: string): void {
-  server = normalizeLibraryServer(value);
-}
+export { DEFAULT_APP_SERVER as DEFAULT_LIBRARY_SERVER, normalizeAppServer as normalizeLibraryServer, setAppServer as setLibraryServer } from "./appServer";
 
 export function librarySyncUrl(): string {
-  if (!isNativeApp()) return "/api/library/sync";
-  if (!server) throw new Error("Add your Arc Reader website address in Settings → Library server to sync.");
-  return `${server}/api/library/sync`;
+  return appApiUrl("/api/library/sync");
 }
 
 export async function requestLibrarySync(url: string, changes: LibraryChange[]): Promise<LibrarySnapshot> {
@@ -58,7 +38,7 @@ export async function requestLibrarySync(url: string, changes: LibraryChange[]):
   }
   const snapshot = data as LibrarySnapshot | null;
   if (!snapshot || !Array.isArray(snapshot.docs) || !Array.isArray(snapshot.positions) || !Array.isArray(snapshot.deleted)) {
-    throw new Error("This address did not return a library. Use your Arc Reader website address in Settings → Library server.");
+    throw new Error("This address did not return a library. Use your website address in Settings → Arc Reader server.");
   }
   return snapshot;
 }

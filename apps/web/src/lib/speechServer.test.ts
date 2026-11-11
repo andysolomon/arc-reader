@@ -27,11 +27,17 @@ describe("speech server address", () => {
     expect(resolveApiBase("/api/vs", false, "not a url")).toBe("/api/vs");
   });
 
-  it("sends the key only to an absolute server", () => {
-    setSpeechEndpoint({ override: "", key: "secret" });
+  it("sends the key only to the configured speech server", () => {
+    setSpeechEndpoint({ override: "https://mac.tailnet.ts.net:3900", key: "secret" });
     expect(speechEndpoint().key).toBe("secret");
     expect(withSpeechAuth("/api/vs/v1/audio/speech", { method: "POST" }).headers).toBeUndefined();
     const authed = withSpeechAuth("https://mac.tailnet.ts.net:3900/v1/audio/speech", { method: "POST" });
     expect(new Headers(authed.headers).get("Authorization")).toBe("Bearer secret");
+    expect(withSpeechAuth("https://reader.example/api/oa/v1/audio/speech").headers).toBeUndefined();
+    expect(withSpeechAuth("https://reader.example/api/fish/v1/tts").headers).toBeUndefined();
+    expect(withSpeechAuth("https://mac.tailnet.ts.net:3900.evil.example/v1/audio/speech").headers).toBeUndefined();
+    setSpeechEndpoint({ override: "https://reader.example/api/vs", key: "secret" });
+    expect(withSpeechAuth("https://reader.example/api/llm/config").headers).toBeUndefined();
+    expect(withSpeechAuth("https://reader.example/api/vs-other").headers).toBeUndefined();
   });
 });

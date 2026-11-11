@@ -1,3 +1,4 @@
+import { serverFetch } from "./appServer";
 import { fencedCode, readingBlocks } from "./codeBlocks";
 import { visualBlock, type ArticleVisual } from "./visuals";
 import { articleVisual } from "./articleVisuals";
@@ -190,7 +191,7 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
     if (signal?.aborted) throw e;
   }
   try {
-    return await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain);
+    return await readResponse(await serverFetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain);
   } catch (e) {
     if (!PROXY || signal?.aborted) throw e;
   }

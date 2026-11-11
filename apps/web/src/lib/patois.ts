@@ -1,8 +1,10 @@
+import { activeOpenAIBase } from "../engine/providers";
+import { serverFetch } from "./appServer";
 import { readingBlocks, fencedCode } from "./codeBlocks";
 import { visualBlock } from "./visuals";
 import type { DocRecord } from "./db";
 
-const BASE = ((import.meta.env.VITE_OPENAI_BASE as string | undefined) ?? "").replace(/\/$/, "");
+
 export const PATOIS_MODEL = (import.meta.env.VITE_PATOIS_MODEL as string | undefined) || "gpt-4.1-mini";
 const VERSION = 1;
 const CHUNK_SIZE = 6000;
@@ -34,6 +36,7 @@ export function hasPatois(rec: DocRecord): boolean {
 export async function preparePatois(rec: DocRecord, signal: AbortSignal, progress: (message: string) => void): Promise<DocRecord> {
   signal.throwIfAborted();
   if (hasPatois(rec)) return rec;
+  const BASE = activeOpenAIBase();
   if (!BASE) throw new Error("Patois rewriting needs the OpenAI connection. Choose Jamaican English to read the original text.");
   const blocks = readingBlocks(rec.text);
   // Preserve visual metadata verbatim instead of asking the translator to rewrite image URLs or bytes.
@@ -48,7 +51,7 @@ export async function preparePatois(rec: DocRecord, signal: AbortSignal, progres
     if (chunk.visual) { translated.push(text); continue; }
     signal.throwIfAborted();
     progress(`Rewriting into Jamaican Patois… ${index + 1} of ${chunks.length}`);
-    const response = await fetch(`${BASE}/v1/chat/completions`, {
+    const response = await serverFetch(`${BASE}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),

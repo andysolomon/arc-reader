@@ -80,7 +80,7 @@ describe("offline library synchronization", () => {
     setLibraryServer("");
     await docs.put(doc("phone"));
     expect(await syncLibrary()).toBe(false);
-    expect(useLibrarySync.getState()).toMatchObject({ status: "offline", pending: 1, error: expect.stringContaining("Settings → Library server") });
+    expect(useLibrarySync.getState()).toMatchObject({ status: "offline", pending: 1, error: expect.stringContaining("Settings → Arc Reader server") });
     expect(CapacitorHttp.post).not.toHaveBeenCalled();
     expect(network).not.toHaveBeenCalled();
     expect(await docs.get("phone")).toBeDefined();

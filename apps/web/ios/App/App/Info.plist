@@ -77,5 +77,7 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Record your voice for dictation, transcription, or a voice you create in Studio.</string>
 </dict>
 </plist>

@@ -1,3 +1,4 @@
+import { serverFetch } from "./appServer";
 import type { DocRecord } from "./db";
 import { codeKey, readingBlocks, safeCodeSummary, type CodeSummaries } from "./codeBlocks";
 import type { SummaryModel } from "./summary";
@@ -10,9 +11,9 @@ const pending = new Map<string, { controller: AbortController; promise: Promise<
 
 async function generate(id: string, title: string, examples: Example[], model: SummaryModel, signal: AbortSignal): Promise<CodeSummaries> {
   const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
-  const config = await fetch("/api/llm/config", { signal: requestSignal });
+  const config = await serverFetch("/api/llm/config", { signal: requestSignal });
   if (!config.ok || !(await config.json() as { configured?: boolean }).configured) return {};
-  const response = await fetch("/api/llm/v1/chat/completions", {
+  const response = await serverFetch("/api/llm/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-opencode-session": `readaloud-code-${id}` },
     signal: requestSignal,

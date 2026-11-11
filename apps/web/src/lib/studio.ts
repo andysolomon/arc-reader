@@ -1,5 +1,7 @@
+import { serverFetch } from "./appServer";
 import { activeApiBase } from "../engine/providers";
 import { withSpeechAuth } from "./speechServer";
+export { downloadText } from "./downloads";
 
 export const studioUrl = (path: string) => `${activeApiBase() || "/api/vs"}${path}`;
 export const idPath = encodeURIComponent;
@@ -18,7 +20,7 @@ export function errorMessage(value: unknown): string {
 
 export async function studioFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const url = studioUrl(path);
-  const response = await fetch(url, withSpeechAuth(url, init));
+  const response = await serverFetch(url, withSpeechAuth(url, init));
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body ? errorMessage(body) : `VoiceStudio returned HTTP ${response.status}`);
@@ -89,12 +91,6 @@ export async function transcribe(file: File, dictation: boolean, signal: AbortSi
   body.set("mode", dictation ? "fast" : "accurate");
   body.set("dictation", String(dictation));
   return studioJson<Transcript>("/transcribe", { method: "POST", body, signal });
-}
-export function downloadText(text: string, filename: string, type = "text/plain") {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = filename; anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function subtitles(segments: Segment[]): string {
   const time = (seconds: number) => {

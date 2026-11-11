@@ -1,3 +1,4 @@
+import { appServer, serverFetch } from "../lib/appServer";
 import { audioCache } from "../lib/db";
 import { hash } from "../lib/hash";
 import { estimateDuration, splitWords } from "../lib/segment";
@@ -20,12 +21,13 @@ export const OPENAI_ENGINE = "openai";
 export const FISH_ENGINE = "fish";
 export const FISH_BASE = ((import.meta.env.VITE_FISH_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const FISH_MODEL = (import.meta.env.VITE_FISH_TTS_MODEL as string | undefined) || "s2.1-pro";
-/** Base actually called. On iOS a relative proxy is dropped unless Settings has an absolute server. */
-export const activeApiBase = () => resolveApiBase(API_BASE, isNativeApp(), speechEndpoint().override);
-export const activeOpenAIBase = () => resolveApiBase(OPENAI_BASE, isNativeApp());
-export const activeFishBase = () => resolveApiBase(FISH_BASE, isNativeApp());
-/** The Vite server on this origin. It also serves preparation, library, and auth routes. The iOS bundle does not. */
-export const usesBuiltInProxy = () => API_BASE === "/api/vs" && !isNativeApp();
+/** Native clients use all three proxies on the selected website, regardless of build-time web flags. */
+const proxyBase = (configured: string, path: string) => isNativeApp() ? (appServer() ? `${appServer()}${path}` : "") : configured;
+export const activeApiBase = () => resolveApiBase(proxyBase(API_BASE, "/api/vs"), isNativeApp(), speechEndpoint().override);
+export const activeOpenAIBase = () => proxyBase(OPENAI_BASE, "/api/oa");
+export const activeFishBase = () => proxyBase(FISH_BASE, "/api/fish");
+/** Preparation belongs to the app server, not a separately configured VoiceStudio. */
+export const usesBuiltInProxy = () => !!activeApiBase() && activeApiBase() === proxyBase("/api/vs", "/api/vs");
 export const hasApi = () => activeApiBase().length > 0;
 export const hasOpenAI = () => activeOpenAIBase().length > 0;
 export const hasFish = () => activeFishBase().length > 0;
@@ -64,7 +66,7 @@ async function doFetch(url: string, init: RequestInit): Promise<Response> {
   const authed = withSpeechAuth(url, init);
   let r: Response;
   try {
-    r = await fetch(url, authed);
+    r = await serverFetch(url, authed);
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
     throw new ApiUnreachable();

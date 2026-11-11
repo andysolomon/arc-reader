@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { Button } from "@readaloud/ui";
 import { studioJson, studioUrl, jsonBody, idPath, waitForTask, type Segment, type Profile } from "../../lib/studio";
 import { ErrorNotice, Field, fieldClass, panelClass, useOperation } from "./shared";
+import { isNativeApp } from "../../lib/native";
+import { downloadMedia } from "../../lib/downloads";
 
 const KEY = "readaloud:dub-draft:v1";
 const LANGUAGES = [["en", "English"], ["es", "Spanish"], ["fr", "French"], ["de", "German"], ["it", "Italian"], ["pt", "Portuguese"], ["ja", "Japanese"], ["zh", "Chinese"], ["hi", "Hindi"], ["ar", "Arabic"]];
@@ -98,7 +100,12 @@ export function Dubbing() {
     </div>}
     {draft?.stage === "done" && draft.renderedLanguage && <div className={`${panelClass} flex flex-col gap-4`}><h3 className="font-serif text-xl">Your dub is ready</h3>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={preserve} onChange={(e) => setPreserve(e.target.checked)} />Preserve background audio</label>
-      <div className="flex flex-wrap gap-4 text-sm underline">{[["download", "Download video"], ["download-audio", "Download audio"], ["srt", "Download subtitles"]].map(([route, label]) => <a key={route} href={studioUrl(`/dub/${route}/${idPath(draft.jobId)}?lang=${idPath(draft.renderedLanguage!)}&preserve_bg=${preserve}${route === "download" ? `&default_track=${idPath(draft.renderedLanguage!)}&include_tracks=${idPath(draft.renderedLanguage!)}` : ""}`)} download>{label}</a>)}</div>
+      <div className="flex flex-wrap gap-4 text-sm underline">{[["download", "Download video", "mp4"], ["download-audio", "Download audio", "wav"], ["srt", "Download subtitles", "srt"]].map(([route, label, extension]) => <a key={route} href={studioUrl(`/dub/${route}/${idPath(draft.jobId)}?lang=${idPath(draft.renderedLanguage!)}&preserve_bg=${preserve}${route === "download" ? `&default_track=${idPath(draft.renderedLanguage!)}&include_tracks=${idPath(draft.renderedLanguage!)}` : ""}`)} download aria-disabled={op.busy} onClick={(event) => {
+        if (!isNativeApp()) return;
+        event.preventDefault();
+        const url = event.currentTarget.href;
+        void op.run(() => downloadMedia(url, `dub-${draft.renderedLanguage}.${extension}`));
+      }}>{label}</a>)}</div>
     </div>}
   </div>;
 }

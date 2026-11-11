@@ -6,7 +6,7 @@ import { LOCAL_ENGINE, type EngineId } from "../engine/types";
 import { DEFAULT_ENGINE, OPENAI_MODEL, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL } from "../engine/providers";
 import { DEFAULT_VOICE_ID } from "../data/voices";
 import { setSpeechEndpoint } from "../lib/speechServer";
-import { DEFAULT_LIBRARY_SERVER, setLibraryServer } from "../lib/libraryServer";
+import { DEFAULT_APP_SERVER, setAppServer } from "../lib/appServer";
 import { DEFAULT_SUMMARY_MODEL, isSummaryModel, type SummaryModel } from "../lib/summary";
 
 export type PlayerStyle = "capsule" | "bar";
@@ -38,14 +38,14 @@ export interface Settings {
   apiKey: string;
   email: string | null;
   /**
-   * Absolute speech-server URL for the iOS app. Empty uses the build-time base
-   * on the web, and the on-device voice in the iOS shell.
+   * Optional absolute VoiceStudio override. Empty uses the web proxy or the
+   * native app server's proxy. OpenAI and Fish keep their own connections.
    */
   speechServer: string;
   /** VoiceStudio key sent only with an absolute speech-server URL. */
   speechServerKey: string;
-  /** Absolute Arc Reader website root for native library sync; web stays same-origin. */
-  libraryServer: string;
+  /** Absolute website root for every native server feature; web stays same-origin. */
+  appServer: string;
 }
 
 interface Actions {
@@ -85,7 +85,7 @@ export const useSettings = create<Settings & Actions>()(
       email: null,
       speechServer: "",
       speechServerKey: "",
-      libraryServer: DEFAULT_LIBRARY_SERVER,
+      appServer: DEFAULT_APP_SERVER,
       set: (k, v) => set({ [k]: v } as Partial<Settings>),
       patch: (p) => set(p),
     }),
@@ -106,10 +106,12 @@ export const useSettings = create<Settings & Actions>()(
         return rest;
       },
       merge: (persisted, current) => {
-        const p = (persisted ?? {}) as Partial<Settings>;
+        const p = { ...((persisted ?? {}) as Partial<Settings> & { libraryServer?: string }) };
+        const appServer = p.appServer ?? p.libraryServer ?? current.appServer;
+        delete p.libraryServer;
         const openaiModel = p.openaiModel === OPENAI_STEADY_MODEL || p.openaiModel === OPENAI_STANDARD_MODEL ? p.openaiModel : current.openaiModel;
         const summaryModel = isSummaryModel(p.summaryModel) ? p.summaryModel : current.summaryModel;
-        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null, openaiModel, summaryModel };
+        return { ...current, ...p, appServer, theme: isThemeId(p.theme) ? p.theme : null, openaiModel, summaryModel };
       },
     },
   ),
@@ -120,9 +122,9 @@ export function useThemeId(): ThemeId {
   return useSettings((s) => s.theme) ?? systemTheme();
 }
 
-function publishEndpoints(state: { speechServer?: string; speechServerKey?: string; libraryServer?: string }) {
+function publishEndpoints(state: { speechServer?: string; speechServerKey?: string; appServer?: string }) {
   setSpeechEndpoint({ override: state.speechServer ?? "", key: state.speechServerKey ?? "" });
-  setLibraryServer(state.libraryServer ?? DEFAULT_LIBRARY_SERVER);
+  setAppServer(state.appServer ?? DEFAULT_APP_SERVER);
 }
 
 publishEndpoints(useSettings.getState());
