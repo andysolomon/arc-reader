@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { addUsage, formatUsd, getUsageSnapshot, priceUsage, summarizeUsage, USAGE_KEY } from "./usage";
+import { addUsage, formatUsd, getDocSpend, getUsageSnapshot, priceUsage, summarizeUsage, USAGE_KEY } from "./usage";
 
 const request = { engine: "fish", model: "s2.1-pro", text: "Hello", audioSeconds: 2 };
 const values = new Map<string, string>();
@@ -8,6 +8,21 @@ beforeEach(() => { vi.stubGlobal("localStorage", storage); vi.stubGlobal("naviga
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("usage ledger", () => {
+  it("tallies paid audio per document, telling repeats from first generations", async () => {
+    await addUsage({ ...request, text: "Hello", docId: "a" });
+    await addUsage({ ...request, text: "Hello", docId: "a" });
+    await addUsage({ ...request, text: "World!", docId: "a" });
+    await addUsage({ ...request, engine: "kittentts", model: "kittentts", docId: "a" });
+    await addUsage({ ...request, text: "No document" });
+    const [entry, ...rest] = getDocSpend().a;
+    expect(rest).toEqual([]);
+    expect(entry).toMatchObject({ provider: "fish", model: "s2.1-pro", requests: 3, characters: 16, uniqueCharacters: 11 });
+    expect(entry.costUsd).toBeCloseTo(16 * 15 / 1e6, 10);
+    expect(JSON.stringify(getDocSpend())).not.toMatch(/Hello|World/);
+    // The monthly ledger stays free of document ids.
+    expect(JSON.stringify(getUsageSnapshot().rows)).not.toContain("\"a\"");
+  });
+
   it("counts UTF-8 bytes for Fish, including non-ASCII text", async () => {
     await addUsage({ ...request, text: "Aé猫😀" });
     const [row] = getUsageSnapshot().rows;

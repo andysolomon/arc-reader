@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag } from "lucide-react";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -18,6 +18,11 @@ import { syncLibrary, useLibrarySync } from "../lib/librarySync";
 import { PreparationQueue, PrepareDialog, PreparedStatus } from "../components/LibraryPreparation";
 import { useCategories } from "../state/categories";
 import { useJev } from "../state/llm";
+import { useFavorites } from "../state/favorites";
+import { usePremiumContext } from "../state/premium";
+import { estimatePremium, type PremiumEstimate } from "../lib/premiumEstimate";
+import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
+import { formatUsd } from "../lib/usage";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
@@ -40,6 +45,7 @@ export function LibraryPage() {
   const [q, setQ] = useState("");
   const [vf, setVf] = useState<string | null>(null);
   const [cf, setCf] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [filing, setFiling] = useState(false);
   const jevReady = useJev((s) => !!s.config?.configured);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -72,16 +78,20 @@ export function LibraryPage() {
     return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [items]);
   const uncategorized = items.filter((it) => !it.rec.category);
+  const favorites = useMemo(() => items.filter((it) => it.rec.favoritedAt), [items]);
+  const premium = usePremiumContext();
+  const estimates = useMemo(() => new Map(favorites.map((it) => [it.rec.id, estimatePremium(it.rec, premium.calibration, { explainable: premium.explainable })])), [favorites, premium]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return items.filter((it) => {
+      if (favoritesOnly && !it.rec.favoritedAt) return false;
       const v = it.rec.voice ?? defaultVoice;
       if (vf && v !== vf && !it.prepared.some((p) => p.voiceId === vf)) return false;
       if (cf && (cf === UNCATEGORIZED ? !!it.rec.category : it.rec.category?.name !== cf)) return false;
       if (!needle) return true;
       return searchable(it).includes(needle);
     });
-  }, [items, q, vf, cf, defaultVoice]);
+  }, [items, q, vf, cf, favoritesOnly, defaultVoice]);
   const fileUncategorized = async () => {
     setFiling(true);
     try {
@@ -107,6 +117,10 @@ export function LibraryPage() {
     resume: (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: true, resume: it.progress < 1 }),
     revoice: (it: LibraryItem) => navigate(`/voices?for=${it.rec.id}`),
     prepare: (it: LibraryItem) => setPrepareIds([it.rec.id]),
+    favorite: (it: LibraryItem) => {
+      void useFavorites.getState().toggle(it.rec);
+      toast(it.rec.favoritedAt ? "Removed from favorites" : "Added to favorites · estimating a premium read");
+    },
     toggleSelected,
     del: async (it: LibraryItem) => {
       if (usePlayer.getState().doc?.id === it.rec.id) usePlayer.getState().close();
@@ -138,6 +152,9 @@ export function LibraryPage() {
           <button type="button" disabled={sync.status === "syncing"} className="ml-1.5 text-accent hover:text-fg disabled:opacity-50" onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}>{sync.status === "offline" ? "Retry sync" : "Sync now"}</button>
           {sync.status === "offline" && sync.error && <span className="basis-full">{sync.error}</span>}
         </div>
+        {favorites.length > 0 && (
+          <FavoritesBar count={favorites.length} selected={favoritesOnly} onSelect={setFavoritesOnly} estimates={[...estimates.values()]} />
+        )}
         {items.length > 0 && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by voice">
             <Chip size="sm" selected={vf === null} onClick={() => setVf(null)}>
@@ -178,7 +195,7 @@ export function LibraryPage() {
                 for (const it of filtered) { if (allVisibleSelected) next.delete(it.rec.id); else next.add(it.rec.id); }
                 return next;
               })} />
-              Select {q || vf || cf ? "visible" : "all"}
+              Select {q || vf || cf || favoritesOnly ? "visible" : "all"}
             </label>
             <span className="flex-1 text-[13px] text-fg2">{selectedItems.length > 0 ? `${selectedItems.length} selected` : "Select documents to prepare together"}</span>
             {selectedItems.length > 0 && <Button variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>}
@@ -192,7 +209,7 @@ export function LibraryPage() {
         {items.length > 0 && filtered.length === 0 && (
           <EmptyState
             action={
-              <button type="button" onClick={() => { setQ(""); setVf(null); setCf(null); }} className="border-0 bg-transparent p-0 text-accent hover:text-fg">
+              <button type="button" onClick={() => { setQ(""); setVf(null); setCf(null); setFavoritesOnly(false); }} className="border-0 bg-transparent p-0 text-accent hover:text-fg">
                 Clear filters
               </button>
             }
@@ -203,14 +220,14 @@ export function LibraryPage() {
         {filtered.length > 0 && !grid && (
           <ul className="m-0 flex list-none flex-col overflow-hidden rounded-card border border-line bg-bg2 p-0">
             {filtered.map((it) => (
-              <Row key={it.rec.id} it={it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} {...act} />
+              <Row key={it.rec.id} it={it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
             ))}
           </ul>
         )}
         {filtered.length > 0 && grid && (
           <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 p-0">
             {filtered.map((it) => (
-              <CardItem key={it.rec.id} it={it} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} {...act} />
+              <CardItem key={it.rec.id} it={it} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
             ))}
           </ul>
         )}
@@ -224,8 +241,11 @@ interface ItemProps {
   it: LibraryItem;
   defaultVoice: string;
   selected: boolean;
+  /** Premium read estimate, for favorites */
+  estimate?: PremiumEstimate;
   toggleSelected: (id: string) => void;
   prepare: (it: LibraryItem) => void;
+  favorite: (it: LibraryItem) => void;
   /** Open in the Reader without starting playback. */
   open: (it: LibraryItem) => void;
   resume: (it: LibraryItem) => void;
@@ -233,9 +253,13 @@ interface ItemProps {
   del: (it: LibraryItem) => void;
 }
 
-function Actions({ it, resume, revoice, prepare, del, size = 36, className }: ItemProps & { size?: 32 | 36 | 44; className?: string }) {
+function Actions({ it, resume, revoice, prepare, favorite, del, size = 36, className }: ItemProps & { size?: 32 | 36 | 44; className?: string }) {
+  const starred = !!it.rec.favoritedAt;
   return (
     <div className={cn("flex gap-0.5", className)}>
+      <IconButton label="Favorite" size={size} active={starred} onClick={() => favorite(it)}>
+        <Star size={size === 32 ? 16 : 20} strokeWidth={1.5} fill={starred ? "currentColor" : "none"} className={starred ? "text-accent" : undefined} />
+      </IconButton>
       <IconButton label={it.progress > 0 && it.progress < 1 ? "Resume" : "Play"} size={size} onClick={() => resume(it)}>
         <Play size={size === 32 ? 16 : 20} strokeWidth={1.5} />
       </IconButton>
@@ -252,7 +276,7 @@ function Actions({ it, resume, revoice, prepare, del, size = 36, className }: It
   );
 }
 
-function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: string; withDate?: boolean }) {
+function Meta({ it, defaultVoice, withDate, estimate }: { it: LibraryItem; defaultVoice: string; withDate?: boolean; estimate?: PremiumEstimate }) {
   const voiceId = it.rec.voice ?? defaultVoice;
   const voice = getVoice(voiceId);
   const prepared = it.prepared.find((v) => v.voiceId === voiceId);
@@ -277,6 +301,51 @@ function Meta({ it, defaultVoice, withDate }: { it: LibraryItem; defaultVoice: s
       <VoiceServiceName source={voiceSource(prepared ?? voice)}>{prepared?.name ?? voice.name}</VoiceServiceName>
       {withDate && <><Dot /><span>{dateLabel(it.rec.updatedAt)}</span></>}
       {it.reads > 0 && <><Dot /><ReadBadge reads={it.reads} /></>}
+      {it.rec.favoritedAt && <><Dot /><PremiumBadge it={it} estimate={estimate} /></>}
+    </div>
+  );
+}
+
+const costRange = (low: number, high: number) => formatUsd(low) === formatUsd(high) ? formatUsd(low) : `${formatUsd(low)}–${formatUsd(high)}`;
+
+/** A favorite's premium read: what it would cost across paid voices, and Jev's verdict. */
+function PremiumBadge({ it, estimate }: { it: LibraryItem; estimate?: PremiumEstimate }) {
+  const assessing = useFavorites((s) => !!s.assessing[it.rec.id]);
+  const costs = estimate?.options.map((o) => o.costUsd) ?? [];
+  const fit = hasPremiumFit(it.rec) ? it.rec.premium! : null;
+  const detail = estimate?.options.map((o) => `${o.label}: ≈${formatUsd(o.costUsd)}`).join("\n");
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap text-fg2" title={detail ? `Premium read, whole document once\n${detail}` : undefined}>
+      <Star size={12} strokeWidth={1.5} fill="currentColor" className="shrink-0 text-accent" aria-hidden />
+      {costs.length > 0 && <span className="tabular-nums" aria-label={`Premium read about ${costRange(Math.min(...costs), Math.max(...costs))}`}>Premium ≈{costRange(Math.min(...costs), Math.max(...costs))}</span>}
+      {fit ? <span className={fit.fit === "strong" ? "text-accent" : undefined}>· {PREMIUM_FIT_LABELS[fit.fit]}</span> : assessing ? <span>· Assessing…</span> : null}
+    </span>
+  );
+}
+
+/** Favorites filter, with what a premium read of every favorite would cost per paid voice. */
+function FavoritesBar({ count, selected, onSelect, estimates }: { count: number; selected: boolean; onSelect: (on: boolean) => void; estimates: PremiumEstimate[] }) {
+  const totals = new Map<string, { label: string; cost: number }>();
+  for (const estimate of estimates) {
+    for (const option of estimate.options) {
+      const total = totals.get(option.id) ?? { label: option.label, cost: 0 };
+      total.cost += option.costUsd;
+      totals.set(option.id, total);
+    }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="flex gap-1.5" role="group" aria-label="Filter by favorites">
+        <Chip size="sm" selected={!selected} onClick={() => onSelect(false)}>All documents</Chip>
+        <Chip size="sm" selected={selected} onClick={() => onSelect(true)}>
+          <Star size={12} strokeWidth={1.5} fill="currentColor" aria-hidden /> Favorites <span className="tabular-nums opacity-70">{count}</span>
+        </Chip>
+      </div>
+      {totals.size > 0 && (
+        <span className="text-[12px] text-fg2" aria-label="Premium read estimate for all favorites">
+          Premium read of {count === 1 ? "your favorite" : `all ${count} favorites`}: {[...totals.values()].map((t) => `${t.label} ≈${formatUsd(t.cost)}`).join(" · ")}
+        </span>
+      )}
     </div>
   );
 }
@@ -320,8 +389,8 @@ function SourceIcon({ rec }: { rec: LibraryItem["rec"] }) {
   return <Icon size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />;
 }
 
-/** Four 44px actions, their gaps and the panel's padding. */
-const SWIPE_W = 4 * 44 + 3 * 2 + 16;
+/** Five 44px actions, their gaps and the panel's padding. */
+const SWIPE_W = 5 * 44 + 4 * 2 + 16;
 
 /** List row. Hover reveals actions; on touch, swipe left reveals them. */
 function Row(props: ItemProps & { touch: boolean }) {
@@ -374,7 +443,7 @@ function Row(props: ItemProps & { touch: boolean }) {
           <button type="button" onClick={() => props.open(it)} className="truncate border-0 bg-transparent p-0 text-left font-serif text-[16px] leading-6 text-fg hover:text-accent">
             {it.rec.title}
           </button>
-          <Meta it={it} defaultVoice={props.defaultVoice} withDate />
+          <Meta it={it} defaultVoice={props.defaultVoice} estimate={props.estimate} withDate />
           <div className="mt-1.5"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
         </div>
         {!touch && <Actions {...props} className="col-start-3 sm:col-start-auto sm:-my-0.5 sm:opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100" />}
@@ -397,7 +466,7 @@ function CardItem(props: ItemProps) {
         </button>
       </div>
       <div className="flex flex-col gap-2.5 border-t border-line pt-3">
-        <Meta it={it} defaultVoice={props.defaultVoice} />
+        <Meta it={it} defaultVoice={props.defaultVoice} estimate={props.estimate} />
         <PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} />
       </div>
     </li>

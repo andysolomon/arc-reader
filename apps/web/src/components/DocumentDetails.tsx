@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Copy, ExternalLink, Library, Sparkles, X } from "lucide-react";
+import { Copy, ExternalLink, Library, Sparkles, Star, X } from "lucide-react";
 import { Button, IconButton, Input, cn } from "@readaloud/ui";
 import type { DocMeta, DocRecord } from "../lib/db";
 import { categoryNames, citation } from "../lib/category";
@@ -10,6 +10,11 @@ import { useLibrary } from "../state/library";
 import { useCategories } from "../state/categories";
 import { useJev } from "../state/llm";
 import { toast } from "../state/toast";
+import { useFavorites } from "../state/favorites";
+import { usePremiumContext } from "../state/premium";
+import { estimatePremium, pendingNote, spentOn } from "../lib/premiumEstimate";
+import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
+import { formatUsd } from "../lib/usage";
 
 const fieldClass = "h-9 w-full min-w-0 bg-bg px-3 text-[14px]";
 
@@ -95,6 +100,7 @@ export function DocumentDetails({ record, summaryAvailable, onShowSummary, onClo
             </div>
           )}
         </Row>
+        <Row label="Premium" top>{() => <PremiumAssessment record={record} jevReady={jevReady} />}</Row>
         {summaryAvailable && (
           <Row label="Summary">
             {() => (
@@ -116,6 +122,61 @@ export function DocumentDetails({ record, summaryAvailable, onShowSummary, onClo
         </Row>
       </div>
     </section>
+  );
+}
+
+/** Favorite, and for favorites what a paid narration would cost and whether Jev thinks it is worth it. */
+function PremiumAssessment({ record, jevReady }: { record: DocRecord; jevReady: boolean }) {
+  const context = usePremiumContext();
+  const assessing = useFavorites((s) => s.assessing[record.id]);
+  const error = useFavorites((s) => s.errors[record.id]);
+  const favorite = !!record.favoritedAt;
+  const estimate = favorite ? estimatePremium(record, context.calibration, { explainable: context.explainable }) : null;
+  const note = estimate && pendingNote(estimate.narration);
+  const spent = spentOn(context.spend[record.id]);
+  const fit = hasPremiumFit(record) ? record.premium! : null;
+  return (
+    <div className="flex flex-col gap-2 pt-1 text-[14px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button leading={<Star size={14} strokeWidth={1.5} fill={favorite ? "currentColor" : "none"} />} onClick={() => void useFavorites.getState().toggle(record)}>
+          {favorite ? "Favorited" : "Favorite"}
+        </Button>
+        {favorite && jevReady && (
+          <Button variant="ghost" leading={<Sparkles size={14} strokeWidth={1.5} />} loading={!!assessing} onClick={() => void useFavorites.getState().assess(record)}>
+            {fit ? "Ask Jev again" : "Ask Jev"}
+          </Button>
+        )}
+      </div>
+      {!favorite && <p className="m-0 text-[12px] text-fg2">Favorite this to estimate a premium read before any paid audio is made.</p>}
+      {estimate && (
+        <>
+          <ul className="m-0 flex list-none flex-col gap-1.5 p-0" aria-label="Premium read estimates">
+            {estimate.options.map((option) => (
+              <li key={option.id} className="flex flex-col">
+                <span className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-fg">{option.label}</span>
+                  <span className="font-mono tabular-nums text-fg">≈{formatUsd(option.costUsd)}</span>
+                  {formatUsd(option.lowUsd) !== formatUsd(option.highUsd) && <span className="text-[12px] tabular-nums text-fg2">{formatUsd(option.lowUsd)}–{formatUsd(option.highUsd)}</span>}
+                </span>
+                <span className="text-[12px] text-fg2">{option.basis}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="m-0 text-[12px] text-fg2">
+            The whole document read once: {estimate.narration.requests.toLocaleString()} passages, {estimate.narration.characters.toLocaleString()} characters.
+            {note && ` ${note}.`}
+            {spent && ` Spent so far on this device: ${formatUsd(spent.costUsd)}${spent.unpriced ? " plus unpriced audio" : ""}.`}
+          </p>
+        </>
+      )}
+      {favorite && (
+        <p className={cn("m-0 text-[12px]", error ? "text-danger" : "text-fg2")} aria-live="polite">
+          {error ?? assessing ?? (fit
+            ? `Jev: ${PREMIUM_FIT_LABELS[fit.fit]}${fit.confidence !== undefined ? ` · ${Math.round(fit.confidence * 100)}% confident` : ""}.`
+            : jevReady ? "Jev hasn't judged whether this deserves a paid voice yet." : "Add a TypeSafe key in Settings to have Jev judge whether this deserves a paid voice.")}
+        </p>
+      )}
+    </div>
   );
 }
 

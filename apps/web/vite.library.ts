@@ -23,6 +23,11 @@ const validCategory = (value: unknown) => value === undefined || (object(value)
   && (value.by === "jev" || value.by === "you") && number(value.at)
   && (value.confidence === undefined || (number(value.confidence) && value.confidence <= 1)) && text(value.model, 200));
 
+const validPremium = (value: unknown) => value === undefined || (object(value)
+  && ["strong", "good", "weak"].includes(value.fit as string) && number(value.at)
+  && typeof value.source === "string" && value.source.length <= 100
+  && (value.confidence === undefined || (number(value.confidence) && value.confidence <= 1)) && text(value.model, 200));
+
 const validLinks = (value: unknown) => Array.isArray(value) && value.length <= MAX_LINKS
   && value.every((link) => object(link) && typeof link.url === "string" && /^https?:\/\//i.test(link.url)
     && link.url.length <= MAX_LINK_URL && typeof link.text === "string" && link.text.length <= MAX_LINK_TEXT);
@@ -49,7 +54,8 @@ function validDoc(value: unknown): value is DocRecord {
       && value.summary.source.length <= 100 && typeof value.summary.text === "string" && value.summary.text.length <= 100_000
       && typeof value.summary.model === "string" && value.summary.model.length <= 200
       && number(value.summary.version) && number(value.summary.createdAt)))
-    && validMeta(value.meta) && validCategory(value.category);
+    && (value.favoritedAt === undefined || number(value.favoritedAt))
+    && validMeta(value.meta) && validCategory(value.category) && validPremium(value.premium);
 }
 
 function validPosition(value: unknown): value is PositionRecord {

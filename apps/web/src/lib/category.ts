@@ -47,18 +47,22 @@ export function categoryNames(used: Iterable<string>): string[] {
   return [...names.values()];
 }
 
-/** Jev's request: the document as state, one Choice over every shelf. */
-export function categoryRequest(rec: DocRecord, used: Iterable<string>) {
+/** What Jev reads about a document: its catalogue details, summary, and an excerpt of the narration. */
+export function jevState(rec: DocRecord): Record<string, string> {
   const { url, author, site, description } = rec.meta ?? {};
-  const state = Object.fromEntries(Object.entries({
+  return Object.fromEntries(Object.entries({
     title: rec.title, link: url, site, author, description,
     summary: hasSummary(rec) ? rec.summary!.text : undefined,
     text: readingBlocks(rec.text).map((block) => block.kind === "visual"
       ? visualNarration(block.visual, rec.visualDescriptions).text : block.text).join("\n\n").slice(0, EXCERPT_CHARS),
-  }).filter(([, value]) => value));
+  }).filter((entry): entry is [string, string] => !!entry[1]));
+}
+
+/** Jev's request: the document as state, one Choice over every shelf. */
+export function categoryRequest(rec: DocRecord, used: Iterable<string>) {
   return {
     model: JEV_MODEL,
-    state,
+    state: jevState(rec),
     questions: {
       category: {
         type: "choice",
@@ -70,26 +74,37 @@ export function categoryRequest(rec: DocRecord, used: Iterable<string>) {
   };
 }
 
-interface ChoiceAnswer { choice?: string; confidence?: number }
+export interface JevChoice { choice: string; confidence?: number; model?: string }
 
-export async function suggestCategory(rec: DocRecord, used: Iterable<string>): Promise<DocCategory> {
-  if (!rec.text.trim() && !rec.title.trim()) throw new Error("There is nothing to categorize.");
-  const request = categoryRequest(rec, used);
+/** Ask Jev one Choice question and check the answer is one of the offered choices. */
+export async function askJevChoice(
+  request: { model: string; state: Record<string, string>; questions: Record<string, { type: string; instructions: string; criteria: Record<string, string | null> }> },
+  messages: { failed: string; missing: string },
+): Promise<JevChoice> {
+  const [question, { criteria }] = Object.entries(request.questions)[0];
   const response = await fetch("/api/jev/v1/systemone", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal: AbortSignal.timeout(60_000),
     body: JSON.stringify(request),
   });
-  const data = await response.json().catch(() => null) as { model?: string; answers?: { category?: ChoiceAnswer }; error?: { message?: string }; detail?: unknown } | null;
+  const data = await response.json().catch(() => null) as { model?: string; answers?: Record<string, ChoiceAnswer>; error?: { message?: string }; detail?: unknown } | null;
   if (!response.ok) {
     const detail = typeof data?.detail === "string" ? data.detail : null;
-    throw new Error(data?.error?.message || detail || `Categorizing failed (HTTP ${response.status}). Please retry.`);
+    throw new Error(data?.error?.message || detail || `${messages.failed} (HTTP ${response.status}). Please retry.`);
   }
-  const answer = data?.answers?.category;
-  if (!answer?.choice || !Object.hasOwn(request.questions.category.criteria, answer.choice)) throw new Error("Jev didn't return a category. Please retry.");
+  const answer = data?.answers?.[question];
+  if (!answer?.choice || !Object.hasOwn(criteria, answer.choice)) throw new Error(messages.missing);
   const confidence = typeof answer.confidence === "number" && Number.isFinite(answer.confidence) ? Math.min(1, Math.max(0, answer.confidence)) : undefined;
-  return { name: answer.choice, by: "jev", confidence, model: data?.model?.slice(0, 200), at: Date.now() };
+  return { choice: answer.choice, confidence, model: data?.model?.slice(0, 200) };
+}
+
+interface ChoiceAnswer { choice?: string; confidence?: number }
+
+export async function suggestCategory(rec: DocRecord, used: Iterable<string>): Promise<DocCategory> {
+  if (!rec.text.trim() && !rec.title.trim()) throw new Error("There is nothing to categorize.");
+  const answer = await askJevChoice(categoryRequest(rec, used), { failed: "Categorizing failed", missing: "Jev didn't return a category. Please retry." });
+  return { name: answer.choice, by: "jev", confidence: answer.confidence, model: answer.model, at: Date.now() };
 }
 
 /** Plain citation for notes and papers: Author (Date). Title. Site. Link */

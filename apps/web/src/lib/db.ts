@@ -30,6 +30,18 @@ export interface DocCategory {
   at: number;
 }
 
+/** Jev's view of whether a document deserves a paid (premium) narration. */
+export type PremiumFitLevel = "strong" | "good" | "weak";
+export interface PremiumFit {
+  fit: PremiumFitLevel;
+  /** Jev's confidence in its pick, 0..1 */
+  confidence?: number;
+  model?: string;
+  /** Fingerprint of the text that was judged (see summarySource) */
+  source: string;
+  at: number;
+}
+
 export interface DocRecord {
   id: string;
   title: string;
@@ -44,6 +56,9 @@ export interface DocRecord {
   visualDescriptions?: Record<string, string>;
   meta?: DocMeta;
   category?: DocCategory;
+  /** When you favorited it. Favorites are assessed as candidates for a premium read. */
+  favoritedAt?: number;
+  premium?: PremiumFit;
   source: DocSource;
   /** Hostname for URLs, file name for uploads, "Pasted text" otherwise */
   domain: string;
@@ -88,6 +103,8 @@ export interface AudioRecord {
   lead?: number;
   tail?: number;
   loudness?: number;
+  /** See Chunk.voiced; absent on clips stored before it was measured. */
+  voiced?: number;
   createdAt: number;
 }
 

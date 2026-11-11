@@ -25,6 +25,8 @@ export interface Chunk {
   tail?: number;
   /** RMS level of the voiced frames in dBFS, for level matching between clips. */
   loudness?: number;
+  /** Share of the clip's energy in voiced frames (see voicing.ts); low means a garbled render. Undefined when not measured. */
+  voiced?: number;
   /** Reported by the provider for a new generation; never reused from cache. */
   tokens?: TokenUsage;
   /** Wall-clock seconds the server took to generate this chunk (new generations only, queue wait excluded). */
@@ -37,6 +39,8 @@ export interface TtsRequest {
   engine: EngineId;
   /** OpenAI model for the reading voice (see openaiModelFor); other engines ignore it. */
   openaiModel?: string;
+  /** Library document being read, for per-document spend on paid voices */
+  docId?: string;
   signal?: AbortSignal;
 }
 

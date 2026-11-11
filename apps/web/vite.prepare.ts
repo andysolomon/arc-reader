@@ -6,6 +6,8 @@ import type { Connect, Plugin } from "vite";
 import type { PreparationRequest, PreparationStatus, SharedPreparation } from "./src/engine/preparation";
 import { PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
 import { SpeechActivity } from "./vite.speech-activity";
+import { mp3VoicedShare } from "./vite.voicing";
+import { GARBLED_BELOW, GARBLED_RETRIES } from "./src/engine/voicing";
 
 interface Job extends PreparationStatus {
   requests: PreparationRequest[];
@@ -333,13 +335,22 @@ export class PreparationService {
       // Only misses enter the single-worker queue, one passage per job at a time.
       const generate = async () => {
         if (![...consumers].some((isAllowed) => isAllowed())) throw new HttpError(410, "Audio preparation was cancelled or expired.");
-        const response = await this.synthesize(item, worker);
-        const body = Buffer.from(await response.arrayBuffer());
-        const type = response.headers.get("content-type") || "audio/mpeg";
-        if (!body.length || (!type.startsWith("audio/") && type !== "application/octet-stream" && !(item.protocol === "readaloud" && type.includes("json")))) {
-          throw new HttpError(502, "The speech server returned no playable audio.");
+        // A garbled take (see src/engine/voicing.ts) is asked for again; the best take is kept.
+        let best: { body: Buffer; metadata: Omit<Audio, "body">; voiced?: number } | undefined;
+        for (let take = 0; ; take++) {
+          const response = await this.synthesize(item, worker);
+          const body = Buffer.from(await response.arrayBuffer());
+          const type = response.headers.get("content-type") || "audio/mpeg";
+          if (!body.length || (!type.startsWith("audio/") && type !== "application/octet-stream" && !(item.protocol === "readaloud" && type.includes("json")))) {
+            throw new HttpError(502, "The speech server returned no playable audio.");
+          }
+          const voiced = type.includes("mpeg") ? await mp3VoicedShare(body) : undefined;
+          const metadata = { type, duration: response.headers.get("x-duration") || undefined, words: response.headers.get("x-word-timings") || undefined };
+          if (!best || (voiced ?? 1) > (best.voiced ?? 1)) best = { body, metadata, voiced };
+          if (voiced === undefined || voiced >= GARBLED_BELOW || take >= GARBLED_RETRIES) break;
+          console.warn(`Prepared speech came back garbled (voiced ${voiced.toFixed(2)}); asking again: ${item.text.slice(0, 60)}`);
         }
-        const metadata = { type, duration: response.headers.get("x-duration") || undefined, words: response.headers.get("x-word-timings") || undefined };
+        const { body, metadata } = best;
         await this.atomic(`${key}.bin`, body);
         await this.atomic(`${key}.json`, JSON.stringify(metadata));
         return { body, ...metadata };

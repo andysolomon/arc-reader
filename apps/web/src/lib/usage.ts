@@ -1,4 +1,5 @@
 import { monthKey } from "./dates";
+import { hash } from "./hash";
 
 export const USAGE_KEY = "readaloud:usage";
 export const USAGE_EVENT = "readaloud:usage";
@@ -100,6 +101,69 @@ export interface UsageInput {
   text: string;
   audioSeconds: number;
   tokens?: TokenUsage;
+  /** The library document the audio was generated for; paid generations are also tallied per document. */
+  docId?: string;
+}
+
+export const DOC_SPEND_KEY = "readaloud:doc-spend";
+/** Paid speech generated for one document with one model, on this device. No text is kept, only passage fingerprints. */
+export interface DocSpend {
+  provider: "openai" | "fish";
+  model: string;
+  requests: number;
+  characters: number;
+  /** Characters of passages generated for the first time: the gap to `characters` is audio paid for twice. */
+  uniqueCharacters: number;
+  /** null once any request could not be priced */
+  costUsd: number | null;
+  seen: string[];
+  updatedAt: number;
+}
+interface DocSpendLedger { version: 1; docs: Record<string, DocSpend[]> }
+const MAX_SPEND_DOCS = 500;
+const MAX_SEEN = 4000;
+
+function validSpend(entry: unknown): entry is DocSpend {
+  if (!entry || typeof entry !== "object") return false;
+  const e = entry as DocSpend;
+  return (e.provider === "openai" || e.provider === "fish") && typeof e.model === "string"
+    && [e.requests, e.characters, e.uniqueCharacters, e.updatedAt].every(validNumber) && nullableNumber(e.costUsd)
+    && Array.isArray(e.seen) && e.seen.every((key) => typeof key === "string");
+}
+
+/** Paid generations per document id. Missing or damaged storage reads as empty. */
+export function getDocSpend(): Record<string, DocSpend[]> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DOC_SPEND_KEY) ?? "null") as DocSpendLedger | null;
+    if (raw?.version !== 1 || !raw.docs || typeof raw.docs !== "object") return {};
+    return Object.fromEntries(Object.entries(raw.docs).map(([id, list]) => [id, Array.isArray(list) ? list.filter(validSpend) : []]));
+  } catch {
+    return {};
+  }
+}
+
+function recordDocSpend(docId: string, provider: "openai" | "fish", row: UsageRow, text: string) {
+  const docs = getDocSpend();
+  const list = docs[docId] ?? [];
+  let entry = list.find((e) => e.provider === provider && e.model === row.model);
+  if (!entry) {
+    entry = { provider, model: row.model, requests: 0, characters: 0, uniqueCharacters: 0, costUsd: 0, seen: [], updatedAt: 0 };
+    list.push(entry);
+  }
+  const key = hash(text);
+  entry.requests += 1;
+  entry.characters += row.characters;
+  if (!entry.seen.includes(key)) {
+    entry.uniqueCharacters += row.characters;
+    entry.seen = [...entry.seen, key].slice(-MAX_SEEN);
+  }
+  entry.costUsd = entry.costUsd === null || row.costUsd === null ? null : entry.costUsd + row.costUsd;
+  entry.updatedAt = Date.now();
+  docs[docId] = list;
+  const kept = Object.entries(docs)
+    .sort((a, b) => Math.max(...b[1].map((e) => e.updatedAt), 0) - Math.max(...a[1].map((e) => e.updatedAt), 0))
+    .slice(0, MAX_SPEND_DOCS);
+  localStorage.setItem(DOC_SPEND_KEY, JSON.stringify({ version: 1, docs: Object.fromEntries(kept) } satisfies DocSpendLedger));
 }
 
 /** A successful generation is counted once, including prefetched audio. Cache
@@ -128,6 +192,9 @@ export async function addUsage(input: UsageInput): Promise<void> {
     } else rows.push(row);
     localStorage.setItem(USAGE_KEY, JSON.stringify({ version: 2, rows } satisfies Ledger));
     writeFailed = false;
+    if (input.docId && (provider === "openai" || provider === "fish")) {
+      try { recordDocSpend(input.docId, provider, row, input.text); } catch { /* the monthly ledger is what matters */ }
+    }
   };
   try {
     // Serialize cross-tab read/modify/write on supported browsers (HTTPS).
