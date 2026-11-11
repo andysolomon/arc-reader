@@ -211,7 +211,7 @@ const DIAGRAMS = {
       { id: "S_start", t: "start", n: "Wants to listen", lw: 84, x: 100, y: 75, lane: "L_user", d: "Someone opens ReadAloud (the Compose screen is the home route) with something they want to hear." },
       { id: "T_input", t: "task", k: "user", n: "Paste a link or text, upload, or read the clipboard", x: 215, y: 75, lane: "L_user",
         d: "Compose puts the link field first; pasting a web address there reads it at once, and anything else opens the folded-away text box. The listener can also upload a .txt/.md file, read the clipboard, or try the sample. The draft survives a reload (sessionStorage).",
-        code: [SRC + "routes/Compose.tsx:67", SRC + "routes/Compose.tsx:97", SRC + "routes/Compose.tsx:113"] },
+        code: [SRC + "routes/Compose.tsx:73", SRC + "routes/Compose.tsx:103", SRC + "routes/Compose.tsx:119"] },
       { id: "S_share", t: "start", ev: "message", n: "Shared from another app", lw: 84, x: 100, y: 235, lane: "L_ui",
         d: "The installed PWA is a Web Share Target: sharing a page or text from another app opens /read/new?title=&text=&url=.",
         code: ["apps/web/vite.config.ts:52", SRC + "routes/ReadNew.tsx:13"] },
