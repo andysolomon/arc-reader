@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { docs as docStore, type DocBook, type DocRecord, type DocSource } from "../lib/db";
-import { fetchReadable, type Fetched } from "../lib/fetchUrl";
+import { fetchReadable, hostOf, type Fetched } from "../lib/fetchUrl";
 import { pageKey, partNames, type BookContents } from "../lib/book";
 import { FINISHED_FRACTION } from "../lib/libraryProtocol";
 import { updateDocument } from "./documents";
+import { useCategories } from "./categories";
 import { useLibrary, type LibraryItem } from "./library";
 import { toast } from "./toast";
 
@@ -15,6 +16,15 @@ export const placeIn = (book: BookContents, index: number): DocBook => ({
 
 /** Chapter numbers of the book that are already in the library. */
 const shelved = (all: DocRecord[], bookId: string) => new Set(all.flatMap((rec) => rec.book?.id === bookId ? [rec.book.chapter] : []));
+
+/** Chapters that arrive together are filed two at a time, not in one burst of requests to Jev. */
+async function fileInTurn(recs: DocRecord[]) {
+  const queue = [...recs];
+  const worker = async () => {
+    for (let rec = queue.shift(); rec; rec = queue.shift()) await useCategories.getState().suggest(rec, { quiet: true });
+  };
+  await Promise.all([worker(), worker()]);
+}
 
 export interface AddResult {
   added: number;
@@ -47,13 +57,20 @@ export const useBooks = create<BooksState>()((set, get) => ({
     if (get().adding[book.id]) return { added: 0, failed: 0 };
     set({ adding: { ...get().adding, [book.id]: { done: 0, total: book.chapters.length } } });
     let added = 0, failed = 0;
+    // Chapters that came with their text: nothing to wait for between them, so they go in as one batch.
+    const batch: DocRecord[] = [];
+    // Opening the first chapter can take a minute (code explanations); the rest keep arriving meanwhile.
+    let first: Promise<void> | undefined;
     try {
       const all = await docStore.all();
       const byPage = new Map(all.flatMap((rec) => rec.meta?.url && !rec.book ? [[pageKey(rec.meta.url), rec] as const] : []));
       // Chapters already shelved are known by their addresses; one saved without an address keeps its number.
       const mine = all.filter((rec) => rec.book?.id === book.id);
       const byAddress = new Map(mine.flatMap((rec) => rec.meta?.url ? [[pageKey(rec.meta.url), rec] as const] : []));
-      const parts = book.chapters.map((chapter, index) => ({ ...chapter, index, rec: byAddress.get(pageKey(chapter.url)) }));
+      // Chapters cut from one text share its address, which tells them apart no better than no address at all.
+      const sharing = new Map<string, number>();
+      for (const chapter of book.chapters) sharing.set(pageKey(chapter.url), (sharing.get(pageKey(chapter.url)) ?? 0) + 1);
+      const parts = book.chapters.map((chapter, index) => ({ ...chapter, index, rec: sharing.get(pageKey(chapter.url)) === 1 ? byAddress.get(pageKey(chapter.url)) : undefined }));
       const listed = new Set(parts.flatMap((part) => part.rec ? [part.rec.id] : []));
       const taken = new Set(mine.filter((rec) => !listed.has(rec.id)).map((rec) => rec.book!.chapter));
       const missing = parts.filter((part) => !part.rec && !taken.has(part.index + 1));
@@ -71,19 +88,27 @@ export const useBooks = create<BooksState>()((set, get) => ({
         let rec: DocRecord | undefined;
         try {
           // A chapter saved earlier as a loose article joins the book instead of being fetched twice.
-          const loose = byPage.get(pageKey(chapter.url));
+          const loose = chapter.text === undefined ? byPage.get(pageKey(chapter.url)) : undefined;
           if (loose) rec = await useLibrary.getState().update(loose.id, { book: place, title: chapter.title });
-          else {
+          else if (chapter.text !== undefined) {
+            rec = await useLibrary.getState().create({ text: chapter.text, title: chapter.title, source: "url", domain: hostOf(chapter.url), meta: book.meta ?? { url: chapter.url }, book: place, batch: true });
+            batch.push(rec);
+          } else {
             const page = await fetchReadable(chapter.url);
             rec = await useLibrary.getState().create({ text: page.text, title: chapter.title, source: "url", domain: page.domain, meta: page.meta, links: page.links, book: place });
           }
         } catch { /* Counted below; the rest of the book still arrives. */ }
         if (rec) {
-          if (++added === 1) await opts.onFirst?.(rec);
+          if (++added === 1) first = Promise.resolve(opts.onFirst?.(rec)).catch(() => {});
         } else failed++;
         set({ adding: { ...get().adding, [book.id]: { done: done + 1, total: missing.length } } });
       }
+      await first;
     } finally {
+      if (batch.length) {
+        await useLibrary.getState().refresh();
+        void fileInTurn(batch);
+      }
       const { [book.id]: _, ...adding } = get().adding;
       // Every page of the book made the same offer; it has been taken up.
       set({ adding, offers: Object.fromEntries(Object.entries(get().offers).filter(([, offer]) => offer.id !== book.id || failed > 0)) });

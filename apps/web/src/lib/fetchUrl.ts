@@ -5,6 +5,8 @@ import type { DocMeta } from "./db";
 
 import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
 import { bookContents, type BookContents } from "./book";
+import { fetchArchiveBook } from "./archive";
+import { ReadError } from "./readError";
 
 /** Fetch a web page and extract readable text. Direct fetch first, then the built-in /api/fetch route, then an optional readability proxy. */
 export interface Fetched {
@@ -35,6 +37,11 @@ export function looksLikeUrl(input: string): boolean {
   if (!t || /\s/.test(t)) return false;
   if (/^https?:\/\//i.test(t)) return true;
   return /^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?([/?#]\S*)?$/i.test(t);
+}
+
+/** Nothing but a web address written out in full: a link wherever it was pasted, never prose to read aloud. */
+export function isWebAddress(input: string): boolean {
+  return /^(https?:\/\/|www\.)[^\s.]\S*$/i.test(input.trim());
 }
 
 export function normalizeUrl(input: string): string {
@@ -243,10 +250,21 @@ export async function readPdfFile(file: File, signal?: AbortSignal): Promise<Fet
   return { ...htmlToText(await r.text(), ""), domain: file.name };
 }
 
-/** Direct fetch (works for CORS-enabled pages), then the dev/preview server's /api/fetch, then VITE_FETCH_PROXY. */
+/**
+ * Direct fetch (works for CORS-enabled pages), then the dev/preview server's /api/fetch, then VITE_FETCH_PROXY.
+ * A book on the Internet Archive is read from its files instead of its page. Throws a ReadError
+ * when the reason the link can't be read is worth passing on.
+ */
 export async function fetchReadable(input: string, signal?: AbortSignal): Promise<Fetched> {
   const url = normalizeUrl(input);
   const domain = hostOf(url);
+  try {
+    const book = await fetchArchiveBook(url, signal);
+    if (book) return book;
+  } catch (e) {
+    // Anything else and the page itself is still worth a try.
+    if (e instanceof ReadError || signal?.aborted) throw e;
+  }
   try {
     return await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain);
   } catch (e) {

@@ -1,3 +1,4 @@
+import type { DocMeta } from "./db";
 import { hash } from "./hash";
 
 /**
@@ -9,6 +10,8 @@ import { hash } from "./hash";
 export interface BookChapter {
   url: string;
   title: string;
+  /** The chapter itself, when the whole book came as one text and there is no page of its own to fetch */
+  text?: string;
 }
 
 export interface BookContents {
@@ -22,6 +25,8 @@ export interface BookContents {
   kind?: "course";
   /** The page that lists the chapters, when they do not list each other */
   contents?: string;
+  /** Catalogue details for chapters that come with their text */
+  meta?: DocMeta;
 }
 
 /** What a book's parts are called. */

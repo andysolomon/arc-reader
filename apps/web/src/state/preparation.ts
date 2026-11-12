@@ -193,7 +193,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {
-        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor, serverId: status?.id });
+        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor, ...(status?.id ? { serverId: status.id } : {}), message: status?.unreachable ? "Can't reach the server. Retrying…" : undefined });
       }, signal);
       signal.throwIfAborted();
       update(job.id, { status: "saving", worker: undefined, waitingFor: undefined });

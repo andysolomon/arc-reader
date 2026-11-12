@@ -34,7 +34,7 @@ export function uniqueLinks(links: Iterable<DocLink>): DocLink[] {
   return [...seen.values()];
 }
 
-const BARE = /\bhttps?:\/\/[^\s<>"'`]+/gi;
+const BARE = /\bhttps?:\/\/[^\s<>"'`“”‘’«»…]+/gi;
 const MARKDOWN = /(!?)\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 
 /** Bare URLs in plain text, minus trailing sentence punctuation and unbalanced closing brackets. */
@@ -44,7 +44,8 @@ export function linksInText(text: string): DocLink[] {
     let raw = match.replace(/[.,;:!?]+$/, "");
     while (/[)\]]$/.test(raw) && count(raw, raw.endsWith(")") ? "(" : "[") < count(raw, raw.slice(-1))) raw = raw.slice(0, -1).replace(/[.,;:!?]+$/, "");
     const url = absoluteUrl(raw);
-    if (url) found.push({ url, text: url });
+    // "http://" on its own, or followed by punctuation, names the scheme, not a place.
+    if (url && /[a-z0-9]/i.test(new URL(url).hostname)) found.push({ url, text: url });
   }
   return uniqueLinks(found);
 }

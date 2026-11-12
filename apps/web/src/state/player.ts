@@ -49,7 +49,7 @@ export interface PlayerState extends EngineSnapshot {
   /** The chosen voice could not be generated; playback is stopped until the user retries or switches voice. */
   speechError: string | null;
   /** "Prepare audio" in progress: passages rendered so far */
-  prerendering: { done: number; total: number } | null;
+  prerendering: { done: number; total: number; unreachable?: boolean } | null;
 }
 
 interface Actions {
@@ -247,6 +247,8 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         await docStore.put(prepared);
       }
       signal.throwIfAborted();
+      // Preparation asked for while this document was still opening belongs to the one before it.
+      get().cancelPrerender();
       engine.load(doc, index, offset);
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
       set({ doc, record: prepared, voiceId: voice.id, summary, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
@@ -299,9 +301,9 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       set({ prerendering: { done: 0, total: engine.passages.length } });
       try {
         let completed = 0;
-        await engine.prepare((done, total) => {
+        await engine.prepare((done, total, status) => {
           completed = Math.max(completed, done);
-          if (prerendering === controller) set({ prerendering: { done: completed, total } });
+          if (prerendering === controller) set({ prerendering: { done: completed, total, ...(status?.unreachable ? { unreachable: true } : {}) } });
         }, controller.signal);
         if (!controller.signal.aborted && get().doc === doc) {
           if (describingDeck === doc.id) heldBack = doc.id;

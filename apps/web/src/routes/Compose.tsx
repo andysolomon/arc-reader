@@ -10,7 +10,8 @@ import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
-import { fetchReadable, hostOf, looksLikeUrl, normalizeUrl, readPdfFile } from "../lib/fetchUrl";
+import { fetchReadable, hostOf, isWebAddress, looksLikeUrl, normalizeUrl, readPdfFile } from "../lib/fetchUrl";
+import { EXPLAIN_MS, ReadError } from "../lib/readError";
 import { openDocument } from "../lib/openDoc";
 import { importPage, isContentsPage } from "../state/books";
 import { SPEED_STEPS } from "@readaloud/ui";
@@ -22,7 +23,8 @@ const TEXT_PANEL_ID = "compose-text";
 
 /**
  * Compose: a link field first, since most reading starts by pasting an address found elsewhere.
- * Pasting a link starts reading at once; pasting prose opens the text box instead.
+ * Pasting a link starts reading at once; pasting prose opens the text box instead. A link is a
+ * link in the text box too: the page is fetched, the address is never read out as text.
  */
 export function Compose() {
   const clipboard = useClipboardImport();
@@ -83,8 +85,9 @@ export function Compose() {
       // A contents page is there to be swapped for its chapters, so it opens without reading itself out.
       const listen = !isContentsPage(f);
       await openDocument(rec, navigate, { autoplay: listen, resume: false, prepare: listen });
-    } catch {
-      toast(`Couldn't read ${host} — try pasting the text`);
+    } catch (e) {
+      if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
+      else toast(`Couldn't read ${host} — try pasting the text`);
       linkRef.current?.focus();
       linkRef.current?.select();
     } finally {
@@ -103,12 +106,21 @@ export function Compose() {
     }
   };
 
+  /** A link that ended up in the text box moves to the link field and is fetched from there. */
+  const readLinkFromText = (link: string) => {
+    setText("");
+    setTitle(undefined);
+    setTextOpen(false);
+    setUrl(link);
+    return readLink(link);
+  };
+
   /** Visible text wins; otherwise the link; a hidden draft is read only when there is no link. */
   const listen = async () => {
     if (busy) return;
     const t = text.trim();
     const link = url.trim();
-    if (t && (textOpen || !link)) return readText(t);
+    if (t && (textOpen || !link)) return isWebAddress(t) ? readLinkFromText(t) : readText(t);
     if (link) return readLink(link);
     toast("Paste a link or some text first");
     linkRef.current?.focus();
@@ -131,6 +143,15 @@ export function Compose() {
     setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")}\n\n${pasted}` : pasted));
     setTitle(undefined);
     openText();
+  };
+
+  const onTextPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = e.clipboardData.getData("text/plain").trim();
+    const { selectionStart, selectionEnd, value } = e.currentTarget;
+    // Only when the link would be all there is in the box; one pasted into a sentence is part of the text.
+    if (busy || !isWebAddress(pasted) || (value.slice(0, selectionStart) + value.slice(selectionEnd)).trim()) return;
+    e.preventDefault();
+    void readLinkFromText(pasted);
   };
 
   const onLinkKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -280,6 +301,7 @@ export function Compose() {
                 setText(e.target.value);
                 setTitle(undefined);
               }}
+              onPaste={onTextPaste}
               onKeyDown={onTextKey}
               placeholder={PLACEHOLDERS[ph]}
               rows={8}

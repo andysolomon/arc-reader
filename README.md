@@ -420,6 +420,14 @@ A course page is read the same way, with lectures for chapters. When a page link
 
 Lectures are numbered by their place among the decks that exist, so the deck after a skipped lecture is "Lecture 14" even if its file is `lecture15.pdf`. Only PDFs are followed: recordings, readings and PowerPoint files are left on the course page.
 
+### Books from the Internet Archive
+
+Paste a link to a book on [archive.org](https://archive.org) (its details page, or any page of its viewer) and the book itself is imported, not the viewer's page. The Reader opens the first chapter and offers the others, which are added at once since the whole text has already arrived. `src/lib/archive.ts` asks the Archive's metadata API which files the item has, downloads the full text (a scan's OCR, or the largest plain-text transcription), and takes title, author and date from the item's record. Links to audio, video and collections are still read as pages.
+
+Only books that are free to download can be imported. A book the Archive lends (most in-copyright scans) keeps its text locked; the app says so and imports nothing. The same work usually has a public-domain edition, and a Project Gutenberg transcription hosted on the Archive reads far better than a scan.
+
+`src/lib/bookText.ts` turns the one long text into chapters. It removes page numbers and running headers, rejoins lines, hyphenated words and paragraphs cut by a page break, drops Project Gutenberg's licence, Google's notice, the title page, the contents list and whatever follows "THE END", and cuts at headings such as "CHAPTER II", "Chapter 3. The Arrival", "STAVE ONE" or "LETTER IV" (parts, books and volumes when there are no chapters). Each chapter opens with its heading, which is read out. OCR misreads headings too, so numerals are corrected against the sequence ("CHAPTER XL" after X is 11), text before the first heading found is kept as the first chapter or the preface, and a heading the scan lost leaves two chapters as one. A book with no recognisable headings is cut into parts of about 25 minutes. Misread words in a scan are not corrected and are read as they stand.
+
 Imported pages keep their structure: headings are stored as Markdown headings (`## Title`) and shown as headings without the marker being read out, callouts written as `<aside>` notes are kept while sidebars are dropped, and tables are read row by row under their column headings. This applies to new imports; headings typed or pasted as Markdown are recognised in any document.
 
 ## PDFs
