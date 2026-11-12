@@ -5,6 +5,8 @@ import type { DocMeta } from "./db";
 
 import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
 import { bookContents, type BookContents } from "./book";
+import { fetchArchiveBook } from "./archive";
+import { ReadError } from "./readError";
 
 /** Fetch a web page and extract readable text. Direct fetch first, then the built-in /api/fetch route, then an optional readability proxy. */
 export interface Fetched {
@@ -235,10 +237,21 @@ async function readResponse(r: Response, url: string, domain: string): Promise<F
   throw new Error("No readable text");
 }
 
-/** Direct fetch (works for CORS-enabled pages), then the dev/preview server's /api/fetch, then VITE_FETCH_PROXY. */
+/**
+ * Direct fetch (works for CORS-enabled pages), then the dev/preview server's /api/fetch, then VITE_FETCH_PROXY.
+ * A book on the Internet Archive is read from its files instead of its page. Throws a ReadError
+ * when the reason the link can't be read is worth passing on.
+ */
 export async function fetchReadable(input: string, signal?: AbortSignal): Promise<Fetched> {
   const url = normalizeUrl(input);
   const domain = hostOf(url);
+  try {
+    const book = await fetchArchiveBook(url, signal);
+    if (book) return book;
+  } catch (e) {
+    // Anything else and the page itself is still worth a try.
+    if (e instanceof ReadError || signal?.aborted) throw e;
+  }
   try {
     return await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain);
   } catch (e) {

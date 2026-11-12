@@ -203,7 +203,7 @@ const SRC = "apps/web/src/";
 /* Participants, left to right. */
 const P = {
   U: { n: "Listener", kind: "actor", d: "The person using the app: pastes, shares, presses play, picks voices." },
-  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:48", SRC + "routes/Compose.tsx:117", SRC + "routes/ReadNew.tsx:14"] },
+  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:48", SRC + "routes/Compose.tsx:119", SRC + "routes/ReadNew.tsx:15"] },
   PL: { n: "usePlayer", s: "state/player.ts", d: "The Zustand player store. It owns the single PlaybackEngine, resolves the voice, rewrites Patois, restores the saved place, and turns engine callbacks into UI state (speechError, offline, toasts).", code: [SRC + "state/player.ts:80", SRC + "state/player.ts:122"] },
   EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:101"] },
   PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:410", SRC + "engine/preparation.ts:172"] },
@@ -250,19 +250,19 @@ const SEQS = {
     rows: [
       { f: "U", to: "UI", t: "async", n: "paste text · press Listen", say: "The listener pastes an article on Compose and presses Listen.",
         d: "Compose (the home route) takes pasted text, the clipboard, an uploaded .txt/.md file, the sample, or a web address. A share from another app opens /read/new?title=&text=&url= instead — the installed PWA is a Web Share Target.",
-        code: [SRC + "routes/Compose.tsx:117", SRC + "routes/Compose.tsx:75", SRC + "routes/ReadNew.tsx:14", "apps/web/vite.config.ts:52"] },
+        code: [SRC + "routes/Compose.tsx:119", SRC + "routes/Compose.tsx:76", SRC + "routes/ReadNew.tsx:15", "apps/web/vite.config.ts:52"] },
       { op: "opt", id: "url", g: "a web address was entered or shared", rows: [
         { f: "UI", to: "SV", t: "call", n: "GET /api/fetch?url=…", say: "Most sites send no CORS headers, so the app server fetches the page for the browser.",
-          d: "fetchReadable tries a direct fetch first, then the app server’s /api/fetch, then an optional reader proxy. Links to X posts are fetched from the FxTwitter API and turned into HTML on the server.",
-          facts: ["GET only, http(s) only", "pages up to 5 MB, 20 s timeout"], code: [SRC + "lib/fetchUrl.ts:239", "apps/web/vite.fetch.ts:20"] },
+          d: "fetchReadable tries a direct fetch first, then the app server’s /api/fetch, then an optional reader proxy. Links to X posts are fetched from the FxTwitter API and turned into HTML on the server. A book on the Internet Archive is read from the item’s full-text file, found through the Archive’s metadata API, and arrives already cut into chapters.",
+          facts: ["GET only, http(s) only", "pages up to 5 MB, 20 s timeout"], code: [SRC + "lib/fetchUrl.ts:245", "apps/web/vite.fetch.ts:20"] },
         { f: "SV", to: "EX", t: "call", n: "GET page", say: "The server downloads the page." },
         { f: "EX", to: "SV", t: "ret", n: "HTML" },
         { f: "SV", to: "UI", t: "ret", n: "HTML" },
         { f: "UI", to: "UI", t: "self", n: "htmlToText: article, code, images, links", say: "The article’s text is kept, with code blocks, images and their captions, links and metadata.",
-          d: "Walks <article> or <main>, dropping scripts, nav, headers, footers and forms. Headings stay as Markdown headings, callouts are kept and tables are read row by row. A numbered chapter list anywhere on the page names the book it belongs to. Code stays as fenced blocks; images and SVGs become visual blocks with their captions; links, author, published date and site are collected.", code: [SRC + "lib/fetchUrl.ts:136"] },
+          d: "Walks <article> or <main>, dropping scripts, nav, headers, footers and forms. Headings stay as Markdown headings, callouts are kept and tables are read row by row. A numbered chapter list anywhere on the page names the book it belongs to. Code stays as fenced blocks; images and SVGs become visual blocks with their captions; links, author, published date and site are collected.", code: [SRC + "lib/fetchUrl.ts:138"] },
       ] },
       { f: "UI", to: "DB", t: "call", n: "useLibrary.create() → docs.put", say: "The text becomes a Library document in IndexedDB.",
-        d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts:72", SRC + "lib/db.ts:139"] },
+        d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts:73", SRC + "lib/db.ts:139"] },
       { f: "DB", to: "UI", t: "ret", n: "DocRecord" },
       { f: "UI", to: "PL", t: "call", n: "openDocument → open(rec, {autoplay})", say: "The document is handed to the player; the Reader opens at /read/:id.",
         d: "open() resolves the voice: the document’s own, else the default from Settings. Autoplay is only set after a user gesture (Listen, Fetch, a Library tap); shared readings follow the “Auto-play on share” setting.",

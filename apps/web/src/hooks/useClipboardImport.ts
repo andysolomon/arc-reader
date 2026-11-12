@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchReadable, hostOf, isWebAddress, normalizeUrl } from "../lib/fetchUrl";
+import { EXPLAIN_MS, ReadError } from "../lib/readError";
 import { openDocument } from "../lib/openDoc";
 import { useLibrary } from "../state/library";
 import { importPage, isContentsPage } from "../state/books";
@@ -46,8 +47,9 @@ export function useClipboardImportController(enabled: boolean): ClipboardImport 
         rec = await create({ text, source: "paste" });
       }
       await openDocument(rec, navigate, { autoplay: listen, resume: false, prepare: listen });
-    } catch {
-      toast(failure);
+    } catch (e) {
+      if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
+      else toast(failure);
     } finally {
       importing.current = false;
       setBusy(false);

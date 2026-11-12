@@ -11,6 +11,7 @@ import { usePlayer } from "../state/player";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { fetchReadable, hostOf, isWebAddress, looksLikeUrl, normalizeUrl } from "../lib/fetchUrl";
+import { EXPLAIN_MS, ReadError } from "../lib/readError";
 import { openDocument } from "../lib/openDoc";
 import { importPage, isContentsPage } from "../state/books";
 import { SPEED_STEPS } from "@readaloud/ui";
@@ -84,8 +85,9 @@ export function Compose() {
       // A contents page is there to be swapped for its chapters, so it opens without reading itself out.
       const listen = !isContentsPage(f);
       await openDocument(rec, navigate, { autoplay: listen, resume: false, prepare: listen });
-    } catch {
-      toast(`Couldn't read ${host} — try pasting the text`);
+    } catch (e) {
+      if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
+      else toast(`Couldn't read ${host} — try pasting the text`);
       linkRef.current?.focus();
       linkRef.current?.select();
     } finally {

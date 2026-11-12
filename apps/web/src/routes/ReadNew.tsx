@@ -4,6 +4,7 @@ import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 import { fetchReadable, hostOf } from "../lib/fetchUrl";
+import { EXPLAIN_MS, ReadError } from "../lib/readError";
 import { openDocument } from "../lib/openDoc";
 import { importPage, isContentsPage } from "../state/books";
 
@@ -39,8 +40,9 @@ export function ReadNew() {
           return;
         }
         navigate("/", { replace: true });
-      } catch {
-        toast("Couldn't read what was shared");
+      } catch (e) {
+        if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
+        else toast("Couldn't read what was shared");
         navigate("/", { replace: true });
       }
     })();
