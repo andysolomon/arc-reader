@@ -17,6 +17,7 @@ import { hasSummary } from "../lib/summary";
 import { prepareCodeSummaries } from "../lib/codeSummaries";
 import { readingBlocks } from "../lib/codeBlocks";
 import { catalogue } from "../lib/postTitle";
+import { serverReachable, serverReturned } from "../lib/appUpdate";
 
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
@@ -48,6 +49,8 @@ export interface PlayerState extends EngineSnapshot {
   preparationError: string | null;
   /** The chosen voice could not be generated; playback is stopped until the user retries or switches voice. */
   speechError: string | null;
+  /** The app's own server stopped answering; playback resumes by itself when it answers again. */
+  reconnecting: boolean;
   /** "Prepare audio" in progress: passages rendered so far */
   prerendering: { done: number; total: number; unreachable?: boolean } | null;
 }
@@ -83,6 +86,22 @@ interface Actions {
   clearOffline: () => void;
 }
 
+let reconnects = 0;
+/**
+ * A phone's tunnel to the app can drop for minutes while the speech server is fine.
+ * When the app's own server is what stopped answering, wait for it and resume instead
+ * of leaving a Retry to tap. A speech server that is down behind a reachable app is
+ * left to the user: asking it again in a loop would not help.
+ */
+async function resumeWhenReachable() {
+  const attempt = ++reconnects;
+  const wanted = () => attempt === reconnects && !!usePlayer.getState().speechError;
+  if (await serverReachable(4000) || !wanted()) return;
+  usePlayer.setState({ speechError: "Can't reach ReadAloud.", reconnecting: true });
+  if (await serverReturned(wanted)) usePlayer.getState().retrySpeech();
+  else if (wanted()) usePlayer.setState({ reconnecting: false });
+}
+
 export const engine = new PlaybackEngine({
   engine: (voiceId) => {
     const v = getVoice(voiceId);
@@ -112,7 +131,10 @@ export const engine = new PlaybackEngine({
     void positions.put({ docId: snap.docId, variant: variant(doc.voice), narrationVersion: 2, index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() }, { completed });
   },
   onError: (m) => toast(m),
-  onUnavailable: (m) => usePlayer.setState({ speechError: m }),
+  onUnavailable: (m, unreachable) => {
+    usePlayer.setState({ speechError: m, reconnecting: false });
+    if (unreachable) void resumeWhenReachable();
+  },
   onSlow: (factor) => {
     const voice = getVoice(usePlayer.getState().voiceId);
     // Prepare audio is not offered for paid engines (it would bill the whole document up front).
@@ -191,6 +213,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
     preparing: null,
     preparationError: null,
     speechError: null,
+    reconnecting: false,
     prerendering: null,
 
     async open(rec, opts = {}) {

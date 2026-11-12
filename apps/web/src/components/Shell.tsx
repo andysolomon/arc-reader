@@ -25,6 +25,7 @@ export function Shell() {
   const preparing = usePlayer((s) => s.preparing);
   const preparationError = usePlayer((s) => s.preparationError);
   const speechError = usePlayer((s) => s.speechError);
+  const reconnecting = usePlayer((s) => s.reconnecting);
   const toastMsg = useToast((s) => s.message);
   const toastHref = useToast((s) => s.href);
   const { pathname } = useLocation();
@@ -50,7 +51,7 @@ export function Shell() {
             <button className="text-accent underline" onClick={() => usePlayer.getState().cancelPreparation()}>{preparing ? "Cancel" : "Dismiss"}</button>
           </div>}
           {speechError && <div role="alert" data-testid="speech-error" className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line bg-bg2 px-5 py-3 text-sm">
-            <span className="flex-1">{speechError} Playback is paused.</span>
+            <span className="flex-1">{speechError} {reconnecting ? "Playback resumes when the connection is back." : "Playback is paused."}</span>
             <button className="text-accent underline" onClick={() => usePlayer.getState().retrySpeech()}>Retry</button>
             <button className="text-accent underline" onClick={() => usePlayer.getState().useBrowserVoice()}>Use browser voice</button>
             <button className="text-accent underline" onClick={() => usePlayer.getState().dismissSpeechError()}>Dismiss</button>

@@ -1,3 +1,4 @@
+import type { Route } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { composeAndListen, TEXT, composeText } from "./helpers";
 
@@ -53,6 +54,20 @@ test.describe("VoiceStudio provider (stub server)", () => {
     await expect(page.getByRole("button", { name: /^Pause/ })).toBeVisible();
     await page.getByRole("button", { name: "Dismiss" }).click();
     await expect(page.getByTestId("offline-banner")).toHaveCount(0);
+  });
+
+  test("connection to the app drops → playback waits for it and resumes by itself", async ({ page, context }) => {
+    const drop = (route: Route) => route.abort("connectionrefused");
+    const lost = ["**/api/vs/**", /\/api\/preparations(?:\/|$)/, /\/\?reachable=/];
+    for (const url of lost) await context.route(url, drop);
+    await composeAndListen(page);
+    const alert = page.getByTestId("speech-error");
+    await expect(alert).toContainText("Can't reach ReadAloud. Playback resumes when the connection is back.");
+    await expect(page.getByRole("button", { name: /^Play/ })).toHaveAttribute("data-playing", "false");
+    for (const url of lost) await context.unroute(url, drop);
+    // Nobody taps Retry: the next probe answers and the same passage is asked for again.
+    await expect(page.getByRole("button", { name: /^Pause/ })).toBeVisible();
+    await expect(alert).toHaveCount(0);
   });
 
   test("voices come from the server; cloned profiles use the active-engine alias", async ({ page }) => {
