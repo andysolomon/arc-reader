@@ -44,6 +44,8 @@ export const useBooks = create<BooksState>()((set, get) => ({
     if (get().adding[book.id]) return { added: 0, failed: 0 };
     set({ adding: { ...get().adding, [book.id]: { done: 0, total: book.chapters.length } } });
     let added = 0, failed = 0;
+    // Opening the first chapter can take a minute (code explanations); the rest keep arriving meanwhile.
+    let first: Promise<void> | undefined;
     try {
       const all = await docStore.all();
       const have = shelved(all, book.id);
@@ -63,10 +65,11 @@ export const useBooks = create<BooksState>()((set, get) => ({
           }
         } catch { /* Counted below; the rest of the book still arrives. */ }
         if (rec) {
-          if (++added === 1) await opts.onFirst?.(rec);
+          if (++added === 1) first = Promise.resolve(opts.onFirst?.(rec)).catch(() => {});
         } else failed++;
         set({ adding: { ...get().adding, [book.id]: { done: done + 1, total: missing.length } } });
       }
+      await first;
     } finally {
       const { [book.id]: _, ...adding } = get().adding;
       // Every page of the book made the same offer; it has been taken up.

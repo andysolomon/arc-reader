@@ -52,6 +52,48 @@ test("pasting prose into the link field opens the text box with it", async ({ pa
   await expectReading(page);
 });
 
+test("a link pasted into the text box is fetched, not read out as text", async ({ page }) => {
+  await page.route("https://example.com/story", (route) => route.fulfill({ contentType: "text/plain", headers: { "Access-Control-Allow-Origin": "*" }, body: TEXT }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Type or paste text" }).click();
+  await pasteInto(page, "Text to read", "https://example.com/story");
+  await expectReading(page);
+  await expect(page.locator("article")).not.toContainText("https://example.com/story");
+  // Nothing is left behind as a draft.
+  await page.getByRole("link", { name: "Compose", exact: true }).click();
+  await expect(page.getByLabel("Text to read")).toHaveCount(0);
+});
+
+test("a link typed into the text box is fetched on Listen", async ({ page }) => {
+  await page.route("https://example.com/story", (route) => route.fulfill({ contentType: "text/plain", headers: { "Access-Control-Allow-Origin": "*" }, body: TEXT }));
+  await page.goto("/");
+  await composeText(page, "https://example.com/story");
+  await page.getByTestId("listen").click();
+  await expectReading(page);
+  await expect(page.locator("article")).not.toContainText("https://example.com/story");
+});
+
+test("a link pasted into a sentence stays part of the text", async ({ page }) => {
+  await page.goto("/");
+  await composeText(page, "The quick brown fox wrote about it here: ");
+  await pasteInto(page, "Text to read", "https://example.com/story");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByLabel("Link to read")).toHaveValue("");
+  await expect(page.getByLabel("Text to read")).toHaveValue("The quick brown fox wrote about it here: ");
+});
+
+test("a link in the text box that can't be fetched moves to the link field", async ({ page }) => {
+  await page.route("https://example.com/story", (route) => route.abort());
+  await page.route("**/api/fetch?**", (route) => route.fulfill({ status: 502, body: "Unavailable" }));
+  await page.goto("/");
+  await composeText(page, "https://example.com/story");
+  await page.getByTestId("listen").click();
+  await expect(page.getByRole("status").filter({ hasText: "Couldn't read example.com" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByLabel("Link to read")).toHaveValue("https://example.com/story");
+  await expect(page.getByLabel("Text to read")).toHaveCount(0);
+});
+
 test("a failed fetch keeps the link for another try", async ({ page }) => {
   await page.route("https://example.com/story", (route) => route.abort());
   await page.route("**/api/fetch?**", (route) => route.fulfill({ status: 502, body: "Unavailable" }));
