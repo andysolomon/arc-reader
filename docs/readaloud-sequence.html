@@ -253,7 +253,7 @@ const SEQS = {
         code: [SRC + "routes/Compose.tsx:119", SRC + "routes/Compose.tsx:76", SRC + "routes/ReadNew.tsx:15", "apps/web/vite.config.ts:52"] },
       { op: "opt", id: "url", g: "a web address was entered or shared", rows: [
         { f: "UI", to: "SV", t: "call", n: "GET /api/fetch?url=…", say: "Most sites send no CORS headers, so the app server fetches the page for the browser.",
-          d: "fetchReadable tries a direct fetch first, then the app server’s /api/fetch, then an optional reader proxy. Links to X posts are fetched from the FxTwitter API and turned into HTML on the server.",
+          d: "fetchReadable tries a direct fetch first, then the app server’s /api/fetch, then an optional reader proxy. Links to X posts are fetched from the FxTwitter API and turned into HTML on the server. A book on the Internet Archive is read from the item’s full-text file, found through the Archive’s metadata API, and arrives already cut into chapters.",
           facts: ["GET only, http(s) only", "pages up to 5 MB, 20 s timeout"], code: [SRC + "lib/fetchUrl.ts:245", "apps/web/vite.fetch.ts:20"] },
         { f: "SV", to: "EX", t: "call", n: "GET page", say: "The server downloads the page." },
         { f: "EX", to: "SV", t: "ret", n: "HTML" },
