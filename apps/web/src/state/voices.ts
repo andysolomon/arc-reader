@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { DEFAULT_VOICE_ID, isDefaultArchetype, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PRESET_VOICES, hueFor, type Voice } from "../data/voices";
-import { fetchServerVoices, fetchFishVoices, hasFish, hasApi, hasOpenAI, API_KIND, OPENAI_ENGINE, FISH_ENGINE, type ServerEngine } from "../engine/providers";
+import { DEFAULT_VOICE_ID, isDefaultArchetype, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PHONON_PREFIX, PHONON_VOICES, PRESET_VOICES, hueFor, phononVoice, type Voice } from "../data/voices";
+import { fetchServerVoices, fetchFishVoices, fetchPhononVoices, hasFish, hasApi, hasOpenAI, hasPhonon, hasOwnServer, API_KIND, OPENAI_ENGINE, FISH_ENGINE, PHONON_ENGINE, type ServerEngine } from "../engine/providers";
 import { archetypeOf, idPath, recordingRevision, studioFetch, studioJson, type Profile } from "../lib/studio";
 import { setVoiceRevision, setVoiceRevisions } from "../engine/voiceRevisions";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -25,6 +25,8 @@ interface VoicesState {
   /** Fetch voices/engines from the speech server; keeps the defaults when it is unreachable. */
   load: () => Promise<void>;
   loadFish: () => Promise<void>;
+  /** Match the Phonon list to what its server offers; keeps the built-in list when it is unreachable. */
+  loadPhonon: () => Promise<void>;
   loadServer: () => Promise<void>;
   /** Delete a saved VoiceStudio profile. A gallery voice reappears in Studio; a clone's reference is gone for good. */
   remove: (id: string) => Promise<void>;
@@ -44,9 +46,11 @@ const ENGINE_LABELS: Record<string, string> = {
   [LOCAL_ENGINE]: "Browser voice",
   [OPENAI_ENGINE]: "OpenAI",
   [FISH_ENGINE]: "Fish Audio",
+  [PHONON_ENGINE]: "Phonon",
 };
 
-const cloud = () => [...(hasOpenAI() ? [...OPENAI_ACCENT_VOICES, ...OPENAI_VOICES] : []), ...(hasFish() ? FISH_PRESET_VOICES : [])];
+/** Voices from servers other than VoiceStudio: Phonon, then the cloud services. */
+const elsewhere = () => [...(hasPhonon() ? PHONON_VOICES : []), ...(hasOpenAI() ? [...OPENAI_ACCENT_VOICES, ...OPENAI_VOICES] : []), ...(hasFish() ? FISH_PRESET_VOICES : [])];
 
 export const engineLabel = (id: string) => ENGINE_LABELS[id] ?? id;
 
@@ -60,13 +64,13 @@ function langLabel(l: string | null | undefined): string {
 }
 
 export const useVoices = create<VoicesState>()((set, get) => ({
-  voices: [...(hasApi() ? PRESET_VOICES : []), ...cloud(), LOCAL_VOICE],
+  voices: [...(hasApi() ? PRESET_VOICES : []), ...elsewhere(), LOCAL_VOICE],
   engines: [],
   activeEngine: null,
   loaded: false,
   fishError: null,
   async load() {
-    await Promise.all([get().loadFish(), get().loadServer()]);
+    await Promise.all([get().loadFish(), get().loadPhonon(), get().loadServer()]);
     set({ loaded: true });
   },
   async loadFish() {
@@ -82,6 +86,22 @@ export const useVoices = create<VoicesState>()((set, get) => ({
       set({ voices: [...get().voices.filter((v) => v.engine !== FISH_ENGINE), ...FISH_PRESET_VOICES, ...fish.filter((v) => !presetIds.has(v.id))], fishError: null });
     } catch (error) {
       set({ fishError: error instanceof Error ? error.message : "Could not load Fish Audio voices" });
+    }
+  },
+  async loadPhonon() {
+    if (!hasPhonon()) return;
+    try {
+      const names = new Set((await fetchPhononVoices()).filter((name) => name !== "default"));
+      if (!names.size) return;
+      // The catalogue's order (narrators, then characters), then voices it does not know yet.
+      const known = PHONON_VOICES.filter((v) => names.delete(v.name));
+      const listed = [...known, ...[...names].map((name) => phononVoice(name))];
+      // Phonon stays after VoiceStudio's voices and before the cloud services.
+      const voices = get().voices.filter((v) => v.engine !== PHONON_ENGINE);
+      const at = Math.max(0, voices.findIndex((v) => hasOwnServer(v.engine) || v.kind === "local"));
+      set({ voices: [...voices.slice(0, at), ...listed, ...voices.slice(at)] });
+    } catch {
+      // Keep the built-in list if the Phonon server is offline.
     }
   },
   async loadServer() {
@@ -111,8 +131,8 @@ export const useVoices = create<VoicesState>()((set, get) => ({
         });
       const engineOpts: EngineOption[] = (engines as ServerEngine[])
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false, cloning: e.supports_cloning === true }));
-      const clouds = get().voices.filter((v) => v.engine === OPENAI_ENGINE || v.engine === FISH_ENGINE);
-      set({ voices: [...profiles, ...presets, ...clouds, LOCAL_VOICE], engines: engineOpts.length ? engineOpts : get().engines, activeEngine: activeEngine ?? get().activeEngine });
+      const others = get().voices.filter((v) => hasOwnServer(v.engine));
+      set({ voices: [...profiles, ...presets, ...others, LOCAL_VOICE], engines: engineOpts.length ? engineOpts : get().engines, activeEngine: activeEngine ?? get().activeEngine });
       adoptDefaultVoice(profiles);
     } catch {
       // Keep available voices if the local speech server is offline.
@@ -149,8 +169,10 @@ export function getVoice(id: string | null | undefined): Voice {
   const list = useVoices.getState().voices;
   const found = list.find((v) => v.id === id);
   if (found) return found;
-  const preset = [...PRESET_VOICES, ...OPENAI_VOICES, ...OPENAI_ACCENT_VOICES, ...FISH_PRESET_VOICES, LOCAL_VOICE].find((v) => v.id === id);
+  const preset = [...PRESET_VOICES, ...PHONON_VOICES, ...OPENAI_VOICES, ...OPENAI_ACCENT_VOICES, ...FISH_PRESET_VOICES, LOCAL_VOICE].find((v) => v.id === id);
   if (preset) return preset;
+  // A saved document can use a Phonon voice the server no longer lists.
+  if (id?.startsWith(PHONON_PREFIX) && id.length > PHONON_PREFIX.length) return phononVoice(id.slice(PHONON_PREFIX.length));
   // A saved document can reference a voice outside the current catalogue page.
   if (id?.startsWith("fish:") && id.length > 5) {
     return { ...FISH_DEFAULT_VOICE, id, name: "Fish Audio voice", hue: hueFor(id) };

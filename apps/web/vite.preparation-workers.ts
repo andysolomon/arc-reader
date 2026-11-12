@@ -21,6 +21,10 @@ export interface PreparationWorker {
   target: string;
   key: string;
 }
+/** Phonon is a speech server of its own: it renders its voices and nothing else. */
+export const PHONON_ENGINE = "phonon";
+export const PHONON_WORKER = "phonon";
+export const forPhonon = (requests: PreparationRequest[]) => requests.some((item) => item.engine === PHONON_ENGINE);
 const profileSignature = (profile: Profile) => JSON.stringify([
   profile.kind, profile.language, profile.instruct, profile.ref_text, profile.seed, profile.vd_states, profile.is_locked,
 ]);
@@ -40,6 +44,13 @@ export class PreparationWorkers {
       id: "secondary", name: env.VOICESTUDIO_SECONDARY_NAME || "Omarchy", target: secondary,
       key: env.VOICESTUDIO_SECONDARY_API_KEY || env.VOICESTUDIO_API_KEY || "",
     });
+    const phonon = env.PHONON_URL?.replace(/\/$/, "");
+    if (phonon) this.workers.push({ id: PHONON_WORKER, name: "Phonon", target: phonon, key: env.PHONON_API_KEY || "" });
+  }
+
+  /** The one machine that can take a reading, when its engine has a server of its own. */
+  only(requests: PreparationRequest[]): PreparationWorker | undefined {
+    return forPhonon(requests) ? this.workers.find((worker) => worker.id === PHONON_WORKER) : undefined;
   }
 
   private async fetch(worker: PreparationWorker, path: string) {
@@ -79,6 +90,7 @@ export class PreparationWorkers {
   }
 
   async supports(worker: PreparationWorker, requests: PreparationRequest[]): Promise<boolean> {
+    if (worker.id === PHONON_WORKER || forPhonon(requests)) return worker.id === PHONON_WORKER && forPhonon(requests);
     if (worker.id === "primary") return true;
     try {
       const secondary = await this.catalog(worker);

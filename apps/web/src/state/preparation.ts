@@ -5,7 +5,7 @@ import type { Voice } from "../data/voices";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { unavailableMessage } from "../engine/engine";
 import { isTransientPreparationError, refreshPreparationCatalog, sharedAudioRemaining } from "../engine/preparation";
-import { baseFor, cacheKey, isPaidEngine, prepareInBackground, synthesize, usesBuiltInProxy } from "../engine/providers";
+import { baseFor, cacheKey, hasOwnServer, hasPreparationServer, prepareInBackground, preparesOnServer, synthesize } from "../engine/providers";
 import { ApiBusy, ApiUnreachable, LOCAL_ENGINE } from "../engine/types";
 import { audioCache, docs } from "../lib/db";
 import { prepareCodeSummaries } from "../lib/codeSummaries";
@@ -34,12 +34,12 @@ export interface PreparationJob {
 }
 
 export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "saving"].includes(job.status);
-// Cloud providers keep bounded parallelism. Local submissions join the durable
-// server queue, which reserves exactly one whole reading per machine.
+// Cloud providers keep bounded parallelism. VoiceStudio and Phonon submissions join
+// the durable server queue, which reserves exactly one whole reading per machine.
 export const PREPARATION_CONCURRENCY = 3;
 export const PREPARATION_QUEUE_LIMIT = 20;
 const active = new Map<string, { controller: AbortController; provider: string }>();
-const providerFor = (job: PreparationJob) => isPaidEngine(job.voice.engine) ? job.voice.engine : "voicestudio";
+const providerFor = (job: PreparationJob) => hasOwnServer(job.voice.engine) ? job.voice.engine : "voicestudio";
 
 interface PreparationState {
   jobs: PreparationJob[];
@@ -64,7 +64,7 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   sharedError: null,
   sharing: 0,
   async refreshShared() {
-    if (!usesBuiltInProxy()) return;
+    if (!hasPreparationServer()) return;
     if (sharedRefresh) return sharedRefresh;
     sharedRefresh = (async () => {
       try {
@@ -137,14 +137,14 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
 const update = (id: string, patch: Partial<PreparationJob>) => usePreparation.setState((state) => ({ jobs: state.jobs.map((job) => job.id === id ? { ...job, ...patch } : job) }));
 
 /** Submit local work to the server's machine scheduler. Cloud voices use their
- * own pools and never occupy a Mac or Omarchy reservation. */
+ * own pools and never occupy a machine's reservation; Phonon readings queue for the Phonon server. */
 function drain() {
   const counts = new Map<string, number>();
   for (const { provider } of active.values()) counts.set(provider, (counts.get(provider) || 0) + 1);
   for (const job of usePreparation.getState().jobs) {
     if (job.remote) continue;
     const provider = providerFor(job);
-    const background = provider === "voicestudio" && usesBuiltInProxy();
+    const background = preparesOnServer(job.voice.engine);
     const limit = background ? PREPARATION_QUEUE_LIMIT : provider === "voicestudio" ? 1 : PREPARATION_CONCURRENCY;
     if (job.status !== "queued" || active.has(job.id) || (counts.get(provider) || 0) >= limit) continue;
     const controller = new AbortController();
@@ -189,7 +189,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     const passages = planPassages(sentences);
     if (!passages.length) throw new Error("There is no text to prepare.");
     update(job.id, { total: passages.length, message: undefined });
-    if (usesBuiltInProxy() && !isPaidEngine(job.voice.engine)) {
+    if (preparesOnServer(job.voice.engine)) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {

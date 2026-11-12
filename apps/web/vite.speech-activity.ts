@@ -3,7 +3,8 @@
  * preparation share one VoiceStudio, which runs a single GPU worker and queues
  * at most one more request. Preparation yields while anyone is listening so
  * live requests are never refused as "pool saturated", and so two engines do
- * not keep evicting each other from memory.
+ * not keep evicting each other from memory. Phonon is tracked the same way, so
+ * preparation never takes its CPU from someone listening.
  */
 export class SpeechActivity {
   private inflight = new Map<string, number>();
@@ -53,6 +54,6 @@ export class SpeechActivity {
   static key(target: string) { return target.replace(/\/$/, ""); }
 }
 
-/** The OpenAI-style speech route, before or after the /api/vs prefix is rewritten away. */
+/** The OpenAI-style speech route, before or after the /api/vs or /api/phonon prefix is rewritten away. */
 export const isSpeechRequest = (method: string | undefined, url: string | undefined) =>
-  method === "POST" && /^(?:\/api\/vs)?\/v1\/audio\/speech(?:[?#]|$)/.test(url || "");
+  method === "POST" && /^(?:\/api\/(?:vs|phonon))?\/v1\/audio\/speech(?:[?#]|$)/.test(url || "");

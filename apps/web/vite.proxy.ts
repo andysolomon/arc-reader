@@ -36,8 +36,10 @@ function route(prefix: string, target: string, key: string, extra: Partial<Proxy
 }
 
 /**
- * /api/vs → VoiceStudio (loopback), /api/oa → OpenAI. Keys come from server-side env only.
- * `activity` is shared with audio preparation so it yields to live speech on the same server.
+ * /api/vs → VoiceStudio (loopback), /api/oa → OpenAI, /api/fish → Fish Audio, /api/phonon → Phonon.
+ * Keys come from server-side env only.
+ * `activity` is shared with audio preparation so it yields to live speech on the same server
+ * (VoiceStudio or Phonon).
  */
 export function voiceStudioProxy(env: Record<string, string>, activity?: SpeechActivity): Record<string, ProxyOptions> {
   const routes: Record<string, ProxyOptions> = {
@@ -59,6 +61,19 @@ export function voiceStudioProxy(env: Record<string, string>, activity?: SpeechA
         }
       },
     });
+  }
+  if (env.PHONON_URL) {
+    routes["^/api/phonon(?:/|$)"] = route("/api/phonon", env.PHONON_URL.replace(/\/$/, ""), env.PHONON_API_KEY || "", {
+      // Only the voice list and speech generation.
+      bypass(req) {
+        const path = new URL(req.url || "/", "http://localhost").pathname;
+        const allowed = (req.method === "GET" && path === "/api/phonon/v1/audio/voices")
+          || (req.method === "POST" && path === "/api/phonon/v1/audio/speech");
+        if (!allowed) {
+          return false;
+        }
+      },
+    }, activity);
   }
   return routes;
 }

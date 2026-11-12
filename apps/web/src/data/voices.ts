@@ -116,6 +116,28 @@ export const FISH_PRESET_VOICES: Voice[] = [
   },
 ];
 
+export const PHONON_PREFIX = "phonon:";
+/** A Phonon voice. The id is `phonon:<name>`; the name is what the server accepts as `voice`. */
+export const phononVoice = (name: string, lang = "EN", tags: string[] = []): Voice => ({
+  id: PHONON_PREFIX + name, name, lang, tags, hue: hueFor(PHONON_PREFIX + name), engine: "phonon", kind: "preset",
+});
+const phononGroup = (lang: string, tags: string[], names: string[]) => names.map((name) => phononVoice(name, lang, tags));
+
+/**
+ * Phonon's English voices, as published in gradium/phonon-voices and listed by its
+ * server. Shown before the server answers; its unnamed `default` entry is left out.
+ */
+export const PHONON_VOICES: Voice[] = [
+  ...phononGroup("EN-US", ["female", "American"], ["Zoey", "Juniper", "Everly", "Harper", "Hadley", "Delia"]),
+  ...phononGroup("EN-US", ["male", "American"], ["Easton", "Micah", "Trevor", "Russell", "Preston", "Miles"]),
+  ...phononGroup("EN-GB", ["female", "British"], ["Maeve", "Freya", "Pippa", "Elodie-Rose", "Imogen", "Lottie", "Bryony"]),
+  ...phononGroup("EN-GB", ["male", "British"], ["Alfie", "Hugh", "Edwin", "Spencer", "Toby", "Teddy"]),
+  ...phononGroup("EN", ["character"], [
+    "Azgorath", "Captain Silas Blackwater", "Fairy Godmother", "Fennick the Young Elf", "Grub the Ogre", "Master Aldric",
+    "Morwenna of the Deep", "Old Mortlake", "Sir Bramwell", "The Snow Queen", "The Thing Under the Stairs", "Vyrmathrax the Ancient",
+  ]),
+];
+
 export const LOCAL_VOICE: Voice = { id: LOCAL_VOICE_ID, name: "Browser voice", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null, engine: LOCAL_ENGINE, kind: "local" };
 
 /** The list shown before (or without) a speech server. */

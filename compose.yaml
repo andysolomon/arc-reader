@@ -1,4 +1,4 @@
-# VoiceStudio and ReadAloud in one place: `docker compose up -d`.
+# VoiceStudio, Phonon and ReadAloud in one place: `docker compose up -d`.
 # Settings come from ./.env (see README "Voices: VoiceStudio"). Both ports stay on loopback.
 name: readaloud
 
@@ -19,6 +19,19 @@ services:
     volumes:
       - voicestudio-data:/app/omnivoice_data
 
+  # Gradium's Phonon: fast English voices on the CPU, behind their own OpenAI-compatible server.
+  phonon:
+    image: ghcr.io/gradium-ai/ptts-openai-server:${PHONON_TAG:-0.7.0}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PHONON_PORT:-8880}:8880"
+    environment:
+      PTTS_LANG: en
+      PTTS_QUANT: q8
+    volumes:
+      # The model (about 65 MB) is downloaded from Hugging Face on first start.
+      - phonon-data:/home/phonon/.cache/huggingface
+
   web:
     build:
       context: .
@@ -33,6 +46,10 @@ services:
         VITE_VISUAL_MODEL: ${VITE_VISUAL_MODEL:-muse-spark-1.3-contributor}
         VITE_FISH_BASE: ${FISH_API_KEY:+/api/fish}
         VITE_FISH_TTS_MODEL: ${VITE_FISH_TTS_MODEL:-s2.1-pro}
+        # Phonon runs beside the app here and in the kind and AWS clusters. Build with an
+        # empty VITE_PHONON_BASE for a deployment without it.
+        VITE_PHONON_BASE: ${VITE_PHONON_BASE-/api/phonon}
+        VITE_PHONON_TTS_MODEL: ${VITE_PHONON_TTS_MODEL:-gradium/phonon-31m-en}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WEB_PORT:-4179}:4173"
@@ -51,6 +68,7 @@ services:
       VOICESTUDIO_SECONDARY_API_KEY: ${VOICESTUDIO_SECONDARY_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       FISH_API_KEY: ${FISH_API_KEY:-}
+      PHONON_URL: http://phonon:8880
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_URL: ${LLM_URL:-https://opencode.ai/zen/go}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
@@ -62,10 +80,12 @@ services:
       - library-data:/app/library
     depends_on:
       - voicestudio
+      - phonon
 
 volumes:
   preparation-data:
   library-data:
+  phonon-data:
   # Fixed name so models downloaded by an earlier `docker run -v voicestudio-data:…` carry over.
   voicestudio-data:
     name: voicestudio-data
