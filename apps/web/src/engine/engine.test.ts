@@ -348,7 +348,7 @@ describe("start-up", () => {
     e.load(doc(2));
     await e.play();
     expect(e.getSnapshot()).toMatchObject({ playing: false, loading: false });
-    expect(onUnavailable).toHaveBeenCalledWith("Speech server unreachable.");
+    expect(onUnavailable).toHaveBeenCalledWith("Speech server unreachable.", true);
     expect(synth.mock.calls[0][0]).toMatchObject({ fallbackLocal: false });
     // A retry asks the server again rather than reusing the failed attempt.
     synth.mockResolvedValue(chunk({ source: "estimate", audio: undefined, duration: 1 }));
