@@ -37,6 +37,11 @@ export function looksLikeUrl(input: string): boolean {
   return /^(localhost|[\w-]+(\.[\w-]+)+)(:\d+)?([/?#]\S*)?$/i.test(t);
 }
 
+/** Nothing but a web address written out in full: a link wherever it was pasted, never prose to read aloud. */
+export function isWebAddress(input: string): boolean {
+  return /^(https?:\/\/|www\.)[^\s.]\S*$/i.test(input.trim());
+}
+
 export function normalizeUrl(input: string): string {
   const t = input.trim();
   if (!/^https?:\/\//i.test(t)) return `https://${t}`;

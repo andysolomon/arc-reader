@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchReadable, hostOf } from "../lib/fetchUrl";
+import { fetchReadable, hostOf, isWebAddress, normalizeUrl } from "../lib/fetchUrl";
 import { openDocument } from "../lib/openDoc";
 import { useLibrary } from "../state/library";
 import { importPage, isContentsPage } from "../state/books";
@@ -35,9 +35,10 @@ export function useClipboardImportController(enabled: boolean): ClipboardImport 
       const create = useLibrary.getState().create;
       let rec;
       let listen = true;
-      if (/^https?:\/\/\S+$/i.test(text)) {
-        failure = `Couldn't read ${hostOf(text)} — try copying the article text`;
-        toast(`Fetching ${hostOf(text)}…`);
+      if (isWebAddress(text)) {
+        const host = hostOf(normalizeUrl(text));
+        failure = `Couldn't read ${host} — try copying the article text`;
+        toast(`Fetching ${host}…`);
         const article = await fetchReadable(text);
         rec = await importPage(article, { source: "url" });
         listen = !isContentsPage(article);

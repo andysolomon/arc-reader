@@ -21,6 +21,11 @@ describe("links", () => {
     ]);
   });
 
+  it("ignores a scheme with no address after it", () => {
+    expect(linksInText("even if a link says http://”. This defeats downgrade attacks, and https://… is not one either.")).toEqual([]);
+    expect(linksInText("Use “https://a.com/x” or ‘https://b.org’.").map((l) => l.url)).toEqual(["https://a.com/x", "https://b.org/"]);
+  });
+
   it("reads Markdown links with their text and skips images", () => {
     expect(linksInMarkdown('Read [the docs](https://a.com/docs "Docs") and ![logo](https://a.com/logo.png), or [rel](/x) at https://b.com', "https://a.com/")).toEqual([
       { url: "https://a.com/docs", text: "the docs" },
