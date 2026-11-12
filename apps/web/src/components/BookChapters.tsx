@@ -4,6 +4,7 @@ import { Button, cn } from "@readaloud/ui";
 import type { DocRecord } from "../lib/db";
 import { openDocument } from "../lib/openDoc";
 import { useBooks, shelves, finished } from "../state/books";
+import { partNames } from "../lib/book";
 import { useLibrary, type LibraryItem } from "../state/library";
 import { usePlayer } from "../state/player";
 
@@ -17,14 +18,15 @@ export function BookOffer({ record }: { record: DocRecord }) {
   const bookId = offer?.id ?? record.book?.id;
   const adding = useBooks((s) => (bookId ? s.adding[bookId] : undefined));
   const items = useLibrary((s) => s.items);
+  const { one, many, whole } = partNames(offer ?? record.book);
 
   if (adding) {
     return (
       <div role="status" data-book-progress className="mb-8 rounded-card border border-line bg-bg2 px-5 py-4 font-sans text-[14px] text-fg2">
         <div className="flex items-center gap-3">
           <BookOpen size={18} strokeWidth={1.5} className="shrink-0" aria-hidden />
-          <span className="flex-1">Adding chapters of {offer?.title ?? record.book?.title}</span>
-          <span className="tabular-nums">{adding.done} of {adding.total}</span>
+          <span className="flex-1">{adding.total ? "Adding" : "Looking for"} {many} of {offer?.title ?? record.book?.title}</span>
+          {adding.total > 0 && <span className="tabular-nums">{adding.done} of {adding.total}</span>}
         </div>
         <div className="mt-3 h-1 overflow-hidden rounded-full bg-bg3" aria-hidden>
           <span className="block h-full rounded-full bg-accent transition-[width] duration-base" style={{ width: `${adding.total ? (adding.done / adding.total) * 100 : 0}%` }} />
@@ -59,16 +61,16 @@ export function BookOffer({ record }: { record: DocRecord }) {
         <div className="min-w-0 flex-1">
           <p className="m-0 text-[14px] leading-relaxed text-fg">
             {contents
-              ? <>This page lists the {total} chapters of <cite className="font-serif">{offer.title}</cite>.</>
-              : <>This is chapter {offer.index! + 1} of {total} in <cite className="font-serif">{offer.title}</cite>.</>}
+              ? <>This page lists the {total} {many} of <cite className="font-serif">{offer.title}</cite>.</>
+              : <>This is {one} {offer.index! + 1} of {total} in <cite className="font-serif">{offer.title}</cite>.</>}
           </p>
           <p className="m-0 mt-1 text-[13px] leading-relaxed text-fg2">
             {contents
-              ? "Add them to read the book in order. The chapters take this page's place in your Library."
-              : "Add the others to read the book in order."}
+              ? `Add them to ${whole === "course" ? "listen to" : "read"} the ${whole} in order. The ${many} take this page's place in your Library.`
+              : `Add the others to read the ${whole} in order.`}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="primary" onClick={add}>{contents || missing === total ? `Add ${missing} chapters` : missing === 1 ? "Add the other chapter" : `Add the other ${missing} chapters`}</Button>
+            <Button variant="primary" onClick={add}>{contents || missing === total ? `Add ${missing} ${many}` : missing === 1 ? `Add the other ${one}` : `Add the other ${missing} ${many}`}</Button>
             <Button variant="ghost" onClick={() => useBooks.getState().dismiss(record.id)}>Not now</Button>
           </div>
         </div>
@@ -83,19 +85,19 @@ export function MissingChapters({ record, className }: { record: DocRecord; clas
   const adding = useBooks((s) => !!(record.book && s.adding[record.book.id]));
   const items = useLibrary((s) => s.items);
   const loaded = useLibrary((s) => s.loaded);
-  if (!record.book || !record.meta?.url || offered || adding || !loaded) return null;
+  if (!record.book || !(record.meta?.url || record.book.contents) || offered || adding || !loaded) return null;
   const have = new Set(shelves(items).get(record.book.id)?.items.map((it) => it.rec.book!.chapter)).size;
   const missing = Math.max(record.book.chapters, record.book.chapter) - have;
   if (missing <= 0) return null;
   return (
     <Button variant="link" className={cn("font-sans text-[12px] text-accent underline-offset-2 hover:underline", className)} onClick={() => void useBooks.getState().complete(record)}>
-      {missing === 1 ? "Add the missing chapter" : `Add the ${missing} missing chapters`}
+      {missing === 1 ? `Add the missing ${partNames(record.book).one}` : `Add the ${missing} missing ${partNames(record.book).many}`}
     </Button>
   );
 }
 
-/** "Chapter 8 of 27" */
-export const chapterLabel = (rec: DocRecord) => rec.book ? `Chapter ${rec.book.chapter} of ${Math.max(rec.book.chapters, rec.book.chapter)}` : "";
+/** "Chapter 8 of 27", or "Lecture 8 of 27" in a course */
+export const chapterLabel = (rec: DocRecord) => rec.book ? `${partNames(rec.book).One} ${rec.book.chapter} of ${Math.max(rec.book.chapters, rec.book.chapter)}` : "";
 
 /** Open a chapter where it was left, or from the top once it has been finished. */
 export function useOpenChapter() {
@@ -107,18 +109,19 @@ export function useOpenChapter() {
 export function ChapterNav({ previous, next, className }: { previous?: LibraryItem; next?: LibraryItem; className?: string }) {
   const open = useOpenChapter();
   if (!previous && !next) return null;
+  const { One } = partNames((previous ?? next)!.rec.book);
   const card = "flex min-w-0 flex-1 basis-56 flex-col gap-1 rounded-card border border-line bg-bg2 px-5 py-4 text-left font-sans transition-colors duration-fast hover:border-fg3 hover:bg-bg3";
   return (
-    <nav aria-label="Chapters" className={cn("flex flex-wrap gap-3", className)}>
+    <nav aria-label={`${One}s`} className={cn("flex flex-wrap gap-3", className)}>
       {previous && (
         <button type="button" onClick={() => open(previous)} className={card}>
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2"><ArrowLeft size={13} strokeWidth={1.5} aria-hidden />Previous · Chapter {previous.rec.book!.chapter}</span>
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2"><ArrowLeft size={13} strokeWidth={1.5} aria-hidden />Previous · {One} {previous.rec.book!.chapter}</span>
           <span className="line-clamp-2 font-serif text-[17px] leading-snug text-fg">{previous.rec.title}</span>
         </button>
       )}
       {next && (
         <button type="button" onClick={() => open(next)} className={cn(card, "items-end text-right")}>
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2">Next · Chapter {next.rec.book!.chapter}<ArrowRight size={13} strokeWidth={1.5} aria-hidden /></span>
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2">Next · {One} {next.rec.book!.chapter}<ArrowRight size={13} strokeWidth={1.5} aria-hidden /></span>
           <span className="line-clamp-2 font-serif text-[17px] leading-snug text-fg">{next.rec.title}</span>
         </button>
       )}

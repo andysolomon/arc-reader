@@ -1,5 +1,5 @@
 import { readingBlocks, fencedCode } from "./codeBlocks";
-import { visualNarration } from "./visuals";
+import { visualText } from "./visuals";
 import type { DocRecord } from "./db";
 import { hash } from "./hash";
 
@@ -30,8 +30,8 @@ export function hasSummary(rec: DocRecord): boolean {
 export async function summarize(rec: DocRecord, model: SummaryModel): Promise<NonNullable<DocRecord["summary"]>> {
   const blocks = readingBlocks(rec.text);
   const text = blocks.some((block) => block.kind === "visual")
-    ? blocks.map((block) => block.kind === "visual" ? visualNarration(block.visual, rec.visualDescriptions).text
-      : block.kind === "code" ? fencedCode(block.text, block.language) : block.text).join("\n\n")
+    ? blocks.map((block) => block.kind === "visual" ? visualText(block.visual, rec.visualDescriptions)
+      : block.kind === "code" ? fencedCode(block.text, block.language) : block.text).filter(Boolean).join("\n\n")
     : rec.text.trim();
   if (!text) throw new Error("There is no text to summarize.");
   if (text.length > MAX_CHARS) throw new Error("This document is too long to summarize in one go.");

@@ -17,7 +17,7 @@ export interface SentenceLike {
 }
 
 export interface ParagraphLike {
-  visual?: { kind: "image" | "diagram"; src: string; alt: string; caption: string; source: "description" | "caption" | "unavailable" };
+  visual?: { kind: "image" | "diagram" | "slide"; src: string; alt: string; caption: string; source: "description" | "caption" | "unavailable" };
   code?: { text: string; language: string; summarized: boolean };
   /** A heading rather than body text: its level, 1 for the largest */
   heading?: number;

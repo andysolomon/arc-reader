@@ -41,4 +41,12 @@ describe("a book's chapters in the library", () => {
     const book = { id: "book:1", title: "Backend Basics", chapters: [{ url: "a", title: "A" }, { url: "b", title: "B" }], index: null };
     expect(placeIn(book, 1)).toEqual({ id: "book:1", title: "Backend Basics", chapter: 2, chapters: 2 });
   });
+
+  it("remembers that a course is one, and the page that lists its lectures", () => {
+    const course = { id: "book:2", title: "CS 101", chapters: [{ url: "a", title: "A" }], index: null, kind: "course" as const, contents: "https://cs101.example/" };
+    expect(placeIn(course, 0)).toEqual({ id: "book:2", title: "CS 101", chapter: 1, chapters: 1, kind: "course", contents: "https://cs101.example/" });
+    const lecture = item("l1", 1);
+    lecture.rec.book = placeIn(course, 0);
+    expect(shelves([lecture]).get("book:2")).toMatchObject({ kind: "course", contents: "https://cs101.example/" });
+  });
 });

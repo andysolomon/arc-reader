@@ -1,4 +1,4 @@
-import { imageSource, type ArticleVisual } from "./visuals";
+import { SLIDE_SOURCE, imageSource, type ArticleVisual } from "./visuals";
 
 function srcset(value: string): string {
   if (value.startsWith("data:")) return "";
@@ -55,5 +55,6 @@ export function articleVisual(el: Element, base: string, caption: string): Artic
     srcset(el.getAttribute("data-srcset") || ""), srcset(el.getAttribute("srcset") || ""),
     srcset(picture?.querySelector("source")?.getAttribute("srcset") || ""), el.getAttribute("src")];
   const src = candidates.map((value) => value ? imageSource(value, base) : "").find(Boolean) || "";
+  if (SLIDE_SOURCE.test(src)) return { kind: "slide", src, alt: alt.trim().slice(0, 1200), caption: "" };
   return { kind: /\b(?:diagram|chart|graph|flowchart)\b/i.test(`${alt} ${caption}`) ? "diagram" : "image", src, alt: alt.trim().slice(0, 1200), caption: caption.slice(0, 1600) };
 }

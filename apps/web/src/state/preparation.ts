@@ -175,7 +175,8 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     const text = job.voice.id === JAMAICAN_PATOIS_VOICE_ID ? rec.patois!.text : rec.text;
     let explained = await prepareCodeSummaries(rec, text, useSettings.getState().summaryModel, signal, (message) => update(job.id, { message }));
     signal.throwIfAborted();
-    explained = await prepareVisualDescriptions(explained, text, signal, (message) => update(job.id, { message }));
+    // Prepared audio keeps its wording, so every slide of a deck is described first.
+    explained = await prepareVisualDescriptions(explained, text, signal, (message) => update(job.id, { message }), { all: true });
     signal.throwIfAborted();
     if (explained !== rec) {
       const latest = await docs.get(job.docId);

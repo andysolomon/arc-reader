@@ -25,7 +25,9 @@ const validCategory = (value: unknown) => value === undefined || (object(value)
 
 const validBook = (value: unknown) => value === undefined || (object(value) && id(value.id)
   && typeof value.title === "string" && value.title.length <= 1000
-  && [value.chapter, value.chapters].every((n) => number(n) && Number.isInteger(n) && n >= 1 && n <= 10_000));
+  && [value.chapter, value.chapters].every((n) => number(n) && Number.isInteger(n) && n >= 1 && n <= 10_000)
+  && (value.kind === undefined || value.kind === "course")
+  && (value.contents === undefined || (typeof value.contents === "string" && value.contents.length <= 4000 && /^https?:\/\//i.test(value.contents))));
 
 const validPremium = (value: unknown) => value === undefined || (object(value)
   && ["strong", "good", "weak"].includes(value.fit as string) && number(value.at)

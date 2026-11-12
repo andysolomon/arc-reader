@@ -1,7 +1,8 @@
 import { hash } from "./hash";
 
 export interface ArticleVisual {
-  kind: "image" | "diagram";
+  /** A slide is a picture of a whole page of a deck, kept by this server */
+  kind: "image" | "diagram" | "slide";
   src: string;
   alt: string;
   caption: string;
@@ -9,8 +10,12 @@ export interface ArticleVisual {
 export type VisualDescriptions = Record<string, string>;
 export const VISUAL_FENCE = "readaloud-visual";
 
+/** Where this server keeps the picture of a slide: the deck's fingerprint and the page. */
+export const SLIDE_SOURCE = /^\/api\/slides\/[a-f0-9]{32}\/\d{1,4}\.jpg$/;
+
 /** Only inert image sources. Never make local paths, credentials, or script URLs into images. */
 export function imageSource(input: string, base?: string): string {
+  if (SLIDE_SOURCE.test(input)) return input;
   if (/^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(input)) return input.length <= 350_000 ? input : "";
   if (/^data:image\/svg\+xml;charset=utf-8,/i.test(input)) return input.length <= 150_000 ? input : "";
   if (input.length > 8192) return "";
@@ -24,9 +29,10 @@ export function imageSource(input: string, base?: string): string {
 export function visualFrom(value: unknown): ArticleVisual | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Partial<ArticleVisual>;
-  if (v.kind !== "image" && v.kind !== "diagram") return null;
+  if (v.kind !== "image" && v.kind !== "diagram" && v.kind !== "slide") return null;
   if (typeof v.src !== "string" || typeof v.alt !== "string" || typeof v.caption !== "string") return null;
-  return { kind: v.kind, src: imageSource(v.src), alt: v.alt.slice(0, 1200), caption: v.caption.slice(0, 1600) };
+  const src = imageSource(v.src);
+  return { kind: v.kind === "slide" && !SLIDE_SOURCE.test(src) ? "image" : v.kind, src, alt: v.alt.slice(0, 1200), caption: v.caption.slice(0, 1600) };
 }
 
 export function visualBlock(visual: ArticleVisual): string {
@@ -47,13 +53,24 @@ function captionText(text: string): string {
     || /^\S+\.(?:png|jpe?g|webp|gif|svg)$/i.test(clean)) return "";
   return clean.length > 600 ? clean.slice(0, 600).replace(/\s+\S*$/, "") + "…" : clean;
 }
+/** Read in place of a slide's picture until it has a description. */
+export const SLIDE_STAND_IN = "This slide has a picture.";
+
 export function visualNarration(visual: ArticleVisual, descriptions: VisualDescriptions = {}): { text: string; source: "description" | "caption" | "unavailable" } {
   const description = descriptions[visualKey(visual)];
   if (safeVisualDescription(description)) return { text: description.trim(), source: "description" };
+  // A deck has a picture on most slides, and the slide's own words are read next: keep the stand-in short.
+  if (visual.kind === "slide") return { text: SLIDE_STAND_IN, source: "unavailable" };
   const caption = captionText(visual.caption) || captionText(visual.alt);
   const label = visual.kind === "diagram" ? "Diagram" : "Image";
   return caption ? { text: `${label} description from the article: ${caption}`, source: "caption" }
     : { text: `An ${visual.kind === "diagram" ? "illustrated diagram" : "image"} appears here. A description is unavailable, so we’ll continue.`, source: "unavailable" };
+}
+
+/** What a visual adds to the document's text for a model reading it: nothing, for a slide not yet described. */
+export function visualText(visual: ArticleVisual, descriptions: VisualDescriptions = {}): string {
+  const narration = visualNarration(visual, descriptions);
+  return visual.kind === "slide" && narration.source === "unavailable" ? "" : narration.text;
 }
 
 /** Inline Markdown pictures become their own listening targets, keeping surrounding prose. */

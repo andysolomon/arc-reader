@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
   plugins: [
     react(),
     tailnetUrl(),
-    pageFetch(),
+    pageFetch(env),
     siteFavicons(),
     audioPreparation(env, activity),
     sharedLibrary(env),

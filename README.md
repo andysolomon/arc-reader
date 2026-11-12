@@ -428,6 +428,17 @@ The Library shows the book as one row with how many chapters are read and how lo
 
 Detection (`src/lib/book.ts`) looks for a run of same-site links numbered 1, 2, 3… in their text or addresses, anywhere on the page including its navigation, and needs one more sign that it is a contents list: numbered addresses, "Chapter"-style labels, a `rel="next"`/`rel="prev"` link into the run, or a navigation or contents container. The page is a chapter when it is in the run and the contents page when the run sits beneath its address. Every page of a book yields the same book id (from the first chapter's address), so chapters imported at different times or on different devices still meet. Sites that number chapters only with CSS, or that list them only after running JavaScript, are not detected.
 
+### Courses
+
+A course page is read the same way, with lectures for chapters. When a page links a numbered series of PDFs, one per lecture (`slides/lecture01.pdf`, `lec3.pdf`, `05-trees.pdf`), the Reader offers to add them as a shelf: paste the course page and its decks take its place, in order, each read as [a slide deck](#pdfs). The files can be kept on another site than the page, and a number may be skipped (a lecture with no slides).
+
+- A lecture is named by its row of the schedule, since its link usually says only "Slides": an element whose class says title or topic, then a heading or bold text, then the first text in the row that is not a date, a number or a label. A link that names its lecture ("Lecture 3: Trees") is used as written. Failing all of those it is "Lecture N".
+- The course is named by the page's main heading.
+- A course posts lectures as it runs, so its Library row has **Check for new lectures**. This reads the course page again, adds the decks that have appeared, and renumbers the ones already shelved if the list has shifted. Each lecture remembers the course page for this, because a PDF cannot list its siblings.
+- A series is a course when its files or folder say so (`lecture`, `lec`, `slides`, `week`, `class`, `session`); numbered `chapter` or `part` PDFs make a book with chapters.
+
+Lectures are numbered by their place among the decks that exist, so the deck after a skipped lecture is "Lecture 14" even if its file is `lecture15.pdf`. Only PDFs are followed: recordings, readings and PowerPoint files are left on the course page.
+
 ### Books from the Internet Archive
 
 Paste a link to a book on [archive.org](https://archive.org) (its details page, or any page of its viewer) and the book itself is imported, not the viewer's page. The Reader opens the first chapter and offers the others, which are added at once since the whole text has already arrived. `src/lib/archive.ts` asks the Archive's metadata API which files the item has, downloads the full text (a scan's OCR, or the largest plain-text transcription), and takes title, author and date from the item's record. Links to audio, video and collections are still read as pages.
@@ -437,6 +448,26 @@ Only books that are free to download can be imported. A book the Archive lends (
 `src/lib/bookText.ts` turns the one long text into chapters. It removes page numbers and running headers, rejoins lines, hyphenated words and paragraphs cut by a page break, drops Project Gutenberg's licence, Google's notice, the title page, the contents list and whatever follows "THE END", and cuts at headings such as "CHAPTER II", "Chapter 3. The Arrival", "STAVE ONE" or "LETTER IV" (parts, books and volumes when there are no chapters). Each chapter opens with its heading, which is read out. OCR misreads headings too, so numerals are corrected against the sequence ("CHAPTER XL" after X is 11), text before the first heading found is kept as the first chapter or the preface, and a heading the scan lost leaves two chapters as one. A book with no recognisable headings is cut into parts of about 25 minutes. Misread words in a scan are not corrected and are read as they stand.
 
 Imported pages keep their structure: headings are stored as Markdown headings (`## Title`) and shown as headings without the marker being read out, callouts written as `<aside>` notes are kept while sidebars are dropped, and tables are read row by row under their column headings. This applies to new imports; headings typed or pasted as Markdown are recognised in any document.
+
+## PDFs
+
+A link to a PDF, or a PDF chosen with **Upload file**, is read by the server and opens like any other page. The browser never parses the file: `/api/fetch` answers a PDF link with an HTML page of its text, and `POST /api/fetch/pdf` does the same for an uploaded file (`vite.pdf.ts`, up to 60 MB). The app needs its server for this, so an iOS build that runs its own files cannot open PDFs.
+
+- **Slide decks** (wide pages) become one section per slide. Text set clearly larger than the rest of a slide is its heading; the bullets under it are read as one paragraph, a sentence each. A slide exported once per animation step is kept only in its finished state. A slide with no title is headed "Slide N", and the line crediting a picture's source is left out.
+- **Papers and handouts** (tall pages) become headings and paragraphs. Lines are joined across hyphenation, columns and page breaks, and running headers, footers and page numbers are dropped. Text set sideways, such as arXiv's margin stamp, is left out.
+
+A scanned PDF has no text layer and is refused. Section headings set in the body's size are read as ordinary paragraphs, and a paper's reference list is read with the rest. A diagram's scattered labels are read once as a short list, and its stray symbols and numbers are dropped.
+
+### Slide pictures
+
+A slide that shows more than its text carries a picture of the whole slide, shown in the Reader under the slide's title and described aloud before the slide's own words.
+
+- **Which slides.** The server reads what each page draws. A slide counts when pictures cover at least 3% of it, or when it draws 40 more shapes than the deck's plainest slides do (a diagram, not a rule or a text box). A picture in the same place on at least half the slides is the template's logo or background and does not count. Slides with only text stay as text. A slide with a picture and no words is kept, headed "Slide N".
+- **The pictures.** Each such page is drawn as a 1280-pixel-wide JPEG with pdf.js and `@napi-rs/canvas` (`drawPages` in `vite.pdf.ts`) and kept in `LIBRARY_DATA_DIR/slides/<deck>/<page>.jpg`, where `<deck>` is a fingerprint of the file, so importing a deck again reuses them. Drawing happens in the background after the import answers, one deck at a time; the PDF is kept only until its pictures are drawn, and a restart picks a half-drawn deck up again. `GET /api/slides/<deck>/<page>.jpg` serves a picture and waits for one that is still being drawn (`vite.slides.ts`). Budget about 100 KB a slide. Nothing removes a deck's pictures when its document is deleted.
+- **The descriptions.** These come from the same vision model as article images (`VITE_VISUAL_MODEL`, through the OpenCode key in **Settings → Summaries**), with a prompt for slides: say what the slide shows beyond its text, which the model is given, in at most 70 words. The model cannot reach this server, so the picture is sent to it as data. Describing starts when you start listening, not when the deck is opened, runs up to three slides at a time from your place onwards, and covers every pictured slide of the deck (an article stops at eight images). Descriptions take the place of the stand-in sentence as they arrive and are saved with the document. **Prepare audio** describes the whole deck first, so the audio keeps its wording.
+- **Until described**, or with no key, a slide's picture is read as "This slide has a picture."
+
+Keynote and other macOS exports draw letter pairs such as "tt" and "ti" as one glyph and record the letters beside it as replacement text. pdf.js ignores that text, which turns "patterns" into "pa=erns", so `patches/pdfjs-dist@6.5.438.patch` makes it report the replacement. The version is pinned to match the patch; re-create the patch with `pnpm patch` when upgrading.
 
 ## Library catalogue
 
