@@ -22,6 +22,8 @@ class HttpError extends Error {
 }
 class RetryableError extends Error {}
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** Times a refused passage is asked for again in a reading the speech server has already rendered part of. */
+const REFUSAL_RETRIES = 3;
 const ALIAS = /^(alloy|ash|ballad|cedar|coral|echo|fable|marin|nova|onyx|sage|shimmer|verse)$/;
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const signature = (requests: PreparationRequest[]) => digest(requests.map(({ cached: _, ...item }) => item));
@@ -243,6 +245,7 @@ export class PreparationService {
         if (job.state !== "running") return;
         const index = (job.start + k) % job.total;
         if (job.completed.includes(index)) continue;
+        let refusals = 0;
         for (let attempt = 0; ; attempt++) {
           try {
             if (!job.requests[index].cached) {
@@ -258,7 +261,12 @@ export class PreparationService {
             if (job.state !== "running") return;
             // A restarting speech server must not turn durable work into a
             // terminal error. Keep this passage pending until it comes back.
-            if (!(error instanceof TypeError) && !(error instanceof RetryableError) && (error as Error)?.name !== "TimeoutError") throw error;
+            const restarting = error instanceof TypeError || error instanceof RetryableError || (error as Error)?.name === "TimeoutError";
+            // Nor must one refusal partway through: a speech server whose own storage
+            // hiccups rejects a single request for a voice it rendered a second earlier.
+            // A reading refused from its first passage still fails at once.
+            const rendered = job.requests.some((request, done) => !request.cached && job.completed.includes(done));
+            if (!restarting && (!rendered || refusals++ >= REFUSAL_RETRIES)) throw error;
             await this.wait(job, Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5)));
             if (job.state !== "running") return;
           }

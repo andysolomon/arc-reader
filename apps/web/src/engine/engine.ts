@@ -58,8 +58,9 @@ export interface EngineOptions {
   /**
    * The chosen voice could not be generated (server down, busy, or rejecting).
    * Playback stops; the host decides whether to retry or switch to the browser voice.
+   * `unreachable` is set when no answer came back at all, rather than a refusal.
    */
-  onUnavailable: (message: string) => void;
+  onUnavailable: (message: string, unreachable: boolean) => void;
   /** Once per load: the voice generates slower than it plays (factor = render seconds ÷ audio seconds), so playback will stall between sentences. */
   onSlow: (factor: number) => void;
 }
@@ -287,7 +288,7 @@ export class PlaybackEngine {
       this.playing = false;
       this.emit();
       this.persistSoon(0);
-      this.opts.onUnavailable(unavailableMessage(e));
+      this.opts.onUnavailable(unavailableMessage(e), e instanceof ApiUnreachable);
       return;
     }
     if (token !== this.token) return;
