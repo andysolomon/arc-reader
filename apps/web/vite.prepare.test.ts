@@ -32,6 +32,23 @@ describe("server-owned audio preparation", () => {
   let primaryAssignmentGate: ReturnType<typeof deferred> | undefined;
   let secondaryCalls: string[];
   let secondaryUnavailable: boolean, secondaryDiscoveries: number;
+  let phonon: Server | undefined;
+  let phononGate: ReturnType<typeof deferred> | undefined;
+  let phononCalls: { path: string; body: Record<string, unknown>; authorization?: string }[];
+  const spoken = (text: string): PreparationRequest => ({ key: `phonon:${text}`, text, voice: "phonon:Captain Silas Blackwater", engine: "phonon", protocol: "openai" });
+  async function addPhonon() {
+    phonon = createServer(async (req, res) => {
+      const buffers: Buffer[] = [];
+      for await (const chunk of req) buffers.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(buffers).toString() || "{}") as Record<string, unknown>;
+      phononCalls.push({ path: req.url!, body, authorization: req.headers.authorization });
+      await phononGate?.promise;
+      res.setHeader("content-type", "audio/mpeg");
+      res.end(`phonon:${body.input}`);
+    });
+    await new Promise<void>((resolve) => phonon!.listen(0, "127.0.0.1", resolve));
+    env.PHONON_URL = `http://127.0.0.1:${(phonon.address() as AddressInfo).port}/`;
+  }
   async function addSecondary() {
     secondary = createServer(async (req, res) => {
       res.setHeader("content-type", "application/json");
@@ -62,6 +79,7 @@ describe("server-owned audio preparation", () => {
     secondary = undefined; secondaryGate = undefined; discoveryGate = undefined; secondaryCalls = [];
     primaryAssignmentGate = undefined;
     secondaryUnavailable = false; secondaryDiscoveries = 0;
+    phonon = undefined; phononGate = undefined; phononCalls = [];
     directory = await mkdtemp(join(tmpdir(), "readaloud-preparation-"));
     upstream = createServer(async (req, res) => {
       const buffers: Buffer[] = [];
@@ -96,6 +114,8 @@ describe("server-owned audio preparation", () => {
     secondaryGate?.resolve();
     discoveryGate?.resolve();
     primaryAssignmentGate?.resolve();
+    phononGate?.resolve();
+    if (phonon) await new Promise<void>((resolve) => phonon!.close(() => resolve()));
     if (secondary) await new Promise<void>((resolve) => secondary!.close(() => resolve()));
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
@@ -448,6 +468,75 @@ describe("server-owned audio preparation", () => {
     expect(calls.map((call) => call.body.input)).toEqual(["second"]);
     await expect(service.submit({ requests: [{ ...item("paid"), engine: "openai" }], start: 0 })).rejects.toThrow("VoiceStudio");
     await expect(service.submit({ requests: [item("bad")], start: -1 })).rejects.toThrow("Invalid");
+  });
+
+  it("renders a Phonon reading on the Phonon server with the voice's own name", async () => {
+    await addPhonon();
+    const service = new PreparationService({ ...env, VITE_PHONON_TTS_MODEL: "gradium/phonon-test" }, directory);
+    const job = await service.submit({ requests: [spoken("first"), spoken("second")], start: 0 });
+    await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(await service.get(job.id)).toMatchObject({ done: 2, total: 2, worker: "Phonon" });
+    expect(phononCalls.map((call) => [call.path, call.body])).toEqual(["first", "second"].map((input) => [
+      "/v1/audio/speech", { model: "gradium/phonon-test", input, voice: "Captain Silas Blackwater", response_format: "mp3" },
+    ]));
+    // VoiceStudio's key never leaves for another server, and VoiceStudio hears nothing.
+    expect(phononCalls.every((call) => !call.authorization)).toBe(true);
+    expect(calls).toHaveLength(0);
+    expect((await service.audio(job.id, 1)).body.toString()).toBe("phonon:second");
+    expect((await new PreparationService(env, directory).list()).jobs[0]).toMatchObject({ id: job.id, engine: "phonon", voice: "phonon:Captain Silas Blackwater", available: [0, 1] });
+  });
+
+  it("prepares on Phonon and VoiceStudio side by side, one reading each", async () => {
+    await addPhonon();
+    await addSecondary();
+    const service = new PreparationService(env, directory);
+    gate = deferred(); phononGate = deferred();
+    const mac = await service.submit({ requests: [item("mac")], start: 0 });
+    const first = await service.submit({ requests: [spoken("first")], start: 0 });
+    const queued = await service.submit({ requests: [spoken("queued")], start: 0 });
+    await expect.poll(() => [calls.filter((call) => call.path !== "/engines").length, phononCalls.length]).toEqual([1, 1]);
+    // The second Phonon reading waits for Phonon even though the secondary machine is idle.
+    expect(await service.get(queued.id)).toMatchObject({ state: "running", queued: true, waitingFor: "Phonon" });
+    expect(secondaryCalls).toEqual([]);
+    phononGate.resolve();
+    await expect.poll(async () => (await service.get(queued.id)).state).toBe("done");
+    expect(await service.get(first.id)).toMatchObject({ state: "done", worker: "Phonon" });
+    // The Mac's reading was never moved to Phonon and is still its own.
+    expect(await service.get(mac.id)).toMatchObject({ state: "running", done: 0, worker: "Mac" });
+    expect(phononCalls.map((call) => call.body.input)).toEqual(["first", "queued"]);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(mac.id)).state).toBe("done");
+    expect(phononCalls).toHaveLength(2);
+  });
+
+  it("pauses Phonon preparation while someone is listening to a Phonon voice", async () => {
+    await addPhonon();
+    const activity = new SpeechActivity(150);
+    const service = new PreparationService(env, directory, activity);
+    const end = activity.begin(env.PHONON_URL);
+    const job = await service.submit({ requests: [spoken("first")], start: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(phononCalls).toHaveLength(0);
+    end();
+    await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(phononCalls).toHaveLength(1);
+  });
+
+  it("refuses Phonon readings it cannot place", async () => {
+    const without = new PreparationService(env, directory);
+    await expect(without.submit({ requests: [spoken("first")], start: 0 })).rejects.toThrow("No Phonon server");
+    await addPhonon();
+    const service = new PreparationService(env, directory);
+    await expect(service.submit({ requests: [spoken("first"), item("second")], start: 0 })).rejects.toThrow("Invalid");
+    await expect(service.submit({ requests: [{ ...spoken("first"), profile: true }], start: 0 })).rejects.toThrow("Invalid");
+    // A reading saved while Phonon was configured does not fall to VoiceStudio once it is gone.
+    phononGate = deferred();
+    const job = await service.submit({ requests: [spoken("first")], start: 0 });
+    await expect.poll(() => phononCalls.length).toBe(1);
+    const { PHONON_URL: _, ...rest } = env;
+    const restored = new PreparationService(rest, directory);
+    expect(await restored.get(job.id)).toMatchObject({ state: "error", error: expect.stringContaining("no longer configured") });
+    expect(calls).toHaveLength(0);
   });
 
   it("checks cloning capabilities before rendering a saved profile", async () => {

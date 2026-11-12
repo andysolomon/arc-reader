@@ -22,6 +22,20 @@ describe("preparation machine compatibility", () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); });
 
+  it("gives Phonon readings to the Phonon server only, and gives it nothing else", async () => {
+    expect(new PreparationWorkers(env).workers.map((worker) => worker.id)).toEqual(["primary", "secondary"]);
+    const workers = new PreparationWorkers({ ...env, PHONON_URL: "http://phonon:8880/" });
+    const [mac, cpu, phonon] = workers.workers;
+    expect(phonon).toEqual({ id: "phonon", name: "Phonon", target: "http://phonon:8880", key: "" });
+    const spoken: PreparationRequest = { key: "phonon|text", text: "Hello.", voice: "phonon:Zoey", engine: "phonon", protocol: "openai" };
+    expect(await Promise.all([mac, cpu, phonon].map((worker) => workers.supports(worker, [spoken])))).toEqual([false, false, true]);
+    expect(await workers.supports(phonon, [request])).toBe(false);
+    expect(workers.only([spoken])).toBe(phonon);
+    expect(workers.only([request])).toBeUndefined();
+    // Routing a Phonon reading asks VoiceStudio nothing.
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("accepts a matching saved design without transferring a recipe or reference", async () => {
     const workers = new PreparationWorkers(env);
     expect(await workers.supports(workers.workers[1], [request, request])).toBe(true);

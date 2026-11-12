@@ -8,6 +8,7 @@ const LIVE = process.env.LIVE === "1";
 const webPort = Number(process.env.E2E_PORT || 4173);
 const voicePort = Number(process.env.E2E_VOICE_PORT || 3999);
 const openaiPort = Number(process.env.E2E_OPENAI_PORT || 3998);
+const phononPort = Number(process.env.E2E_PHONON_PORT || 3997);
 const localEnv = (() => {
   try {
     return Object.fromEntries(readFileSync(".env.local", "utf8").split("\n").filter((l: string) => /^[A-Z_]+=/.test(l)).map((l: string) => l.split(/=(.*)/s).slice(0, 2)));
@@ -46,6 +47,12 @@ export default defineConfig({
             reuseExistingServer: !process.env.CI,
             timeout: 20_000,
           },
+          {
+            command: `node tests/stub-phonon.mjs ${phononPort}`,
+            url: `http://127.0.0.1:${phononPort}/health`,
+            reuseExistingServer: !process.env.CI,
+            timeout: 20_000,
+          },
         ]),
     {
       // Built against the proxy; the preview server forwards /api/vs to the stub above.
@@ -75,6 +82,8 @@ export default defineConfig({
         // Local credentials must not enable a real provider in the stub suite.
         VITE_FISH_BASE: LIVE ? process.env.VITE_FISH_BASE || localEnv.VITE_FISH_BASE || "" : "",
         FISH_API_KEY: LIVE ? process.env.FISH_API_KEY || localEnv.FISH_API_KEY || "" : "",
+        VITE_PHONON_BASE: LIVE ? process.env.VITE_PHONON_BASE || localEnv.VITE_PHONON_BASE || "" : "/api/phonon",
+        PHONON_URL: LIVE ? process.env.PHONON_URL || localEnv.PHONON_URL || "" : `http://127.0.0.1:${phononPort}`,
         LIBRARY_DATA_DIR: join(tmpdir(), `readaloud-e2e-library-${process.pid}`),
         PREPARATION_DATA_DIR: join(tmpdir(), `readaloud-e2e-preparations-${process.pid}`),
       },

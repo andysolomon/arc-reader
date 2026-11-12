@@ -1,7 +1,7 @@
 import { prepareVisualDescriptions } from "../lib/visualDescriptions";
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
-import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground, usesBuiltInProxy } from "../engine/providers";
+import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground, preparesOnServer } from "../engine/providers";
 import { hasActivePreparation } from "../engine/preparation";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { FINISHED_FRACTION } from "../lib/libraryProtocol";
@@ -214,8 +214,8 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
       set({ doc, record: prepared, voiceId: voice.id, summary, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
       const requests = engine.passages.map((p) => ({ text: p.text, voice: voice.id, engine: voice.engine, profile: voice.kind === "profile" }));
-      const autoPrepare = opts.prepare && usesBuiltInProxy() && voice.engine !== LOCAL_ENGINE
-        && !isPaidEngine(voice.engine) && useSettings.getState().engine !== LOCAL_ENGINE && !get().offline;
+      const autoPrepare = opts.prepare && preparesOnServer(voice.engine)
+        && useSettings.getState().engine !== LOCAL_ENGINE && !get().offline;
       if (autoPrepare || hasActivePreparation(preparationRequests(requests))) void get().prerender();
       if (opts.autoplay) void engine.play();
       // Reading starts with captions and alt text; descriptions replace them as they arrive.

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hasActivePreparation, prepareAudio, preparedAudio, refreshPreparationCatalog, serverPreparedKeys, type PreparationRequest } from "./preparation";
+import { announcePreparation, hasActivePreparation, prepareAudio, preparedAudio, refreshPreparationCatalog, serverPreparedKeys, type PreparationRequest } from "./preparation";
 
 const requests: PreparationRequest[] = ["first", "second"].map((text) => ({ key: text, text, engine: "kittentts", voice: "v", protocol: "openai" }));
 const response = (data: unknown) => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
@@ -15,6 +15,33 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("background preparation client", () => {
+  it("holds playback for an announced reading and takes its audio from the server job", async () => {
+    const announced: PreparationRequest[] = ["joined one", "joined two"].map((text) => ({ ...requests[0], key: text, text }));
+    const submitted = announcePreparation(announced.map((item) => item.key));
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => init?.method === "POST" ? response(status("running", 0))
+      : url.endsWith("/audio/1") ? new Response("clip", { headers: { "content-type": "audio/mpeg" } }) : response(status("done", 2)));
+    const playback = preparedAudio("joined two");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Nothing is asked for until the server has the reading.
+    expect(fetchMock).not.toHaveBeenCalled();
+    await prepareAudio(announced, 0, undefined, undefined, submitted);
+    expect(await (await playback)!.text()).toBe("clip");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/preparations/job-id/audio/1");
+    // Once submitted, later passages do not wait.
+    expect(await (await preparedAudio("joined one"))!.text()).toBeDefined();
+  });
+
+  it("stops waiting for a submission that does not arrive, so ordinary generation can start", async () => {
+    vi.useFakeTimers();
+    const submitted = announcePreparation(["stalled"]);
+    const playback = preparedAudio("stalled");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await playback).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    submitted();
+    expect(await preparedAudio("stalled")).toBeNull();
+  });
+
   it("retries submission while the web server restarts", async () => {
     vi.useFakeTimers();
     fetchMock.mockRejectedValueOnce(new TypeError("Connection refused"))
