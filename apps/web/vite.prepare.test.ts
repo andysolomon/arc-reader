@@ -24,6 +24,7 @@ describe("server-owned audio preparation", () => {
   let calls: { path: string; body: Record<string, unknown>; authorization?: string; origin?: string }[];
   let gate: ReturnType<typeof deferred> | undefined;
   let rejectSpeech: boolean;
+  let refuseOnce: Set<unknown>;
   let unavailable: boolean;
   let activeSpeech: number, peakSpeech: number;
   let secondary: Server | undefined;
@@ -74,7 +75,7 @@ describe("server-owned audio preparation", () => {
     env.VOICESTUDIO_SECONDARY_API_KEY = "secondary-secret";
   }
   beforeEach(async () => {
-    calls = []; gate = undefined; rejectSpeech = false; unavailable = false;
+    calls = []; gate = undefined; rejectSpeech = false; refuseOnce = new Set(); unavailable = false;
     activeSpeech = 0; peakSpeech = 0;
     secondary = undefined; secondaryGate = undefined; discoveryGate = undefined; secondaryCalls = [];
     primaryAssignmentGate = undefined;
@@ -98,7 +99,7 @@ describe("server-owned audio preparation", () => {
         res.writeHead(503);
         return res.end();
       }
-      if (rejectSpeech) {
+      if (rejectSpeech || refuseOnce.delete(calls.at(-1)!.body.input)) {
         res.writeHead(400, { "content-type": "application/json" });
         return res.end(JSON.stringify({ detail: "Model terms need acceptance" }));
       }
@@ -448,6 +449,14 @@ describe("server-owned audio preparation", () => {
     await expect.poll(async () => (await service.get(job.id)).state).toBe("error");
     expect(await service.get(job.id)).toMatchObject({ done: 0, error: "Model terms need acceptance" });
     expect(calls).toHaveLength(1);
+  });
+
+  it("asks again for a passage the speech server refuses partway through a reading", async () => {
+    refuseOnce.add("second");
+    const service = new PreparationService(env, directory);
+    const job = await service.submit({ requests: [item("first"), item("second"), item("third")], start: 0 });
+    await expect.poll(async () => (await service.get(job.id)).state, { timeout: 5000 }).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["first", "second", "second", "third"]);
   });
 
   it("does not generate browser-cached passages or accept paid engines", async () => {

@@ -65,3 +65,16 @@ export async function serverReachable(timeoutMs = 5000, load: typeof fetch = fet
     return false;
   }
 }
+
+/**
+ * Waits for an unreachable server to answer again. Resolves false when `wanted`
+ * stops holding (the user moved on) or after `patience` without an answer.
+ */
+export async function serverReturned(wanted: () => boolean, { every = 3000, patience = 10 * 60_000, probe = () => serverReachable(4000) } = {}): Promise<boolean> {
+  for (const until = Date.now() + patience; Date.now() < until;) {
+    await new Promise((resolve) => setTimeout(resolve, every));
+    if (!wanted()) return false;
+    if (await probe()) return wanted();
+  }
+  return false;
+}
