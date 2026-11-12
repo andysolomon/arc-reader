@@ -86,16 +86,18 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   await page.reload();
   await page.getByRole("checkbox", { name: "Select First document", exact: true }).check();
   await page.getByRole("button", { name: "Prepare selected" }).click();
-  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).toBeChecked();
-  await expect(dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" })).toBeChecked();
+  // Voices with complete audio are not preselected.
+  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" })).not.toBeChecked();
   await expect(dialog.getByRole("checkbox", { name: "Alloy ChatGPT" })).not.toBeChecked();
-  await expect(dialog.getByRole("button", { name: "Prepare 2 readings" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Prepare 0 readings" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 
   await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
   await page.getByRole("button", { name: "Prepare selected" }).click();
-  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).toBeChecked();
-  await expect(dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).not.toBeChecked();
+  await dialog.getByRole("checkbox", { name: "Bella VoiceStudio" }).check();
+  await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
   await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished");
   expect(requests).toBe(8);
