@@ -60,3 +60,63 @@ describe("finding the book a page belongs to", () => {
     expect(htmlToText("<article><p>Just an article, long enough to read.</p></article>", `${SITE}/post`).book).toBeUndefined();
   });
 });
+
+describe("finding a course's lectures", () => {
+  const SLIDES = "https://web.school.example/class/cs101/slides";
+  const row = (week: number, date: string, title: string, links: string, extra = "") => `<tr><td>${week}</td><td>${date}</td><td>
+    ${extra}<span class="lec-title">${title}</span><span class="lec-desc">What the lecture covers, at some length.</span>
+    <span class="slides-link">${links}</span></td><td><b>Readings</b>: <ul><li><a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need.</a></li></ul></td></tr>`;
+  const schedule = `<title>CS101 | Building Things</title><meta property="og:site_name" content="School CS101">
+    <h1>CS 101: Building Things</h1><p>Welcome. See the <a href="logistics.html">Logistics</a> page and the <a href="https://web.school.example/class/cs101/assignments/paper_video.pdf">handout</a>.</p>
+    <table><thead><tr><th>Week</th><th>Date</th><th>Lecture</th><th>Material</th></tr></thead><tbody>
+    ${row(1, "Wed Sep 23", "Introduction — What Are Systems?", `<a href="${SLIDES}/lecture01.pdf">Slides</a> <a href="https://youtu.be/abc">Video</a>`, '<span class="theme-tag">Foundations</span>')}
+    ${row(2, "Mon Sep 28", "Models for Builders", `<a href="${SLIDES}/lecture02.pdf">Slides</a>`)}
+    ${row(2, "Wed Sep 30", "📺 Guest Lecture: Retrieval", `<a href="https://speaker.example">Speaker</a> <a href="${SLIDES}/lecture03.pdf">Slides</a>`)}
+    ${row(3, "Mon Oct 5", "Fireside Chat", "")}
+    ${row(3, "Wed Oct 7", "Tools &amp; Function Calling", `<a href="${SLIDES}/lecture05.pdf">Slides</a>`)}
+    </tbody></table>`;
+  const course = (html: string, url = "https://cs101.school.example/") => bookContents(parse(html), url);
+
+  it("shelves the decks a schedule links, wherever they are kept, named by their rows", () => {
+    const found = course(schedule)!;
+    expect(found).toMatchObject({ title: "CS 101: Building Things", index: null, kind: "course", contents: "https://cs101.school.example/" });
+    // Lecture 4 had no slides: the ones there are keep their order.
+    expect(found.chapters).toEqual([
+      { url: `${SLIDES}/lecture01.pdf`, title: "Introduction — What Are Systems?" },
+      { url: `${SLIDES}/lecture02.pdf`, title: "Models for Builders" },
+      { url: `${SLIDES}/lecture03.pdf`, title: "Guest Lecture: Retrieval" },
+      { url: `${SLIDES}/lecture05.pdf`, title: "Tools & Function Calling" },
+    ]);
+    expect(htmlToText(`<html><body>${schedule}</body></html>`, "https://cs101.school.example/").book?.id).toBe(found.id);
+  });
+
+  it("stays the same course as more lectures are posted, and whichever way the page lists them", () => {
+    const list = (numbers: number[]) => `<h1>Course</h1><ul>${numbers.map((n) => `<li>Lecture ${n}: Topic ${n} <a href="slides/lec${n}.pdf">[slides]</a></li>`).join("")}</ul>`;
+    const early = course(list([1, 2, 3]))!;
+    const later = course(list([5, 4, 3, 2, 1]))!;
+    expect(later.id).toBe(early.id);
+    expect(later.chapters.map((chapter) => chapter.title)).toEqual(["Topic 1", "Topic 2", "Topic 3", "Topic 4", "Topic 5"]);
+    expect(later.chapters[4].url).toBe("https://cs101.school.example/slides/lec5.pdf");
+  });
+
+  it("names a lecture by its own link, by a plain table row, or by its number", () => {
+    const named = course(`<h1>Course</h1><ol>${["Intro", "Trees", "Graphs"].map((title, i) => `<li><a href="/files/cs-fall-lecture0${i + 1}-${title.toLowerCase()}.pdf">Lecture ${i + 1}: ${title}</a></li>`).join("")}</ol>`)!;
+    expect(named.chapters.map((chapter) => chapter.title)).toEqual(["Intro", "Trees", "Graphs"]);
+    const table = course(`<h1>Course</h1><table>${["Intro", "Trees", "Graphs"].map((title, i) => `<tr><td>Week ${i + 1}</td><td>Jan ${9 + i}</td><td>${title} and friends</td><td><a href="slides/0${i + 1}-${title}.pdf">pdf</a></td></tr>`).join("")}</table>`)!;
+    expect(table.kind).toBe("course");
+    expect(table.chapters.map((chapter) => chapter.title)).toEqual(["Intro and friends", "Trees and friends", "Graphs and friends"]);
+    const bare = course(`<h1>Course</h1><p>${[1, 2, 3].map((n) => `<a href="lecture${n}.pdf">Slides</a>`).join(" ")}</p>`)!;
+    expect(bare.chapters.map((chapter) => chapter.title)).toEqual(["Lecture 1", "Lecture 2", "Lecture 3"]);
+  });
+
+  it("calls a book's chapters chapters, and leaves other files alone", () => {
+    const chapters = course(`<h1>The Book</h1><ul>${[1, 2, 3].map((n) => `<li><a href="book/chapter${n}.pdf">Chapter ${n}: Part ${n}</a></li>`).join("")}</ul>`)!;
+    expect(chapters.kind).toBeUndefined();
+    expect(chapters.contents).toBe("https://cs101.school.example/");
+    // Homework and one-off handouts are not a numbered series of lectures.
+    expect(course(`<a href="hw1.pdf">HW 1</a><a href="hw2.pdf">HW 2</a><a href="hw3.pdf">HW 3</a><a href="syllabus.pdf">Syllabus</a>`)).toBeNull();
+    expect(course(`<a href="lecture1.pdf">One</a><a href="lecture2.pdf">Two</a>`)).toBeNull();
+    // Numbers too far apart are years or sizes, not a series.
+    expect(course(`<a href="lecture1.pdf">a</a><a href="lecture40.pdf">b</a><a href="lecture90.pdf">c</a>`)).toBeNull();
+  });
+});

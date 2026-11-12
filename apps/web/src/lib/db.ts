@@ -30,6 +30,10 @@ export interface DocBook {
   chapter: number;
   /** Chapters in the book, whether or not they are in the library */
   chapters: number;
+  /** A course: its chapters are lectures, and more are posted as it runs */
+  kind?: "course";
+  /** The page that lists the chapters, when a chapter's own page does not */
+  contents?: string;
 }
 
 /** Library category: suggested by Jev (with its confidence) or chosen by you. */

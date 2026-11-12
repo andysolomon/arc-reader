@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
-import { htmlToText, looksLikeUrl, markdownToText, publishedDate } from "./fetchUrl";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { fetchReadable, htmlToText, looksLikeUrl, markdownToText, publishedDate, readPdfFile } from "./fetchUrl";
 import { segment } from "./segment";
 import { placeLinks } from "./linkPlaces";
 
@@ -172,5 +172,38 @@ describe("telling a pasted link from pasted text", () => {
     expect(looksLikeUrl("A sentence. Another one.")).toBe(false);
     expect(looksLikeUrl("hello")).toBe(false);
     expect(looksLikeUrl("one\ntwo")).toBe(false);
+  });
+});
+
+describe("PDFs", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const page = `<!doctype html><html><head><title>Tool Use</title><meta name="author" content="Diyi Yang"></head><body><article data-pdf="slides"><h1>Tool Use</h1>
+    <h2>Why LLMs need tools</h2><p>Models cannot look anything up. Tools let them act.</p></article></body></html>`;
+  const html = () => new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
+
+  it("leaves a PDF the browser can reach to the server, which answers with a page", async () => {
+    const url = "https://web.stanford.edu/class/cs329z/slides/lecture04.pdf";
+    const fetched = vi.fn(async (input: string) => input === url ? new Response("%PDF-1.7 \u0000binary", { headers: { "content-type": "application/pdf" } }) : html());
+    vi.stubGlobal("fetch", fetched);
+    const result = await fetchReadable(url);
+    expect(fetched.mock.calls.map(([input]) => input)).toEqual([url, `/api/fetch?url=${encodeURIComponent(url)}`]);
+    expect(result).toMatchObject({ title: "Tool Use", domain: "web.stanford.edu", meta: { url, author: "Diyi Yang" } });
+    expect(result.text).toBe("# Tool Use\n\n## Why LLMs need tools\n\nModels cannot look anything up. Tools let them act.");
+  });
+
+  it("never takes a PDF's bytes for text, whatever type it is served as", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(`%PDF-1.7\n${"stream ".repeat(40)}`, { headers: { "content-type": "application/octet-stream" } })));
+    await expect(fetchReadable("https://example.com/paper")).rejects.toThrow();
+  });
+
+  it("sends a chosen file to the server and names the document after the file", async () => {
+    const fetched = vi.fn(async (_input: string, _init?: RequestInit) => html());
+    vi.stubGlobal("fetch", fetched);
+    const file = new File(["%PDF-1.7"], "lecture 04.pdf", { type: "application/pdf" });
+    const result = await readPdfFile(file);
+    expect(fetched.mock.calls[0][0]).toBe("/api/fetch/pdf?name=lecture%2004.pdf");
+    expect(fetched.mock.calls[0][1]).toMatchObject({ method: "POST", body: file });
+    expect(result).toMatchObject({ title: "Tool Use", domain: "lecture 04.pdf", meta: { author: "Diyi Yang" } });
+    expect(result.meta.url).toBeUndefined();
   });
 });

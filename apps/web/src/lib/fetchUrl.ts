@@ -219,7 +219,13 @@ export function markdownToText(md: string, base?: string): string {
 async function readResponse(r: Response, url: string, domain: string): Promise<Fetched> {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const ct = r.headers.get("content-type") ?? "";
+  // A PDF is not text: only the server can read one, and it answers with a page of HTML.
+  if (/application\/(?:x-)?pdf/i.test(ct)) {
+    void r.body?.cancel().catch(() => {});
+    throw new Error("PDF");
+  }
   const body = await r.text();
+  if (body.startsWith("%PDF-")) throw new Error("PDF");
   if (ct.includes("html")) {
     const f = htmlToText(body, url);
     if (f.text.length > 40) return f;
@@ -228,6 +234,13 @@ async function readResponse(r: Response, url: string, domain: string): Promise<F
     return { title: domain, text, domain, meta: { url }, links: ct.includes("markdown") ? linksInMarkdown(body, url) : linksInText(body) };
   }
   throw new Error("No readable text");
+}
+
+/** A PDF chosen from the device, read by the server into the same shape as a fetched page. */
+export async function readPdfFile(file: File, signal?: AbortSignal): Promise<Fetched> {
+  const r = await fetch(`/api/fetch/pdf?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file, headers: { "content-type": "application/pdf" }, signal });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return { ...htmlToText(await r.text(), ""), domain: file.name };
 }
 
 /** Direct fetch (works for CORS-enabled pages), then the dev/preview server's /api/fetch, then VITE_FETCH_PROXY. */

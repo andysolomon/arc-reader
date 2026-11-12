@@ -1,0 +1,18 @@
+diff --git a/legacy/build/pdf.worker.mjs b/legacy/build/pdf.worker.mjs
+index 7b0cb751f79191b4eb706ede7c3bd3dd891e428a..9c2fc8e4690d5c784a8ae4803d5a190429da11e4 100644
+--- a/legacy/build/pdf.worker.mjs
++++ b/legacy/build/pdf.worker.mjs
+@@ -42579,10 +42579,12 @@ class PartialEvaluator {
+             if (includeMarkedContent) {
+               markedContentLevel++;
+               const mcid = args[1] instanceof Dict ? args[1].get("MCID") : null;
++              const actualText = args[1] instanceof Dict ? args[1].get("ActualText") : null;
+               textContent.items.push({
+                 type: "beginMarkedContentProps",
+                 id: Number.isInteger(mcid) ? `${self.idFactory.getPageObjId()}_mc${mcid}` : null,
+-                tag: args[0] instanceof Name ? args[0].name : null
++                tag: args[0] instanceof Name ? args[0].name : null,
++                actualText: typeof actualText === "string" ? stringToPDFString(actualText) : null
+               });
+             }
+             break;

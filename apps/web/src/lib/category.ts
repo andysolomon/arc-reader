@@ -1,5 +1,5 @@
 import { readingBlocks } from "./codeBlocks";
-import { visualNarration } from "./visuals";
+import { visualText } from "./visuals";
 import type { DocCategory, DocRecord } from "./db";
 import { hasSummary } from "./summary";
 
@@ -54,7 +54,7 @@ export function jevState(rec: DocRecord): Record<string, string> {
     title: rec.title, link: url, site, author, description,
     summary: hasSummary(rec) ? rec.summary!.text : undefined,
     text: readingBlocks(rec.text).map((block) => block.kind === "visual"
-      ? visualNarration(block.visual, rec.visualDescriptions).text : block.text).join("\n\n").slice(0, EXCERPT_CHARS),
+      ? visualText(block.visual, rec.visualDescriptions) : block.text).filter(Boolean).join("\n\n").slice(0, EXCERPT_CHARS),
   }).filter((entry): entry is [string, string] => !!entry[1]));
 }
 

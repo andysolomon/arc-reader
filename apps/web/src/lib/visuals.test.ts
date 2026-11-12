@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { imageSource, visualBlock, visualKey, visualNarration, type ArticleVisual } from "./visuals";
+import { imageSource, visualBlock, visualKey, visualNarration, visualText, type ArticleVisual } from "./visuals";
 import { readingBlocks } from "./codeBlocks";
 import { segment, planPassages } from "./segment";
 const visual: ArticleVisual = { kind: "diagram", src: "https://example.com/chart.png", alt: "Flow chart", caption: "A request passes from the client through a server to a database." };
@@ -34,5 +34,23 @@ describe("visual narration", () => {
     expect(segment('```readaloud-visual\nnot json\n```').sentences[0].text).toContain("unavailable");
     for (const url of ["javascript:alert(1)", "file:///private/photo.png", "https://user:secret@example.com/x.png", "data:text/html,hello"]) expect(imageSource(url)).toBe("");
     expect(imageSource("../photo.png", "https://example.com/news/article")).toBe("https://example.com/photo.png");
+  });
+  it("shows a slide kept by this server, and says little until it has a description", () => {
+    const slide: ArticleVisual = { kind: "slide", src: `/api/slides/${"a".repeat(32)}/12.jpg`, alt: "Slide 12: Recap", caption: "" };
+    const text = `## Recap\n\n${visualBlock(slide)}\n\nWorkflows are simpler than agents.`;
+    expect(readingBlocks(text)[1]).toMatchObject({ kind: "visual", visual: slide });
+    expect(segment(text).sentences.map((s) => s.text)).toEqual(["Recap", "This slide has a picture.", "Workflows are simpler than agents."]);
+    const described = segment(text, {}, { [visualKey(slide)]: "A flowchart runs from start to end." });
+    expect(described.sentences.map((s) => s.text)).toEqual(["Recap", "A flowchart runs from start to end.", "Workflows are simpler than agents."]);
+    expect(described.paragraphs[1].visual).toMatchObject({ kind: "slide", source: "description" });
+    // A model summarising the deck is not told sixty times that a slide has a picture.
+    expect(visualText(slide)).toBe("");
+    expect(visualText(slide, { [visualKey(slide)]: "A flowchart runs from start to end." })).toBe("A flowchart runs from start to end.");
+    expect(visualText(visual)).toContain("description from the article");
+    // Only this server's slide pictures are taken on trust; the kind does not make another address one.
+    expect(imageSource(`/api/slides/${"a".repeat(32)}/12.jpg`, "https://elsewhere.example/page")).toBe(slide.src);
+    for (const src of ["/api/slides/../library", `/api/slides/${"a".repeat(32)}/source.pdf`, "/api/llm/config"]) expect(imageSource(src)).toBe("");
+    const elsewhere = readingBlocks(visualBlock({ ...slide, src: "https://example.com/slide.png" }))[0];
+    expect(elsewhere).toMatchObject({ visual: { kind: "image", src: "https://example.com/slide.png" } });
   });
 });

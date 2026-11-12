@@ -10,7 +10,7 @@ import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
-import { fetchReadable, hostOf, looksLikeUrl, normalizeUrl } from "../lib/fetchUrl";
+import { fetchReadable, hostOf, looksLikeUrl, normalizeUrl, readPdfFile } from "../lib/fetchUrl";
 import { openDocument } from "../lib/openDoc";
 import { importPage, isContentsPage } from "../state/books";
 import { SPEED_STEPS } from "@readaloud/ui";
@@ -147,8 +147,25 @@ export function Compose() {
     }
   };
 
+  /** A PDF is read by the server and opens like a link; there is no text to look over first. */
+  const readPdf = async (file: File) => {
+    if (busy) return;
+    setBusy("fetch");
+    toast(`Reading ${file.name}…`);
+    try {
+      const f = await readPdfFile(file);
+      const rec = await create({ text: f.text, title: f.title || file.name.replace(/\.pdf$/i, ""), source: "file", domain: f.domain, meta: f.meta, links: f.links });
+      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
+    } catch {
+      toast("Couldn't read that PDF. A scanned PDF has no text to read.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const onFile = (file: File | undefined) => {
     if (!file) return;
+    if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) return void readPdf(file);
     const r = new FileReader();
     r.onload = () => {
       setText(String(r.result ?? ""));
@@ -219,7 +236,7 @@ export function Compose() {
               <Upload size={16} strokeWidth={1.5} aria-hidden />
             </span>
             Upload file
-            <input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(e) => onFile(e.target.files?.[0])} className="sr-only" />
+            <input type="file" accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf" onChange={(e) => onFile(e.target.files?.[0])} className="sr-only" />
           </label>
           <Button
             leading={<AlignLeft size={16} strokeWidth={1.5} />}

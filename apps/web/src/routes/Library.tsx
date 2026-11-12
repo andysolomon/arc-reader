@@ -25,6 +25,7 @@ import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
 import { catalogue } from "../lib/postTitle";
 import { finished, nextUnread, shelves, useBooks, type Shelf } from "../state/books";
+import { partNames } from "../lib/book";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
@@ -164,7 +165,7 @@ export function LibraryPage() {
 
   const bookProps = (shelf: Shelf) => {
     const whole = library.get(shelf.id) ?? shelf;
-    const source = whole.items.find((it) => it.rec.meta?.url);
+    const source = whole.items.find((it) => it.rec.book?.contents) ?? whole.items.find((it) => it.rec.meta?.url);
     return {
       shelf, whole, grid, open: openBooks.has(shelf.id),
       onToggle: () => toggleBook(shelf.id),
@@ -359,9 +360,9 @@ function Meta({ it, inBook, withDate, estimate, className }: { it: LibraryItem; 
         </Fact>
         <Fact className="tabular-nums">{fmtTime(it.duration)}</Fact>
         {it.rec.book && !inBook && (
-          <Fact title={`Chapter ${it.rec.book.chapter} of ${it.rec.book.title}`}>
+          <Fact title={`${partNames(it.rec.book).One} ${it.rec.book.chapter} of ${it.rec.book.title}`}>
             <BookOpen size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
-            <span className="truncate">Ch. {it.rec.book.chapter} · {it.rec.book.title}</span>
+            <span className="truncate">{partNames(it.rec.book).short} {it.rec.book.chapter} · {it.rec.book.title}</span>
           </Fact>
         )}
         {withDate && <Fact title="Added">{dateLabel(it.rec.createdAt)}</Fact>}
@@ -405,12 +406,15 @@ function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, 
   const read = whole.items.filter(finished).length;
   const have = new Set(whole.items.map((it) => it.rec.book!.chapter)).size;
   const missing = whole.chapters - have;
+  const { one, many, One } = partNames(whole);
+  // A course posts lectures as it runs, so its page is worth asking again even when nothing is missing.
+  const growing = whole.kind === "course" && !!whole.contents;
   const started = heard > 0;
   const panel = `book-${shelf.id.replace(/\W/g, "-")}`;
   return (
     <li data-book={shelf.title} className={cn(grid ? "col-span-full overflow-hidden rounded-card border border-line bg-bg2" : "border-b border-line last:border-b-0")}>
       <div className={cn("grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 bg-bg2 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:gap-x-3.5", grid ? "p-[18px]" : "px-5 py-4")}>
-        <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} chapters of ${shelf.title}`} onClick={onToggle} className="col-start-1 row-start-1 -m-1 grid size-6 place-items-center rounded-control border-0 bg-transparent text-fg2 hover:bg-bg3 hover:text-fg">
+        <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} ${many} of ${shelf.title}`} onClick={onToggle} className="col-start-1 row-start-1 -m-1 grid size-6 place-items-center rounded-control border-0 bg-transparent text-fg2 hover:bg-bg3 hover:text-fg">
           <ChevronRight size={16} strokeWidth={1.5} className={cn("transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
         </button>
         <div className="col-start-2 row-start-1 min-w-0">
@@ -420,18 +424,18 @@ function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, 
         </div>
         <div className="col-start-2 row-start-2 min-w-0 overflow-hidden text-[12px] leading-[18px] text-fg2">
           <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
-            <Fact><BookOpen size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />Book</Fact>
-            <Fact className="tabular-nums">{missing > 0 ? `${have} of ${whole.chapters} chapters` : `${have} chapters`}</Fact>
+            <Fact><BookOpen size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />{whole.kind === "course" ? "Course" : "Book"}</Fact>
+            <Fact className="tabular-nums">{missing > 0 ? `${have} of ${whole.chapters} ${many}` : `${have} ${many}`}</Fact>
             <Fact className="tabular-nums">{fmtTime(total)}</Fact>
             {read > 0 && <Fact className="tabular-nums text-accent">{read === have ? "All read" : `${read} read`}</Fact>}
             {shelf.items.length < whole.items.length && <Fact className="tabular-nums">{shelf.items.length} shown</Fact>}
           </div>
         </div>
-        {(adding || (missing > 0 && onComplete)) && (
+        {(adding || ((missing > 0 || growing) && onComplete)) && (
           <div className="col-span-2 col-start-2 row-start-3 mt-1.5 text-[13px] text-fg2 sm:col-span-1">
             {adding
-              ? <span role="status" className="tabular-nums">Adding chapters · {adding.done} of {adding.total}</span>
-              : <Button variant="ghost" className="-ml-3" leading={<ListPlus size={15} strokeWidth={1.5} />} onClick={onComplete}>{missing === 1 ? "Add the missing chapter" : `Add the ${missing} missing chapters`}</Button>}
+              ? <span role="status" className="tabular-nums">{adding.total ? `Adding ${many} · ${adding.done} of ${adding.total}` : `Checking for new ${many}…`}</span>
+              : <Button variant="ghost" className="-ml-3" leading={<ListPlus size={15} strokeWidth={1.5} />} onClick={onComplete}>{missing <= 0 ? `Check for new ${many}` : missing === 1 ? `Add the missing ${one}` : `Add the ${missing} missing ${many}`}</Button>}
           </div>
         )}
         <ReadProgress value={total ? heard / total : 0} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3" />
@@ -445,7 +449,7 @@ function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, 
         </div>
       </div>
       {open && (
-        <ul id={panel} aria-label={`Chapters of ${shelf.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 bg-bg p-[18px]" : "flex flex-col pl-4 sm:pl-8")}>
+        <ul id={panel} aria-label={`${One}s of ${shelf.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 bg-bg p-[18px]" : "flex flex-col pl-4 sm:pl-8")}>
           {children}
         </ul>
       )}

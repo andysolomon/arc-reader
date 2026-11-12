@@ -1,4 +1,5 @@
 import { prepareVisualDescriptions } from "../lib/visualDescriptions";
+import type { VisualDescriptions } from "../lib/visuals";
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
 import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground, usesBuiltInProxy } from "../engine/providers";
@@ -19,6 +20,11 @@ import { catalogue } from "../lib/postTitle";
 
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
+/** The deck whose slides are being described: its audio is not final until they are. */
+let describingDeck: string | null = null;
+/** The document whose audio finished preparing while its slides were still being described. */
+let heldBack: string | null = null;
+const PREPARED = "Audio prepared — playback no longer waits on the server";
 /** Image descriptions being written for the open reading after it started. */
 let describing: AbortController | null = null;
 let retryPreparation: (() => Promise<boolean>) | null = null;
@@ -115,6 +121,18 @@ export const engine = new PlaybackEngine({
   },
 });
 
+/** Resolves once `ready` holds, looking again each second; rejects when cancelled. */
+function until(ready: () => boolean, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (signal.aborted) { clearInterval(timer); reject(signal.reason); }
+      else if (ready()) { clearInterval(timer); resolve(); }
+    };
+    const timer = setInterval(check, 1000);
+    check();
+  });
+}
+
 export function clampSpeed(v: number) {
   return Math.round(Math.max(0.5, Math.min(3, v)) * 20) / 20;
 }
@@ -122,14 +140,15 @@ export function clampSpeed(v: number) {
 export const usePlayer = create<PlayerState & Actions>()((set, get) => {
   engine.subscribe((snap) => set(snap));
 
-  /** Save descriptions for a reading's images and swap them into it, keeping the listener's place. */
+  /**
+   * Save descriptions for a reading's images and swap them into it, keeping the listener's place.
+   * A deck's slides are described from that place onwards, a few at a time as they arrive.
+   */
   async function describeVisuals(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal) {
-    try {
-      const described = await prepareVisualDescriptions(opened, readingText, signal, () => {});
-      if (signal.aborted || described.visualDescriptions === opened.visualDescriptions) return;
+    const swapIn = async (found: VisualDescriptions) => {
       const latest = await docStore.get(id);
       if (signal.aborted || !latest || latest.text !== opened.text) return;
-      const record = { ...latest, visualDescriptions: { ...latest.visualDescriptions, ...described.visualDescriptions } };
+      const record = { ...latest, visualDescriptions: { ...latest.visualDescriptions, ...found } };
       await docStore.put(record);
       const { doc } = get();
       if (signal.aborted || doc?.id !== id) return;
@@ -138,7 +157,25 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       set({ doc: next, record });
       // Prepared audio follows the new wording.
       if (autoPrepare || prerendering) { get().cancelPrerender(); void get().prerender(); }
+    };
+    try {
+      const slides = readingBlocks(readingText).some((block) => block.kind === "visual" && block.visual.kind === "slide");
+      if (slides) {
+        // Describing a deck is a call to the model for most of its slides: wait until it is being listened to.
+        await until(() => get().doc?.id === id && (get().playing || get().index > 0), signal);
+        describingDeck = id;
+      }
+      await prepareVisualDescriptions(opened, readingText, signal, () => {}, {
+        all: true,
+        heard: () => { const { doc, index } = get(); return doc?.id === id ? doc.paragraphs.filter((p) => p.visual && p.start < index).length : 0; },
+        found: swapIn,
+      });
     } catch { /* Captions and alt text keep serving. */ }
+    if (describingDeck !== id) return;
+    describingDeck = null;
+    // Audio that finished in the meantime was not announced, since its wording was still changing.
+    if (heldBack === id && !prerendering && !signal.aborted && get().doc?.id === id) toast(PREPARED);
+    heldBack = null;
   }
 
   return {
@@ -266,7 +303,10 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
           completed = Math.max(completed, done);
           if (prerendering === controller) set({ prerendering: { done: completed, total } });
         }, controller.signal);
-        if (!controller.signal.aborted && get().doc === doc) toast("Audio prepared — playback no longer waits on the server");
+        if (!controller.signal.aborted && get().doc === doc) {
+          if (describingDeck === doc.id) heldBack = doc.id;
+          else toast(PREPARED);
+        }
       } catch (error) {
         if (!controller.signal.aborted) toast(`Audio preparation failed: ${error instanceof Error ? error.message : "Please retry."}`);
       } finally {

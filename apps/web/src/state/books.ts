@@ -1,14 +1,17 @@
 import { create } from "zustand";
 import { docs as docStore, type DocBook, type DocRecord, type DocSource } from "../lib/db";
 import { fetchReadable, type Fetched } from "../lib/fetchUrl";
-import { pageKey, type BookContents } from "../lib/book";
+import { pageKey, partNames, type BookContents } from "../lib/book";
 import { FINISHED_FRACTION } from "../lib/libraryProtocol";
 import { updateDocument } from "./documents";
 import { useLibrary, type LibraryItem } from "./library";
 import { toast } from "./toast";
 
 /** The chapter at `index` in the book's contents, as it is stored on the chapter's document. */
-export const placeIn = (book: BookContents, index: number): DocBook => ({ id: book.id, title: book.title, chapter: index + 1, chapters: book.chapters.length });
+export const placeIn = (book: BookContents, index: number): DocBook => ({
+  id: book.id, title: book.title, chapter: index + 1, chapters: book.chapters.length,
+  ...(book.kind ? { kind: book.kind } : {}), ...(book.contents ? { contents: book.contents } : {}),
+});
 
 /** Chapter numbers of the book that are already in the library. */
 const shelved = (all: DocRecord[], bookId: string) => new Set(all.flatMap((rec) => rec.book?.id === bookId ? [rec.book.chapter] : []));
@@ -46,10 +49,23 @@ export const useBooks = create<BooksState>()((set, get) => ({
     let added = 0, failed = 0;
     try {
       const all = await docStore.all();
-      const have = shelved(all, book.id);
       const byPage = new Map(all.flatMap((rec) => rec.meta?.url && !rec.book ? [[pageKey(rec.meta.url), rec] as const] : []));
-      const missing = book.chapters.map((chapter, index) => ({ ...chapter, index })).filter((chapter) => !have.has(chapter.index + 1));
+      // Chapters already shelved are known by their addresses; one saved without an address keeps its number.
+      const mine = all.filter((rec) => rec.book?.id === book.id);
+      const byAddress = new Map(mine.flatMap((rec) => rec.meta?.url ? [[pageKey(rec.meta.url), rec] as const] : []));
+      const parts = book.chapters.map((chapter, index) => ({ ...chapter, index, rec: byAddress.get(pageKey(chapter.url)) }));
+      const listed = new Set(parts.flatMap((part) => part.rec ? [part.rec.id] : []));
+      const taken = new Set(mine.filter((rec) => !listed.has(rec.id)).map((rec) => rec.book!.chapter));
+      const missing = parts.filter((part) => !part.rec && !taken.has(part.index + 1));
       set({ adding: { ...get().adding, [book.id]: { done: 0, total: missing.length } } });
+      // The list can have grown or shifted since (a course posts lectures as it runs): what is shelved follows it.
+      for (const part of parts) {
+        const place = placeIn(book, part.index);
+        const shelved = part.rec?.book;
+        if (part.rec && shelved && (shelved.chapter !== place.chapter || shelved.chapters !== place.chapters)) {
+          await useLibrary.getState().update(part.rec.id, { book: { ...shelved, chapter: place.chapter, chapters: place.chapters } }).catch(() => undefined);
+        }
+      }
       for (const [done, chapter] of missing.entries()) {
         const place = placeIn(book, chapter.index);
         let rec: DocRecord | undefined;
@@ -72,17 +88,33 @@ export const useBooks = create<BooksState>()((set, get) => ({
       // Every page of the book made the same offer; it has been taken up.
       set({ adding, offers: Object.fromEntries(Object.entries(get().offers).filter(([, offer]) => offer.id !== book.id || failed > 0)) });
     }
+    const { one, many } = partNames(book);
     toast(failed
-      ? added ? `Added ${added} ${added === 1 ? "chapter" : "chapters"}; ${failed} couldn't be fetched. Add the rest from your Library.` : "Couldn't fetch the chapters. Check your connection and try again."
-      : added ? `Added ${added} ${added === 1 ? "chapter" : "chapters"} of ${book.title}` : "Every chapter is already in your Library", 4000);
+      ? added ? `Added ${added} ${added === 1 ? one : many}; ${failed} couldn't be fetched. Add the rest from your Library.` : `Couldn't fetch the ${many}. Check your connection and try again.`
+      : added ? `Added ${added} ${added === 1 ? one : many} of ${book.title}` : book.kind === "course" ? "No new lectures have been posted" : "Every chapter is already in your Library", 4000);
     return { added, failed };
   },
   async complete(rec) {
-    if (!rec.book || !rec.meta?.url) return null;
+    const id = rec.book?.id;
+    if (!rec.book || !id || get().adding[id]) return null;
     let book: BookContents | undefined;
-    try { book = (await fetchReadable(rec.meta.url)).book; } catch { /* Reported below. */ }
-    if (!book || book.id !== rec.book.id) {
-      toast("Couldn't find the chapter list on that page");
+    // Shown as looking for the list until there are chapters to count.
+    set({ adding: { ...get().adding, [id]: { done: 0, total: 0 } } });
+    try {
+      // Where the chapters do not list each other (a course's decks are files), the page that lists them is asked.
+      for (const url of [rec.book.contents, rec.meta?.url]) {
+        if (!url) continue;
+        try {
+          const found = (await fetchReadable(url)).book;
+          if (found?.id === id) { book = found; break; }
+        } catch { /* Reported below. */ }
+      }
+    } finally {
+      const { [id]: _, ...adding } = get().adding;
+      set({ adding });
+    }
+    if (!book) {
+      toast(`Couldn't find the ${partNames(rec.book).one} list on that page`);
       return null;
     }
     // Keep the title the book already has on the shelf.
@@ -118,6 +150,10 @@ export interface Shelf {
   items: LibraryItem[];
   /** Chapters in the whole book */
   chapters: number;
+  /** A course, whose chapters are lectures */
+  kind?: "course";
+  /** The page that lists the chapters, when there is one to ask again */
+  contents?: string;
 }
 
 export const finished = (it: Pick<LibraryItem, "progress" | "reads">) => it.reads > 0 || it.progress >= FINISHED_FRACTION;
@@ -128,8 +164,10 @@ export function shelves(items: LibraryItem[]): Map<string, Shelf> {
   for (const it of items) {
     const book = it.rec.book;
     if (!book) continue;
-    const shelf = out.get(book.id) ?? { id: book.id, title: book.title, items: [], chapters: 0 };
+    const shelf: Shelf = out.get(book.id) ?? { id: book.id, title: book.title, items: [], chapters: 0 };
     shelf.items.push(it);
+    if (book.kind) shelf.kind = book.kind;
+    if (book.contents) shelf.contents = book.contents;
     shelf.chapters = Math.max(shelf.chapters, book.chapters, book.chapter);
     out.set(book.id, shelf);
   }
