@@ -114,7 +114,7 @@ export function PlayerHost() {
     menuOpen: p.menuOpen,
     onMenuOpenChange: p.setMenuOpen,
     // A passage still being generated: say so, so a wait mid-reading doesn't read as a stop.
-    status: prerender ? `Preparing ${prerender.done}/${prerender.total}` : p.loading ? "Generating…" : undefined,
+    status: prerender ? `${prerender.unreachable ? "Can't reach server" : "Preparing"} ${prerender.done}/${prerender.total}` : p.loading ? "Generating…" : undefined,
     extraMenu,
   };
 

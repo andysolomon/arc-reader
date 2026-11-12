@@ -43,7 +43,8 @@ test("pasting in text fields and editable content leaves normal editing alone", 
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByLabel("Text to read")).toHaveValue("Existing draft");
   await page.getByRole("link", { name: "Library", exact: true }).click();
-  await paste(page, TEXT, "input");
+  // Named, so the paste waits for the Library instead of catching Compose on its way out.
+  await paste(page, TEXT, 'input[aria-label="Search library"]');
   await page.evaluate(() => {
     const editor = document.createElement("div");
     editor.contentEditable = "true";

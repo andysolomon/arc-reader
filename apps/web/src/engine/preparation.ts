@@ -21,6 +21,8 @@ export interface PreparationStatus {
   worker?: string;
   /** The only machine a queued reading can run on, when the other can't take it. */
   waitingFor?: string;
+  /** The app's own server is not answering; the request is being retried. */
+  unreachable?: boolean;
 }
 export interface SharedPreparation extends PreparationStatus {
   keys: string[];
@@ -76,13 +78,16 @@ interface SavedPreparation {
   keys: string[];
   active: boolean;
 }
-interface PreparationObserver { signal?: AbortSignal }
+type PreparationProgress = (done: number, total: number, status?: PreparationStatus) => void;
+interface PreparationObserver { signal?: AbortSignal; progress?: PreparationProgress }
 interface PreparationSession {
   entry: Promise<SavedPreparation>;
   observers: Set<PreparationObserver>;
   cancelled: boolean;
   controller: AbortController;
 }
+/** Retrying is silent by design, but a reader watching "0 of 55" should know nothing is arriving. */
+const waiting = (id: string, done: number, total: number): PreparationStatus => ({ id, state: "running", done, total, unreachable: true });
 const sessions = new Map<string, PreparationSession>();
 class PreparationHttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -129,7 +134,7 @@ function delay(signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function submit(requests: PreparationRequest[], start: number, fingerprint: string, signal: AbortSignal): Promise<SavedPreparation> {
+async function submit(requests: PreparationRequest[], start: number, fingerprint: string, signal: AbortSignal, unreachable: () => void): Promise<SavedPreparation> {
   let entry = saved().find((job) => job.signature === fingerprint && job.active);
   if (!entry) {
     const existing = shared.find((job) => (job.state === "running" || job.available.length === job.total) && matches(job, requests));
@@ -152,6 +157,7 @@ async function submit(requests: PreparationRequest[], start: number, fingerprint
       } catch (error) {
         signal?.throwIfAborted();
         if (!isTransientPreparationError(error)) throw error;
+        unreachable();
         await delay(signal);
       }
     }
@@ -163,16 +169,18 @@ async function submit(requests: PreparationRequest[], start: number, fingerprint
 
 /** Identical readings share a submission; polling only observes it. A reader
  * cancels server work only when no other reader still needs that job. */
-export async function prepareAudio(requests: PreparationRequest[], start: number, progress?: (done: number, total: number, status?: PreparationStatus) => void, signal?: AbortSignal) {
+export async function prepareAudio(requests: PreparationRequest[], start: number, progress?: PreparationProgress, signal?: AbortSignal) {
   signal?.throwIfAborted();
   const fingerprint = signature(requests);
   let session = sessions.get(fingerprint);
   if (!session) {
     const controller = new AbortController();
-    session = { entry: submit(requests, start, fingerprint, controller.signal), observers: new Set(), cancelled: false, controller };
+    const observers = new Set<PreparationObserver>();
+    const unreachable = () => { for (const other of observers) if (!other.signal?.aborted) other.progress?.(0, requests.length, waiting("", 0, requests.length)); };
+    session = { entry: submit(requests, start, fingerprint, controller.signal, unreachable), observers, cancelled: false, controller };
     sessions.set(fingerprint, session);
   }
-  const observer = { signal };
+  const observer = { signal, progress };
   session.observers.add(observer);
   let id: string | undefined;
   const cancel = () => {
@@ -188,6 +196,7 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
   try {
     id = (await session.entry).id;
     if (signal?.aborted) { cancel(); signal.throwIfAborted(); }
+    let done = 0, total = requests.length;
     for (;;) {
       let status: PreparationStatus;
       try {
@@ -200,9 +209,11 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
           save(saved().map((job) => job.id === id ? { ...job, active: false } : job));
           throw error;
         }
+        progress?.(done, total, waiting(id, done, total));
         await delay(signal);
         continue;
       }
+      ({ done, total } = status);
       progress?.(status.done, status.total, status);
       if (status.state !== "running") {
         save(saved().map((job) => job.id === id ? { ...job, active: false } : job));

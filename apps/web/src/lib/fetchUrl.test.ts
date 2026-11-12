@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { htmlToText, looksLikeUrl, markdownToText, publishedDate } from "./fetchUrl";
+import { htmlToText, isWebAddress, looksLikeUrl, markdownToText, publishedDate } from "./fetchUrl";
 import { segment } from "./segment";
 import { placeLinks } from "./linkPlaces";
 
@@ -172,5 +172,14 @@ describe("telling a pasted link from pasted text", () => {
     expect(looksLikeUrl("A sentence. Another one.")).toBe(false);
     expect(looksLikeUrl("hello")).toBe(false);
     expect(looksLikeUrl("one\ntwo")).toBe(false);
+  });
+  it("knows a full address on its own from text that mentions one", () => {
+    expect(isWebAddress(" https://backend-from-first-principle.vercel.app/ ")).toBe(true);
+    expect(isWebAddress("HTTP://example.com/story")).toBe(true);
+    expect(isWebAddress("www.example.com")).toBe(true);
+    expect(isWebAddress("example.com")).toBe(false);
+    expect(isWebAddress("https://")).toBe(false);
+    expect(isWebAddress("Read https://example.com later")).toBe(false);
+    expect(isWebAddress("https://example.com\nand some notes")).toBe(false);
   });
 });
