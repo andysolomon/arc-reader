@@ -167,9 +167,29 @@ async function submit(requests: PreparationRequest[], start: number, fingerprint
   return entry;
 }
 
+/** Readings on their way to the server, by passage key. */
+const submitting = new Map<string, Promise<void>>();
+const SUBMISSION_WAIT_MS = 3000;
+/**
+ * Say that these passages are about to be submitted; call the result once the server has
+ * the reading (or will not get it). Until then `preparedAudio` holds playback back briefly,
+ * so it joins the server's work instead of asking the speech server for the same passage
+ * at the same moment.
+ */
+export function announcePreparation(keys: string[]): () => void {
+  let settle!: () => void;
+  const pending = new Promise<void>((resolve) => { settle = resolve; });
+  for (const key of keys) submitting.set(key, pending);
+  return () => {
+    for (const key of keys) if (submitting.get(key) === pending) submitting.delete(key);
+    settle();
+  };
+}
+
 /** Identical readings share a submission; polling only observes it. A reader
- * cancels server work only when no other reader still needs that job. */
-export async function prepareAudio(requests: PreparationRequest[], start: number, progress?: PreparationProgress, signal?: AbortSignal) {
+ * cancels server work only when no other reader still needs that job.
+ * `submitted` is called once the server has the reading, or has refused it. */
+export async function prepareAudio(requests: PreparationRequest[], start: number, progress?: PreparationProgress, signal?: AbortSignal, submitted?: () => void) {
   signal?.throwIfAborted();
   const fingerprint = signature(requests);
   let session = sessions.get(fingerprint);
@@ -194,7 +214,8 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
   };
   signal?.addEventListener("abort", cancel, { once: true });
   try {
-    id = (await session.entry).id;
+    try { id = (await session.entry).id; }
+    finally { submitted?.(); }
     if (signal?.aborted) { cancel(); signal.throwIfAborted(); }
     let done = 0, total = requests.length;
     for (;;) {
@@ -232,6 +253,17 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
 
 /** Fetch a server-rendered clip before attempting another generation. */
 export async function preparedAudio(key: string, signal?: AbortSignal): Promise<Response | null> {
+  const pending = submitting.get(key);
+  if (pending) {
+    // A slow submission never holds playback for long: ordinary generation remains available.
+    await new Promise<void>((resolve) => {
+      const finish = () => { clearTimeout(timer); signal?.removeEventListener("abort", finish); resolve(); };
+      const timer = setTimeout(finish, SUBMISSION_WAIT_MS);
+      signal?.addEventListener("abort", finish, { once: true });
+      void pending.then(finish);
+    });
+    signal?.throwIfAborted();
+  }
   const ready = shared.find((job) => job.available.some((index) => job.keys[index] === key));
   const running = shared.find((job) => job.state === "running" && job.keys.includes(key));
   const entry = ready || saved().slice().reverse().find((job) => job.keys.includes(key)) || running;

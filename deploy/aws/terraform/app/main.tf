@@ -1,5 +1,6 @@
 # ReadAloud on the k3s host from ../infra: the readaloud module without VoiceStudio,
-# which stays on the Mac mini (VOICESTUDIO_REMOTE_URL in .env). deploy.sh applies it
+# which stays on the Mac mini (VOICESTUDIO_REMOTE_URL in .env), and with Phonon, which
+# runs on the host. deploy.sh applies it
 # after pushing the web image to ECR, with the variables from the root .env (env.tf).
 terraform {
   required_version = ">= 1.6"
@@ -20,9 +21,16 @@ variable "web_image" {
   description = "Web image in ECR, e.g. <account>.dkr.ecr.<region>.amazonaws.com/readaloud-web:<commit>."
 }
 
+variable "phonon_image" {
+  type        = string
+  default     = "ghcr.io/gradium-ai/ptts-openai-server:0.7.0@sha256:806af0149e6520c8dec95f21c7847d7728c5ecff22b83b61f25e1c782705f5d9"
+  description = "Gradium's Phonon speech server, which runs on the host's CPU. The host pulls it from ghcr.io."
+}
+
 module "readaloud" {
-  source    = "../../../terraform/modules/readaloud"
-  web_image = var.web_image
+  source       = "../../../terraform/modules/readaloud"
+  web_image    = var.web_image
+  phonon_image = var.phonon_image
 
   voicestudio_remote_url           = local.env.voicestudio_remote_url
   voicestudio_name                 = local.env.voicestudio_name

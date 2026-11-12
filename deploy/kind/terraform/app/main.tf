@@ -1,5 +1,5 @@
 # Everything that runs in the kind cluster from ../cluster: the readaloud module, with
-# VoiceStudio in the cluster. deploy.sh applies it on every deploy, after loading the
+# VoiceStudio and Phonon in the cluster. deploy.sh applies it on every deploy, after loading the
 # images into the node, and sets the variables from the root .env (env.tf). public-url.tf
 # has Tailscale serve the app at its tailnet address.
 terraform {
@@ -27,10 +27,17 @@ variable "voicestudio_image" {
   default = "ghcr.io/debpalash/voicestudio:stable"
 }
 
+# The tag names the release; the digest keeps a moved tag from changing what runs.
+variable "phonon_image" {
+  type    = string
+  default = "ghcr.io/gradium-ai/ptts-openai-server:0.7.0@sha256:806af0149e6520c8dec95f21c7847d7728c5ecff22b83b61f25e1c782705f5d9"
+}
+
 module "readaloud" {
   source            = "../../../terraform/modules/readaloud"
   web_image         = var.web_image
   voicestudio_image = var.voicestudio_image
+  phonon_image      = var.phonon_image
 
   voicestudio_remote_url           = local.env.voicestudio_remote_url
   voicestudio_name                 = local.env.voicestudio_name
