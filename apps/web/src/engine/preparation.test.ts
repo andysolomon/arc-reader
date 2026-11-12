@@ -55,6 +55,21 @@ describe("background preparation client", () => {
     expect(hasActivePreparation(requests)).toBe(false);
   });
 
+  it("says the server is unreachable while it retries, then reports progress again", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockRejectedValueOnce(new TypeError("Connection refused"))
+      .mockResolvedValueOnce(response(status("running", 0)))
+      .mockResolvedValueOnce(response(status("running", 1)))
+      .mockRejectedValueOnce(new TypeError("Connection refused"))
+      .mockResolvedValueOnce(response(status("done", 2)));
+    const seen: string[] = [];
+    const run = prepareAudio(requests, 0, (done, total, state) => seen.push(`${done}/${total}${state?.unreachable ? " unreachable" : ""}`));
+    await vi.advanceTimersByTimeAsync(6000);
+    await run;
+    // Not reachable to submit, then a poll that kept what was already known.
+    expect(seen).toEqual(["0/2 unreachable", "1/2", "1/2 unreachable", "2/2"]);
+  });
+
   it("can cancel while waiting for the web server to return", async () => {
     vi.useFakeTimers();
     fetchMock.mockRejectedValue(new TypeError("Connection refused"));

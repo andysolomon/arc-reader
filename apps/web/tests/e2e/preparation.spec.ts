@@ -50,7 +50,8 @@ test("composing automatically prepares all passages, continues with the page clo
   const job = await response.json() as { id: string; state: string; total: number };
   expect(job.state).toBe("running");
   expect(job.total).toBe(12);
-  await expect(page.getByRole("region", { name: "Player" })).toContainText("Preparing 0/12");
+  // The page's connection is gone, and it says so instead of counting in silence.
+  await expect(page.getByRole("region", { name: "Player" })).toContainText("Can't reach server 0/12");
   await page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Pause/ }).click();
   await page.waitForFunction(() => JSON.parse(localStorage.getItem("readaloud:preparations") || "[]").some((j: { active: boolean }) => j.active));
   await page.close();
@@ -67,6 +68,21 @@ test("composing automatically prepares all passages, continues with the page clo
   await expect(returned.getByRole("button", { name: /^Pause/ })).toBeVisible();
   await expect(returned.getByTestId("speech-error")).toHaveCount(0);
   expect(regenerated).toBe(0);
+});
+
+test("preparation says when the server can't be reached, and carries on once it can", async ({ page }) => {
+  const job = { id: "unreachable-prepare", state: "running", done: 1, total: 3 };
+  let reachable = false;
+  await page.route("**/api/preparations", (route) => route.request().method() !== "POST" ? route.fallback() : reachable ? route.fulfill({ status: 202, json: job }) : route.abort("connectionrefused"));
+  await page.route(`**/api/preparations/${job.id}`, (route) => route.fulfill({ json: job }));
+  await page.goto("/");
+  await composeText(page, "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.");
+  await page.getByTestId("listen").click();
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+  const player = page.getByRole("region", { name: "Player" });
+  await expect(player).toContainText("Can't reach server 0/3");
+  reachable = true;
+  await expect(player).toContainText("Preparing 1/3");
 });
 
 test("automatic preparation can be stopped from the player", async ({ page }) => {
