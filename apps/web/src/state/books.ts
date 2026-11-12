@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { docs as docStore, type DocBook, type DocRecord, type DocSource } from "../lib/db";
-import { fetchReadable, type Fetched } from "../lib/fetchUrl";
+import { fetchReadable, hostOf, type Fetched } from "../lib/fetchUrl";
 import { pageKey, type BookContents } from "../lib/book";
 import { FINISHED_FRACTION } from "../lib/libraryProtocol";
 import { updateDocument } from "./documents";
+import { useCategories } from "./categories";
 import { useLibrary, type LibraryItem } from "./library";
 import { toast } from "./toast";
 
@@ -12,6 +13,15 @@ export const placeIn = (book: BookContents, index: number): DocBook => ({ id: bo
 
 /** Chapter numbers of the book that are already in the library. */
 const shelved = (all: DocRecord[], bookId: string) => new Set(all.flatMap((rec) => rec.book?.id === bookId ? [rec.book.chapter] : []));
+
+/** Chapters that arrive together are filed two at a time, not in one burst of requests to Jev. */
+async function fileInTurn(recs: DocRecord[]) {
+  const queue = [...recs];
+  const worker = async () => {
+    for (let rec = queue.shift(); rec; rec = queue.shift()) await useCategories.getState().suggest(rec, { quiet: true });
+  };
+  await Promise.all([worker(), worker()]);
+}
 
 export interface AddResult {
   added: number;
@@ -44,6 +54,8 @@ export const useBooks = create<BooksState>()((set, get) => ({
     if (get().adding[book.id]) return { added: 0, failed: 0 };
     set({ adding: { ...get().adding, [book.id]: { done: 0, total: book.chapters.length } } });
     let added = 0, failed = 0;
+    // Chapters that came with their text: nothing to wait for between them, so they go in as one batch.
+    const batch: DocRecord[] = [];
     try {
       const all = await docStore.all();
       const have = shelved(all, book.id);
@@ -55,9 +67,12 @@ export const useBooks = create<BooksState>()((set, get) => ({
         let rec: DocRecord | undefined;
         try {
           // A chapter saved earlier as a loose article joins the book instead of being fetched twice.
-          const loose = byPage.get(pageKey(chapter.url));
+          const loose = chapter.text === undefined ? byPage.get(pageKey(chapter.url)) : undefined;
           if (loose) rec = await useLibrary.getState().update(loose.id, { book: place, title: chapter.title });
-          else {
+          else if (chapter.text !== undefined) {
+            rec = await useLibrary.getState().create({ text: chapter.text, title: chapter.title, source: "url", domain: hostOf(chapter.url), meta: book.meta ?? { url: chapter.url }, book: place, batch: true });
+            batch.push(rec);
+          } else {
             const page = await fetchReadable(chapter.url);
             rec = await useLibrary.getState().create({ text: page.text, title: chapter.title, source: "url", domain: page.domain, meta: page.meta, links: page.links, book: place });
           }
@@ -68,6 +83,10 @@ export const useBooks = create<BooksState>()((set, get) => ({
         set({ adding: { ...get().adding, [book.id]: { done: done + 1, total: missing.length } } });
       }
     } finally {
+      if (batch.length) {
+        await useLibrary.getState().refresh();
+        void fileInTurn(batch);
+      }
       const { [book.id]: _, ...adding } = get().adding;
       // Every page of the book made the same offer; it has been taken up.
       set({ adding, offers: Object.fromEntries(Object.entries(get().offers).filter(([, offer]) => offer.id !== book.id || failed > 0)) });

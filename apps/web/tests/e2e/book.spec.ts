@@ -118,3 +118,87 @@ test("a single chapter offers the rest of its book, then and later", async ({ pa
   await page.getByRole("link", { name: "Library", exact: true }).click();
   await expect(page.locator('li[data-book="Backend Basics"]')).toContainText("3 chapters");
 });
+
+const ARCHIVE = "https://archive.org";
+const prose = (about: string) => Array.from({ length: 6 }, (_, i) => `${about} went on in sentence ${i + 1}, long enough that the paragraph reads as prose.`).join(" ");
+/** A scan's text: a title page, chapters under misread headings, and a page header between paragraphs. */
+const SCAN = [
+  "THE  COUNT  OF  MONTE-CRISTO", "LONDON  1888",
+  "CHAPTER    I\n\n\nTHE   ARRIVAL", prose("The arrival"), "2  THE    COUNT    OF    MONTE-CRISTO.", prose("The harbour"), prose("The owner"), prose("The mate"),
+  "CHAPTER    Il\n\n\nFATHER   AND   SON", ...["The father", "The son", "The neighbour", "The purse"].map(prose),
+  "CHAPTER    III\n\n\nTHE   CATALANS", ...["The village", "The cousin", "The rival", "The tavern"].map(prose),
+  "END  OF  VOLUME  I.", "University of California Library",
+].join("\n\n\n");
+const ITEMS: Record<string, unknown> = {
+  countofmontecris01duma: {
+    metadata: { mediatype: "texts", title: "The Count of Monte-Cristo", creator: "Dumas, Alexandre, 1802-1870", date: "1888" },
+    files: [{ name: "countofmontecris01duma_djvu.txt", format: "DjVuTXT", size: String(SCAN.length) }],
+  },
+  countofmontecris0000alex_k5l0: {
+    metadata: { mediatype: "texts", title: "The Count of Monte Cristo", "access-restricted-item": "true" },
+    files: [{ name: "countofmontecris0000alex_k5l0_djvu.txt", format: "DjVuTXT", size: "113454", private: "true" }],
+  },
+};
+
+/** The Internet Archive's metadata API and downloads, readable straight from the browser as the real ones are. */
+async function serveArchive(page: Page) {
+  const requested: string[] = [];
+  await page.route(`${ARCHIVE}/**`, (route) => {
+    const [, kind, id] = new URL(route.request().url()).pathname.split("/");
+    requested.push(`${kind}/${id}`);
+    const headers = { "access-control-allow-origin": "*" };
+    if (kind === "metadata") return route.fulfill({ contentType: "application/json", headers, body: JSON.stringify(ITEMS[id] ?? {}) });
+    if (kind === "download" && id === "countofmontecris01duma") return route.fulfill({ contentType: "text/plain; charset=utf-8", headers, body: SCAN });
+    return route.fulfill({ status: 403, body: "Forbidden" });
+  });
+  return requested;
+}
+
+test("a book on the Internet Archive is read from its scan, chapter by chapter", async ({ page }) => {
+  await serveArchive(page);
+  // A link into the page viewer, as copied from the address bar.
+  await readLink(page, `${ARCHIVE}/details/countofmontecris01duma/page/n7/mode/1up`);
+  const offer = page.getByRole("complementary", { name: "Book" });
+  await expect(offer).toContainText("This is chapter 1 of 3 in The Count of Monte-Cristo");
+  await expect(page.getByRole("heading", { level: 1, name: "The Arrival" })).toBeVisible();
+  const text = page.getByRole("region", { name: "Document text" }).locator("article");
+  await expect(text.getByRole("heading", { level: 2, name: "Chapter 1: The Arrival" })).toBeVisible();
+  // The page header between two paragraphs is gone, and so is the title page.
+  await expect(text).not.toContainText("MONTE-CRISTO");
+  await expect(text).not.toContainText("LONDON");
+  await page.keyboard.press("Space");
+  await axe(page);
+
+  await offer.getByRole("button", { name: "Add the other 2 chapters" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Added 2 chapters of The Count of Monte-Cristo" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Chapters" }).getByRole("button", { name: /Next · Chapter 2\s*Father and Son/ })).toBeVisible();
+
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const book = page.locator('li[data-book="The Count of Monte-Cristo"]');
+  await expect(book).toContainText("3 chapters");
+  await book.getByRole("button", { name: "Show chapters of The Count of Monte-Cristo" }).click();
+  const rows = page.getByRole("list", { name: "Chapters of The Count of Monte-Cristo" }).getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(1)).toContainText("2. Father and Son");
+  await expect(rows.nth(2)).toContainText("3. The Catalans");
+
+  // The last chapter ends with the book, not with the library's stamp.
+  await rows.nth(2).getByRole("button", { name: /The Catalans/ }).first().click();
+  await expect(page.getByText("Chapter 3 of 3")).toBeVisible();
+  await expect(text).toContainText("The tavern went on in sentence 6");
+  await expect(text).not.toContainText("END OF VOLUME");
+  await expect(text).not.toContainText("University of California");
+});
+
+test("a book the Internet Archive only lends is not imported, and says why", async ({ page }) => {
+  const requested = await serveArchive(page);
+  await page.goto("/");
+  await page.getByLabel("Link to read").fill(`${ARCHIVE}/details/countofmontecris0000alex_k5l0/page/n7/mode/1up`);
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("status").filter({ hasText: "Archive.org only lends this book" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  // Neither the locked text nor the viewer's page is asked for.
+  expect(requested).toEqual(["metadata/countofmontecris0000alex_k5l0"]);
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  await expect(page.getByText("The Count of Monte Cristo")).toHaveCount(0);
+});

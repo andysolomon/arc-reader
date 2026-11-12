@@ -29,7 +29,8 @@ interface LibraryState {
   items: LibraryItem[];
   loaded: boolean;
   refresh: () => Promise<void>;
-  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null; meta?: DocMeta; links?: DocLink[]; book?: DocBook }) => Promise<DocRecord>;
+  /** `batch` is one of many added together: the caller refreshes the library and files them once they are all in. */
+  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null; meta?: DocMeta; links?: DocLink[]; book?: DocBook; batch?: boolean }) => Promise<DocRecord>;
   /** Edit catalogue fields: title, metadata, category. */
   update: (id: string, patch: DocPatch) => Promise<DocRecord | undefined>;
   remove: (id: string) => Promise<void>;
@@ -69,7 +70,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       set({ loaded: true });
     }
   },
-  async create({ text, title, source, domain, voice = null, meta, links = [], book }) {
+  async create({ text, title, source, domain, voice = null, meta, links = [], book, batch = false }) {
     const now = Date.now();
     // Page links come from the HTML; links written into the text itself count too.
     const allLinks = uniqueLinks([...links, ...linksInMarkdown(text)]);
@@ -91,6 +92,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       updatedAt: now,
     };
     await docStore.put(rec);
+    if (batch) return rec;
     void get().refresh();
     // Shelve new documents in the background when Jev is set up; you can change it later.
     void useCategories.getState().suggest(rec, { quiet: true });

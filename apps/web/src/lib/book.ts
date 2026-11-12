@@ -1,3 +1,4 @@
+import type { DocMeta } from "./db";
 import { hash } from "./hash";
 
 /**
@@ -8,6 +9,8 @@ import { hash } from "./hash";
 export interface BookChapter {
   url: string;
   title: string;
+  /** The chapter itself, when the whole book came as one text and there is no page of its own to fetch */
+  text?: string;
 }
 
 export interface BookContents {
@@ -17,6 +20,8 @@ export interface BookContents {
   chapters: BookChapter[];
   /** Where the fetched page sits in `chapters`; null when it is the contents page itself */
   index: number | null;
+  /** Catalogue details for chapters that come with their text */
+  meta?: DocMeta;
 }
 
 export const MIN_CHAPTERS = 3;
