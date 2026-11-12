@@ -65,6 +65,9 @@ test("a course page becomes a shelf of its lectures, and takes new ones as they 
   const rows = page.getByRole("list", { name: "Lectures of CS 101: Building Things" }).getByRole("listitem");
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(2)).toContainText("3. Retrieval");
+  // Opening the Library syncs it, and "Sync now" is dimmed meanwhile.
+  await expect(page.getByRole("status", { name: "Library sync" })).toContainText("Synced");
+  await expect(page.getByRole("button", { name: "Sync now", exact: true })).toBeEnabled();
   await axe(page);
 
   // Nothing new yet; then the fourth lecture's slides are posted.
