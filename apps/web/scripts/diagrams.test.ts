@@ -1,6 +1,6 @@
 import * as moddle from "bpmn-moddle";
 import { describe, expect, it } from "vitest";
-import { PAGES, loadModel, resolveRefs } from "./diagrams.mjs";
+import { PAGES, describesChange, loadModel, resolveRefs } from "./diagrams.mjs";
 
 // bpmn-moddle's default export, however this runtime presents it.
 const BpmnModdle = (moddle as any).default?.default ?? (moddle as any).default ?? (moddle as any).BpmnModdle;
@@ -13,6 +13,23 @@ describe("diagram code references", () => {
     expect(count).toBeGreaterThan(100);
     // Fix: point the reference at the code it describes, then run `node apps/web/scripts/diagrams.mjs refs`.
     expect(problems).toEqual([]);
+  });
+});
+
+describe("diagram staleness reminder", () => {
+  const diff = (...lines: string[]) => ["--- a/docs/x.html", "+++ b/docs/x.html", "@@ -1 +1 @@", ...lines].join("\n");
+
+  it("ignores pages whose only change is re-pointed line numbers", () => {
+    expect(describesChange(diff(
+      `-  code: [SRC + "engine/engine.ts:443", "apps/web/vite.prepare.ts:240"] },`,
+      `+  code: [SRC + "engine/engine.ts:451", "apps/web/vite.prepare.ts:236"] },`,
+    ))).toBe(false);
+  });
+
+  it("counts a change to what a page says", () => {
+    expect(describesChange(diff(`-  d: "VoiceStudio voices only.", code: [SRC + "a.ts:1"] },`, `+  d: "VoiceStudio and Phonon voices.", code: [SRC + "a.ts:2"] },`))).toBe(true);
+    expect(describesChange(diff(`+  { id: "X_phonon", n: "Phonon" },`))).toBe(true);
+    expect(describesChange(diff(`-  { id: "X_old", n: "Old" },`))).toBe(true);
   });
 });
 
