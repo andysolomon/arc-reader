@@ -205,7 +205,8 @@ export function htmlToText(html: string, url: string): Fetched {
   flush();
   const text = blocks.join("\n\n");
   const title = (doc.querySelector('meta[property="og:title"]')?.getAttribute("content") || doc.title || hostOf(url)).trim();
-  const links = Array.from(root.querySelectorAll("a[href]")).flatMap((a) => {
+  // Links drawn inside a diagram are labels in a picture, not places the reading points to.
+  const links = Array.from(root.querySelectorAll("a[href]")).filter((a) => !a.closest("svg")).flatMap((a) => {
     const href = absoluteUrl(a.getAttribute("href") ?? "", base);
     return href ? [{ url: href, text: a.textContent ?? "" }] : [];
   });
