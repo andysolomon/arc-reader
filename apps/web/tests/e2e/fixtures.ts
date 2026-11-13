@@ -15,8 +15,8 @@ export const test = base.extend<{ isolatedLibrary: void }>({
       if (route.request().method() === "GET") return route.fulfill({ json: { jobs: [] } });
       await route.fallback();
     });
-    await context.route("**/api/library/sync", async (route) => {
-      await route.fulfill({ json: await library.sync(route.request().postDataJSON()) });
+    await context.route(/\/api\/library\/(sync|docs)$/, async (route) => {
+      await route.fulfill({ json: await library.request(new URL(route.request().url()).pathname.replace("/api/library", ""), route.request().postDataJSON()) });
     });
     await use();
     await context.unrouteAll({ behavior: "wait" });

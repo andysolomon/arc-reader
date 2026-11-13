@@ -7,6 +7,7 @@ import type { PreparationRequest, PreparationStatus, SharedPreparation } from ".
 import { PHONON_ENGINE, PHONON_WORKER, forPhonon, PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
 import { SpeechActivity } from "./vite.speech-activity";
 import { mp3VoicedShare } from "./vite.voicing";
+import { sendJson } from "./vite.json";
 import { GARBLED_BELOW, GARBLED_RETRIES } from "./src/engine/voicing";
 
 interface Job extends PreparationStatus {
@@ -433,10 +434,7 @@ export class PreparationService {
   }
 }
 
-function send(res: ServerResponse, status: number, data: unknown) {
-  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
-  res.end(JSON.stringify(data));
-}
+const send = (res: ServerResponse, status: number, data: unknown) => sendJson(res.req, res, status, data);
 async function body(req: IncomingMessage) {
   let length = 0;
   const chunks: Buffer[] = [];
@@ -458,7 +456,8 @@ export function audioPreparation(env: Record<string, string>, activity?: SpeechA
           throw new HttpError(403, "Use the app to prepare audio.");
         }
         const path = new URL(req.url || "/", "http://localhost").pathname;
-        if (req.method === "GET" && path === "/") return send(res, 200, await service.list());
+        // Every open app polls this list; an unchanged list answers 304 with no body.
+        if (req.method === "GET" && path === "/") return sendJson(req, res, 200, await service.list(), { etag: true });
         if (req.method === "POST" && path === "/") return send(res, 202, await service.submit(await body(req)));
         const match = /^\/([a-f0-9-]{36})(?:\/audio\/(\d+))?$/.exec(path);
         if (!match) throw new HttpError(404, "Not found.");
