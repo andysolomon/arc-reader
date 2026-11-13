@@ -20,6 +20,7 @@ import { SUMMARY_MODELS } from "../lib/summary";
 import { useJev, useLlm } from "../state/llm";
 import { CATEGORIES } from "../lib/category";
 import { LlmKeyField } from "../components/LlmKeyField";
+import { DOC_LINKS, docUrl } from "../lib/docs";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -278,6 +279,23 @@ export function SettingsPage() {
         <Section title="Keyboard shortcuts">
           <ShortcutsGrid />
         </Section>
+
+        {/* The server serves the docs (vite.docs.ts); the bundled iOS app has none. */}
+        {!bundled && (
+          <Section title="How it works">
+            <nav aria-label="How it works" className="flex flex-col rounded-panel border border-line bg-bg2">
+              {DOC_LINKS.map((d, i) => (
+                <a key={d.page} href={docUrl(d.page)} className={`flex items-center justify-between gap-4 px-4 py-3.5 text-fg no-underline hover:bg-bg3 ${i < DOC_LINKS.length - 1 ? "border-b border-line" : ""}`}>
+                  <div>
+                    <div>{d.title}</div>
+                    <div className="text-[13px] text-fg2">{d.hint}</div>
+                  </div>
+                  <ChevronRight size={16} strokeWidth={1.5} className="shrink-0 text-fg2" aria-hidden />
+                </a>
+              ))}
+            </nav>
+          </Section>
+        )}
       </div>
     </section>
   );

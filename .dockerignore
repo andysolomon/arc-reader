@@ -10,4 +10,6 @@
 **/*.local
 **/.readaloud-preparations
 .git
-docs
+# Only the HTML docs, which the app serves at /docs/ (apps/web/vite.docs.ts).
+docs/**
+!docs/**/*.html

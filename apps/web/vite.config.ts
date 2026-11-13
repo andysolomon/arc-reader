@@ -13,6 +13,7 @@ import { llm } from "./vite.llm";
 import { jev } from "./vite.jev";
 import { shellFallback } from "./vite.shell";
 import { publicAccess } from "./vite.gate";
+import { hostedDocs } from "./vite.docs";
 import { serverUrl, startUrl, UNREACHABLE_PAGE } from "./capacitor.config";
 
 export default defineConfig(({ mode }) => {
@@ -33,6 +34,7 @@ export default defineConfig(({ mode }) => {
     voiceAvatars(env),
     llm(env),
     jev(env),
+    hostedDocs(),
     shellFallback(serverUrl, UNREACHABLE_PAGE, startUrl),
     VitePWA({
       registerType: "autoUpdate",
@@ -66,6 +68,9 @@ export default defineConfig(({ mode }) => {
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
         navigateFallback: "/index.html",
+        // The docs are full pages of their own (vite.docs.ts): fetch them, don't precache them.
+        navigateFallbackDenylist: [/^\/docs\//],
+        globIgnores: ["docs/**"],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
