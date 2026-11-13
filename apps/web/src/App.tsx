@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { MotionConfig } from "framer-motion";
 import { applyTheme, getTheme } from "@readaloud/tokens";
+import { AvatarProvider } from "./components/AvatarProvider";
 import { Shell } from "./components/Shell";
 import { Compose } from "./routes/Compose";
 import { Reader } from "./routes/Reader";
@@ -57,6 +58,7 @@ export default function App() {
   }, []);
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}>
+      <AvatarProvider>
       <ThemeSync />
       <BrowserRouter>
         <Routes>
@@ -76,6 +78,7 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </AvatarProvider>
     </MotionConfig>
   );
 }

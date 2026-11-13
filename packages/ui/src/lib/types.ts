@@ -7,8 +7,12 @@ export interface Voice {
   hue: number | null;
   /** Rendering service; used for a consistent service color throughout the UI. */
   engine?: string;
+  kind?: "preset" | "profile" | "local";
   /** Voice direction used to give custom voices an expressive portrait. */
   description?: string;
+  /** Explicit voice-design metadata; never inferred from a speaker's name or accent. */
+  gender?: string | null;
+  age?: string | null;
   /** Stable gallery identity, preserved after adding a recipe to saved voices. */
   archetype?: string;
 }
