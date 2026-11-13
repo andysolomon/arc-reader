@@ -5,6 +5,7 @@ import { UsageMeter } from "../components/UsageMeter";
 import { EmptyState } from "../components/EmptyState";
 import { Skeleton } from "../components/Skeleton";
 import { ProgressRing } from "../components/ProgressRing";
+import { ProgressBar } from "../components/ProgressBar";
 import { ThemeSwatch } from "../components/ThemeSwatch";
 import { Switch } from "../components/Switch";
 import { Segmented } from "../components/Segmented";
@@ -43,6 +44,9 @@ export const Skeletons: StoryObj = {
 };
 export const Rings: StoryObj = {
   render: () => <div className="flex gap-4">{[0, 0.18, 0.4, 0.62, 0.85, 1].map((v) => <ProgressRing key={v} value={v} />)}</div>,
+};
+export const Bars: StoryObj = {
+  render: () => <div className="flex w-80 flex-col gap-4">{[null, 0, 0.18, 0.62, 1].map((v) => <ProgressBar key={String(v)} value={v} label="Preparing" />)}</div>,
 };
 export const Swatches: StoryObj = {
   render: () => {

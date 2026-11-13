@@ -123,7 +123,7 @@ export interface DescribeOptions {
 const HAND_OVER_MS = 20_000;
 
 /** A failed image never prevents the remaining visuals or article from being read. */
-export async function prepareVisualDescriptions(rec: DocRecord, text: string, signal: AbortSignal, progress: (message: string) => void, opts: DescribeOptions = {}): Promise<DocRecord> {
+export async function prepareVisualDescriptions(rec: DocRecord, text: string, signal: AbortSignal, progress: (message: string, step?: { done: number; total: number }) => void, opts: DescribeOptions = {}): Promise<DocRecord> {
   signal.throwIfAborted();
   const blocks = readingBlocks(text);
   const missing = new Map<string, { visual: ArticleVisual; context: string; order: number }>();
@@ -141,7 +141,7 @@ export async function prepareVisualDescriptions(rec: DocRecord, text: string, si
     missing.set(key, { visual: block.visual, context: beside?.kind !== "prose" ? "" : slide ? beside.text.split(/^#{1,6} /m)[0].trim().slice(0, 1500) : beside.text.slice(-1200), order });
   }
   if (!missing.size) return rec;
-  progress("Preparing image and diagram descriptions…");
+  progress("Preparing image and diagram descriptions…", { done: 0, total: missing.size });
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(Math.min(60_000 + slides * 20_000, 30 * 60_000))]);
   const descriptions: VisualDescriptions = {};
   let waiting: VisualDescriptions = {}, handed = 0;
@@ -169,7 +169,7 @@ export async function prepareVisualDescriptions(rec: DocRecord, text: string, si
         const [key, { visual, context }] = next;
         const description = await sharedDescription(rec, visual, context, deadline);
         if (description) descriptions[key] = waiting[key] = description;
-        if (!signal.aborted) progress(`Preparing image and diagram descriptions… ${++done} of ${missing.size}`);
+        if (!signal.aborted) progress(`Preparing image and diagram descriptions… ${++done} of ${missing.size}`, { done, total: missing.size });
         if (!signal.aborted) await hand();
       }
     };
