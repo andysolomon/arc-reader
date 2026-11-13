@@ -1,6 +1,7 @@
 export * from "./lib/cn";
 export * from "./lib/format";
 export * from "./lib/types";
+export type { PortraitVoice } from "./lib/voicePortraits";
 export * from "./lib/useReducedMotion";
 export * from "./components/Button";
 export * from "./components/IconButton";
@@ -28,6 +29,7 @@ export * from "./components/SentenceText";
 export * from "./components/Dialog";
 export * from "./components/Sheet";
 export * from "./components/Toast";
+export * from "./components/VoiceTile";
 export * from "./components/VoiceCard";
 export * from "./components/UsageMeter";
 export * from "./components/EmptyState";

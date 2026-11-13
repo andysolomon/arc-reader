@@ -1,9 +1,9 @@
 import type { Voice, ParagraphLike } from "../lib/types";
 
 export const VOICES: Voice[] = [
-  { id: "ava", name: "Ava", lang: "EN-US", tags: ["warm", "narrator"], hue: 30 },
-  { id: "noah", name: "Noah", lang: "EN-GB", tags: ["crisp", "documentary"], hue: 215 },
-  { id: "piper", name: "Piper", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null },
+  { id: "ava", name: "Ava", lang: "EN-US", tags: ["warm", "narrator"], hue: 30, engine: "kittentts" },
+  { id: "noah", name: "Noah", lang: "EN-GB", tags: ["crisp", "documentary"], hue: 215, engine: "phonon" },
+  { id: "piper", name: "Piper", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null, engine: "local" },
 ];
 
 const P1 =
