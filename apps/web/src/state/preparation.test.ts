@@ -4,6 +4,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JAMAICAN_PATOIS_VOICE_ID, FISH_PRESET_VOICES, OPENAI_VOICES, PRESET_VOICES } from "../data/voices";
 import { cacheKey, prepareInBackground, synthesize } from "../engine/providers";
+import { prioritizePreparation } from "../engine/preparation";
 import { audioCache, db, docs, type DocRecord } from "../lib/db";
 import { codeKey } from "../lib/codeBlocks";
 import { preparePatois } from "../lib/patois";
@@ -22,6 +23,7 @@ vi.hoisted(() => {
 });
 
 vi.mock("../engine/providers", async (original) => ({ ...await original<typeof import("../engine/providers")>(), synthesize: vi.fn(), prepareInBackground: vi.fn() }));
+vi.mock("../engine/preparation", async (original) => ({ ...await original<typeof import("../engine/preparation")>(), prioritizePreparation: vi.fn() }));
 vi.mock("../lib/patois", async (original) => ({ ...await original<typeof import("../lib/patois")>(), preparePatois: vi.fn() }));
 const [bella, jasper] = PRESET_VOICES;
 const record = (id: string): DocRecord => ({ id, title: id, text: `First ${id}.\n\nSecond ${id}.`, voice: null, chars: 20, source: "paste", domain: "Text", createdAt: 0, updatedAt: 0 });
@@ -131,6 +133,24 @@ describe("Library preparation queue", () => {
     expect(synthesize).toHaveBeenCalledTimes(3);
   });
 
+  it("says a reading is being sent until the server accepts it, then that the server can't be reached", async () => {
+    let report!: (status: { submitting?: boolean; unreachable?: boolean; queued?: boolean }) => void;
+    vi.mocked(prepareInBackground).mockImplementation((requests, _start, progress, signal) => new Promise<void>((resolve) => {
+      report = (flags) => progress?.(0, requests.length, { id: "", state: "running", done: 0, total: requests.length, ...flags });
+      signal!.addEventListener("abort", () => resolve(), { once: true });
+    }));
+    usePreparation.getState().enqueue([record("a")], [bella]);
+    // Before the server has answered at all, nothing is waiting for a machine.
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", message: "Sending to the server…" });
+    await vi.waitFor(() => expect(report).toBeDefined());
+    report({ submitting: true });
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", message: "Sending to the server…" });
+    report({ unreachable: true });
+    expect(usePreparation.getState().jobs[0].message).toBe("Can't reach the server. Retrying…");
+    report({ queued: true });
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", message: undefined });
+  });
+
   it("submits local readings to the machine queue and reports the actual assignment", async () => {
     const pending = holdBackgroundJobs();
     usePreparation.getState().enqueue([record("a"), record("b")], [bella, jasper]);
@@ -149,6 +169,46 @@ describe("Library preparation queue", () => {
     pending.forEach((job) => job.release());
     await settled();
     expect(usePreparation.getState().jobs.every((job) => job.status === "ready")).toBe(true);
+  });
+
+  it("moves a waiting server reading to the front, or starts it now, through the server", async () => {
+    const pending = holdBackgroundJobs();
+    usePreparation.getState().enqueue([record("a"), record("b")], [bella]);
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    pending[0].activate("Mac");
+    vi.mocked(prioritizePreparation).mockResolvedValue({ id: "1", state: "running", done: 0, total: 2, queued: true, ahead: 0, prioritized: true, busy: true });
+    const [running, waiting] = usePreparation.getState().jobs;
+    await usePreparation.getState().prioritize(waiting.id, true);
+    expect(prioritizePreparation).toHaveBeenCalledWith("1", true);
+    expect(usePreparation.getState().jobs[1]).toMatchObject({ status: "queued", ahead: 0, prioritized: true, busy: true });
+    // A reading already being prepared has nothing to move ahead of.
+    await usePreparation.getState().prioritize(running.id);
+    expect(prioritizePreparation).toHaveBeenCalledTimes(1);
+    pending.forEach((job) => job.release());
+    await settled();
+  });
+
+  it("starts a moved-up cloud reading before the others waiting for a slot", async () => {
+    await Promise.all(["c", "d", "e"].map((id) => docs.put(record(id))));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started: string[] = [];
+    vi.mocked(synthesize).mockImplementation(async (req) => {
+      if (!started.includes(req.docId!)) started.push(req.docId!);
+      await gate;
+      const audio = new Blob(["audio"]);
+      await audioCache.put({ key: cacheKey(req), blob: audio, mime: "audio/mpeg", duration: 1, createdAt: 0 });
+      return { source: "api", audio, duration: 1 };
+    });
+    usePreparation.getState().enqueue(["a", "b", "c", "d", "e"].map(record), [OPENAI_VOICES[0]]);
+    await vi.waitFor(() => expect(started).toEqual(["a", "b", "c"]));
+    const last = usePreparation.getState().jobs[4];
+    await usePreparation.getState().prioritize(last.id);
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ id: last.id, status: "queued", prioritized: true });
+    expect(prioritizePreparation).not.toHaveBeenCalled();
+    release();
+    await settled();
+    expect(started).toEqual(["a", "b", "c", "e", "d"]);
   });
 
   it("prepares cloud voices even when all VoiceStudio slots are occupied", async () => {
