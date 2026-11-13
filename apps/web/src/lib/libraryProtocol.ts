@@ -27,6 +27,19 @@ export interface LibrarySnapshot {
   deleted: string[];
 }
 
+/** A sync answer that names each document's version instead of carrying its body. */
+export interface LibraryManifest {
+  docs: { id: string; updatedAt: number }[];
+  positions: PositionRecord[];
+  deleted: string[];
+}
+
+export interface LibraryDocs {
+  docs: DocRecord[];
+  /** Requested documents the server does not hold, such as one deleted meanwhile. */
+  missing: string[];
+}
+
 export interface PendingChange {
   key: string;
   token: string;

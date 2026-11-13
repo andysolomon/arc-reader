@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { db, pendingChange, subscribeLibraryWrites } from "./db";
-import type { LibrarySnapshot, PendingChange } from "./libraryProtocol";
+import { db, pendingChange, subscribeLibraryWrites, type DocRecord } from "./db";
+import type { LibraryDocs, LibraryManifest, PendingChange } from "./libraryProtocol";
 
 interface SyncState {
   status: "syncing" | "synced" | "offline";
@@ -29,8 +29,11 @@ async function migrate() {
   await tx.done;
 }
 
-/** Acknowledge only the exact writes sent. Edits made during the request remain pending. */
-async function apply(snapshot: LibrarySnapshot, sent: PendingChange[]) {
+/**
+ * Acknowledge only the exact writes sent. Edits made during the request remain pending.
+ * Returns the documents this device lacks or holds an older version of.
+ */
+async function apply(snapshot: LibraryManifest, sent: PendingChange[]): Promise<string[]> {
   const d = await db();
   const tx = d.transaction(["docs", "positions", "outbox"], "readwrite");
   const outbox = tx.objectStore("outbox");
@@ -38,7 +41,7 @@ async function apply(snapshot: LibrarySnapshot, sent: PendingChange[]) {
     if ((await outbox.get(item.key))?.token === item.token) await outbox.delete(item.key);
   }
   const pending = new Set(await outbox.getAllKeys());
-  const remoteDocs = new Map(snapshot.docs.map((record) => [record.id, record]));
+  const remoteDocs = new Map(snapshot.docs.map((entry) => [entry.id, entry]));
   const remotePositions = new Map(snapshot.positions.map((record) => [record.docId, record]));
   const deleted = new Set(snapshot.deleted);
   const localDocs = await tx.objectStore("docs").getAll();
@@ -62,9 +65,6 @@ async function apply(snapshot: LibrarySnapshot, sent: PendingChange[]) {
       pending.add(key);
     }
   }
-  for (const record of snapshot.docs) {
-    if (!pending.has(`doc:${record.id}`)) await tx.objectStore("docs").put(record);
-  }
   for (const record of snapshot.positions) {
     if (!pending.has(`position:${record.docId}`) && !pending.has(`doc:${record.docId}`)) await tx.objectStore("positions").put(record);
   }
@@ -75,7 +75,41 @@ async function apply(snapshot: LibrarySnapshot, sent: PendingChange[]) {
     await outbox.delete(`doc:${id}`);
     await outbox.delete(`position:${id}`);
   }
+  const local = new Map(localDocs.map((record) => [record.id, record.updatedAt]));
+  const wanted = snapshot.docs.filter((entry) => !pending.has(`doc:${entry.id}`) && !deleted.has(entry.id)
+    && !((local.get(entry.id) ?? -1) >= entry.updatedAt)).map((entry) => entry.id);
   await tx.done;
+  return wanted;
+}
+
+/** Store fetched documents, unless this device has an edit or deletion on its way up. */
+async function store(records: DocRecord[]) {
+  const d = await db();
+  const tx = d.transaction(["docs", "outbox"], "readwrite");
+  for (const record of records) {
+    if (!await tx.objectStore("outbox").get(`doc:${record.id}`)) await tx.objectStore("docs").put(record);
+  }
+  await tx.done;
+}
+
+/**
+ * Download document bodies a few at a time. Each answer is stored as it arrives, so a
+ * weak connection that drops partway keeps what it got and the next sync asks only for the rest.
+ */
+async function download(ids: string[]) {
+  let remaining = ids;
+  while (remaining.length) {
+    const response = await fetch("/api/library/docs", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: remaining }), signal: AbortSignal.timeout(30_000), cache: "no-store",
+    });
+    if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Library server unavailable.");
+    const result = await response.json() as LibraryDocs;
+    if (!Array.isArray(result.docs) || !Array.isArray(result.missing) || (!result.docs.length && !result.missing.length)) throw new Error("Library server unavailable.");
+    await store(result.docs);
+    const answered = new Set([...result.docs.map((record) => record.id), ...result.missing]);
+    remaining = remaining.filter((id) => !answered.has(id));
+  }
 }
 
 let inflight: Promise<boolean> | null = null;
@@ -87,7 +121,7 @@ export function syncLibrary(): Promise<boolean> {
     try {
       await migrate();
       const d = await db();
-      let snapshot: LibrarySnapshot | undefined;
+      let snapshot: LibraryManifest | undefined;
       // A second round immediately uploads any local records recovered during reconciliation.
       for (let round = 0; round < 2; round++) {
         // Bound each round so continuous playback writes cannot starve completion.
@@ -101,17 +135,20 @@ export function syncLibrary(): Promise<boolean> {
           batches.at(-1)!.push(item);
           size += bytes;
         }
+        let wanted: string[] = [];
         for (const sent of batches) {
+          // The answer lists document versions, not bodies, so a quiet poll stays a few kilobytes.
           const response = await fetch("/api/library/sync", {
             method: "POST", headers: { "content-type": "application/json" },
-            body: JSON.stringify({ changes: sent.map((item) => item.change) }),
+            body: JSON.stringify({ changes: sent.map((item) => item.change), view: "manifest" }),
             signal: AbortSignal.timeout(20_000), cache: "no-store",
           });
           if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Library server unavailable.");
-          snapshot = await response.json() as LibrarySnapshot;
+          snapshot = await response.json() as LibraryManifest;
           if (!Array.isArray(snapshot.docs) || !Array.isArray(snapshot.positions) || !Array.isArray(snapshot.deleted)) throw new Error("Library server unavailable.");
-          await apply(snapshot, sent);
+          wanted = await apply(snapshot, sent);
         }
+        await download(wanted);
         if (!await d.count("outbox")) break;
       }
       const pending = await d.count("outbox");

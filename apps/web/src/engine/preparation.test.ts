@@ -261,4 +261,13 @@ describe("background preparation client", () => {
     await prepareAudio(requests, 0);
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
+
+  it("asks for the job list only if it changed, and reuses the copy it has when it did not", async () => {
+    const jobs = [{ ...status("done", 2), keys: ["first", "second"], available: [0, 1], engine: "kittentts", voice: "v", createdAt: 1 }];
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ jobs }), { headers: { "content-type": "application/json", etag: '"v1"' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 304, headers: { etag: '"v1"' } }));
+    expect(await refreshPreparationCatalog()).toEqual(jobs);
+    expect(await refreshPreparationCatalog()).toEqual(jobs);
+    expect(fetchMock.mock.calls[1][1].headers).toEqual({ "if-none-match": '"v1"' });
+  });
 });

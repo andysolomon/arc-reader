@@ -45,10 +45,22 @@ export interface SharedPreparation extends PreparationStatus {
 let shared: SharedPreparation[] = [];
 let sharing = 0;
 export const sharedAudioRemaining = () => sharing;
-export async function refreshPreparationCatalog(): Promise<SharedPreparation[]> {
-  const result = await json<{ jobs: SharedPreparation[] }>("", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+/** The last list the server sent and its tag; an unchanged list then comes back as 304 with no body. */
+let catalogue: { tag: string; jobs: SharedPreparation[] } | undefined;
+async function fetchCatalogue(): Promise<SharedPreparation[]> {
+  const response = await fetch(BASE, {
+    cache: "no-store", signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+    ...(catalogue ? { headers: { "if-none-match": catalogue.tag } } : {}),
+  });
+  if (response.status === 304 && catalogue) return catalogue.jobs;
+  const result = await answer<{ jobs: SharedPreparation[] }>(response);
   if (!Array.isArray(result.jobs)) throw new Error("Server audio status is unavailable.");
-  shared = result.jobs;
+  const tag = response.headers.get("etag");
+  catalogue = tag ? { tag, jobs: result.jobs } : undefined;
+  return result.jobs;
+}
+export async function refreshPreparationCatalog(): Promise<SharedPreparation[]> {
+  shared = await fetchCatalogue();
   const local = new Set(await audioCache.keys().catch(() => []));
   const uploads = new Map<string, { id: string; index: number }>();
   for (const job of shared) for (const index of job.deviceOnly || []) {
@@ -69,9 +81,7 @@ export async function refreshPreparationCatalog(): Promise<SharedPreparation[]> 
     sent++;
   }
   if (sent) {
-    const updated = await json<{ jobs: SharedPreparation[] }>("", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
-    if (!Array.isArray(updated.jobs)) throw new Error("Server audio status is unavailable.");
-    shared = updated.jobs;
+    shared = await fetchCatalogue();
     sharing = Math.max(0, sharing - sent);
   }
   return shared;
