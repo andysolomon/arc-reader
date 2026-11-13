@@ -26,7 +26,7 @@ const sameReading = (job: PreparationJob, reading: Reading, openaiModel: string)
 export interface ReadingStatus {
   voice: PreparedVoice;
   reading: Reading;
-  /** 0..1: generated so far while it is being made, saved on this device otherwise */
+  /** 0..1: how much of the audio exists, saved on this device or generated in the run under way, whichever is further */
   fraction: number;
   /** Queued, being made or being saved right now */
   active: boolean;
@@ -75,8 +75,10 @@ export function useReadings(it: LibraryItem, defaultVoice: string): { voiceId: s
     const counted = job ?? player;
     // Server generation precedes downloading into the browser's audio cache.
     // While a reading is being made, its confirmed passage count is the live progress.
-    const fraction = counted && counted.total > 0 ? Math.max(0, Math.min(1, counted.done / counted.total)) : voice.fraction;
-    const percent = Math.floor(fraction * 100);
+    const generated = counted && counted.total > 0 ? Math.max(0, Math.min(1, counted.done / counted.total)) : null;
+    // A run starts its count at zero even when most of the audio is already saved; the ring shows what exists.
+    const fraction = Math.max(generated ?? 0, voice.fraction);
+    const percent = Math.floor((generated ?? fraction) * 100);
     const stage = job
       ? job.message ?? (job.status === "queued" ? (job.waitingFor ? `Waiting for ${job.waitingFor}` : "Queued") : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing")
       : player ? (player.unreachable ? "Can’t reach server" : "Preparing") : undefined;
@@ -304,7 +306,7 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
   const localAhead = job && !job.serverId ? jobs.slice(0, jobs.indexOf(job)).filter((other) => other.status === "queued" && !other.serverId && providerFor(other) === providerFor(job)).length : 0;
   const ahead = job?.status !== "queued" ? undefined : job.serverId ? job.ahead : localAhead;
   const machine = job?.worker ?? job?.waitingFor;
-  const fraction = job ? (job.total > 0 ? job.done / job.total : 0) : saved?.fraction ?? (last?.status === "ready" ? 1 : 0);
+  const fraction = job ? Math.max(job.total > 0 ? job.done / job.total : 0, saved?.fraction ?? 0) : saved?.fraction ?? (last?.status === "ready" ? 1 : 0);
 
   const status = job
     ? job.message ?? (job.status === "queued" ? `Queued · waiting for ${job.waitingFor ?? (server ? "a free machine" : "its turn")}`
