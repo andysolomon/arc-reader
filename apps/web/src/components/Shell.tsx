@@ -10,6 +10,7 @@ import { LiveRegion } from "./LiveRegion";
 import { PullToRefresh } from "./PullToRefresh";
 import { useShortcuts } from "../hooks/useShortcuts";
 import { useBreakpoint } from "../hooks/useMedia";
+import { useHistoryTrail } from "../hooks/useBack";
 import { usePlayer } from "../state/player";
 import { useToast } from "../state/toast";
 import { useLinkToasts } from "../state/links";
@@ -17,6 +18,7 @@ import { ClipboardImportContext, useClipboardImportController } from "../hooks/u
 
 export function Shell() {
   useShortcuts();
+  useHistoryTrail();
   useLinkToasts();
   const bp = useBreakpoint();
   const mainRef = useRef<HTMLElement>(null);
@@ -25,6 +27,7 @@ export function Shell() {
   const preparing = usePlayer((s) => s.preparing);
   const preparationError = usePlayer((s) => s.preparationError);
   const speechError = usePlayer((s) => s.speechError);
+  const reconnecting = usePlayer((s) => s.reconnecting);
   const toastMsg = useToast((s) => s.message);
   const toastHref = useToast((s) => s.href);
   const { pathname } = useLocation();
@@ -33,7 +36,8 @@ export function Shell() {
   const clipboard = useClipboardImportController(!isAuth);
   const showRail = !focus && !isAuth && bp !== "sm";
   const showTabs = !focus && !isAuth && bp === "sm";
-  const playerOffset = hasDoc && !isAuth ? (bp === "sm" ? 160 : 156) : 24;
+  // The toast clears whatever sits at the bottom: the player, and on a phone the bar of screens under it.
+  const playerOffset = isAuth ? 24 : bp === "sm" ? (hasDoc ? 184 : 96) : hasDoc ? 156 : 24;
 
   return (
     <ClipboardImportContext.Provider value={clipboard}>
@@ -50,7 +54,7 @@ export function Shell() {
             <button className="text-accent underline" onClick={() => usePlayer.getState().cancelPreparation()}>{preparing ? "Cancel" : "Dismiss"}</button>
           </div>}
           {speechError && <div role="alert" data-testid="speech-error" className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line bg-bg2 px-5 py-3 text-sm">
-            <span className="flex-1">{speechError} Playback is paused.</span>
+            <span className="flex-1">{speechError} {reconnecting ? "Playback resumes when the connection is back." : "Playback is paused."}</span>
             <button className="text-accent underline" onClick={() => usePlayer.getState().retrySpeech()}>Retry</button>
             <button className="text-accent underline" onClick={() => usePlayer.getState().useBrowserVoice()}>Use browser voice</button>
             <button className="text-accent underline" onClick={() => usePlayer.getState().dismissSpeechError()}>Dismiss</button>

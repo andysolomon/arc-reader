@@ -3,7 +3,7 @@ import { hash } from "./hash";
 
 export const USAGE_KEY = "readaloud:usage";
 export const USAGE_EVENT = "readaloud:usage";
-export type UsageProvider = "openai" | "fish" | "voicestudio" | "unknown";
+export type UsageProvider = "openai" | "fish" | "phonon" | "voicestudio" | "unknown";
 export interface TokenUsage { inputTokens: number; outputTokens: number }
 
 /** Daily aggregates contain no text, audio, credentials, or document identifiers. */
@@ -29,14 +29,14 @@ const validMonth = (s: unknown): s is string => typeof s === "string" && /^\d{4}
 let writeFailed = false;
 
 export function providerFor(engine: string): UsageProvider {
-  return engine === "openai" || engine === "fish" ? engine : engine === "unknown" ? "unknown" : "voicestudio";
+  return engine === "openai" || engine === "fish" || engine === "phonon" ? engine : engine === "unknown" ? "unknown" : "voicestudio";
 }
 
 function validRow(row: unknown): row is UsageRow {
   if (!row || typeof row !== "object") return false;
   const r = row as UsageRow;
   return typeof r.day === "string" && validMonth(r.day.slice(0, 7)) && /^\d{4}-\d{2}(?:-(?:0[1-9]|[12]\d|3[01]))?$/.test(r.day)
-    && ["openai", "fish", "voicestudio", "unknown"].includes(r.provider) && typeof r.model === "string"
+    && ["openai", "fish", "phonon", "voicestudio", "unknown"].includes(r.provider) && typeof r.model === "string"
     && [r.requests, r.characters, r.bytes, r.audioSeconds].every(validNumber)
     && [r.inputTokens, r.outputTokens, r.costUsd].every(nullableNumber)
     && typeof r.pricing === "string" && typeof r.legacy === "boolean";
@@ -92,7 +92,7 @@ export function priceUsage(provider: UsageProvider, model: string, characters: n
     const rate = model === "s2.1-pro-free" ? 0 : ["s2.1-pro", "s2-pro", "s1"].includes(model) ? 15 : null;
     if (rate !== null) return { costUsd: bytes * rate / 1_000_000, pricing: `$${rate} / 1M UTF-8 bytes` };
   }
-  return { costUsd: null, pricing: provider === "voicestudio" ? "Server costs are not reported" : "No pricing available for this model" };
+  return { costUsd: null, pricing: provider === "voicestudio" || provider === "phonon" ? "Server costs are not reported" : "No pricing available for this model" };
 }
 
 export interface UsageInput {

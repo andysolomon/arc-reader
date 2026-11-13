@@ -63,10 +63,25 @@ READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:8449
 
 `ios:sync` writes it into the app as Capacitor's `server.url`, so changing the address means building and installing the app again. The local kind deployment owns the other end: with the same setting, Terraform has Tailscale serve the cluster's web port at that address, and `deploy/kind/deploy.sh` fails unless the address ends up serving the build it just deployed (see [the kind cluster](#or-run-it-in-a-local-kind-cluster)).
 
-- The phone must be on the tailnet to open the app. When the server cannot be reached, the app shows a page stored inside it that names the server. The page checks for the server every few seconds and opens the app by itself once it answers, so reconnecting Tailscale is enough. **Try again** opens it at once, and gives the button back after 10 seconds if the connection hangs. If the server answers with an error instead (for a few seconds while a deploy restarts the web pod), that error is what the web view shows; close and reopen the app.
+- The phone must be on the tailnet to open the app, unless it uses the public address below. When the server cannot be reached, the app shows a page stored inside it that names the server. The page checks for the server every few seconds and opens the app by itself once it answers, so reconnecting Tailscale is enough. **Try again** opens it at once, and gives the button back after 10 seconds if the connection hangs. If the server answers with an error instead (for a few seconds while a deploy restarts the web pod), that error is what the web view shows; close and reopen the app.
 - iOS keeps the page alive for days, so the app asks the server which build it serves each time it comes to the foreground, and reloads once nothing is playing when a deploy has happened.
 - The app's storage belongs to the address it loads from. Documents saved in an app that ran its own files stay with that build; the server's shared library takes their place.
 - The speech server setting described below is hidden. Speech goes through the server's `/api/vs` proxy, and the Local voice still reads with the iPhone's own voices.
+
+#### Without Tailscale on the phone
+
+The iOS Tailscale client can stall (the app then shows "Can't reach ReadAloud" until the VPN is toggled). To avoid it, the kind deployment can also publish the app to the internet through [Tailscale Funnel](https://tailscale.com/kb/1223/funnel), and the phone loads it from there with no VPN:
+
+```sh
+# root .env
+READALOUD_FUNNEL_PORT=10000                              # 443, 8443 or 10000
+READALOUD_ACCESS_TOKEN=<openssl rand -base64 32>
+READALOUD_APP_URL=https://<machine>.<tailnet>.ts.net:10000  # what the iOS app loads
+```
+
+Funnel needs the `funnel` node attribute in the tailnet policy. The next deploy rolls out the web server with the token, and only then opens the Funnel (`deploy/kind/terraform/app/funnel.tf`). It refuses to open one without a token of at least 32 characters.
+
+Tailscale marks every request that arrives through Funnel (`Tailscale-Funnel-Request`, which a client cannot forge or remove), and the web server refuses those unless they carry the token (`apps/web/vite.gate.ts`). Tailnet requests are not affected. Opening any page with `?access=<token>` stores a 400-day HttpOnly cookie and redirects to the same page without the token. `ios:sync` builds the app to start at `READALOUD_APP_URL/?access=<token>`, so the phone never asks. To revoke access, change the token, deploy, and rebuild the app. The one exception is the icon the offline page checks for, which is public.
 
 ### Voices on device
 
@@ -107,7 +122,7 @@ Then in Xcode:
 
 Version in Xcode is 1.0 (build 1), separate from the web app's package version. The icon and launch screen come from `apps/web/public/icons`.
 
-For parallel worktrees, give each Playwright run separate ports, for example `E2E_PORT=4184 E2E_VOICE_PORT=3987 E2E_OPENAI_PORT=3986 pnpm test:e2e`. Each run uses temporary server library storage; UI tests isolate their libraries while the shared-library test uses independent browsers against the real HTTP API.
+For parallel worktrees, give each Playwright run separate ports, for example `E2E_PORT=4184 E2E_VOICE_PORT=3987 E2E_OPENAI_PORT=3986 E2E_PHONON_PORT=3985 pnpm test:e2e`. Each run uses temporary server library storage; UI tests isolate their libraries while the shared-library test uses independent browsers against the real HTTP API.
 
 ## Shared library
 
@@ -119,7 +134,7 @@ On first connection, each browser automatically merges its existing documents an
 
 IndexedDB remains the offline copy. Local edits and deletions are committed alongside a persistent outgoing queue, retried after reconnecting, on focus, and every five seconds while the app is visible. The Library shows whether it has synced or is waiting. A fresh device can open a document link after syncing. Downloaded audio, app preferences, usage totals, and cloud-provider preparation queues remain local to each browser. Sync does not interrupt active playback; shared progress is used the next time a document opens.
 
-Every sync also reconciles the cached documents and positions with the server, even after the initial browser import is complete. Local records missing from the server (or newer than its copy) are queued again without changing their timestamps; server deletion tombstones still win. “Synced” requires matching document IDs and an empty outgoing queue. The Library shows the synced document count, a **Sync now** button, and any sync error directly on the page.
+Every sync also reconciles the cached documents and positions with the server, even after the initial browser import is complete. Local records missing from the server (or newer than its copy) are queued again without changing their timestamps; server deletion tombstones still win. “Synced” requires matching document IDs and an empty outgoing queue. The Library shows the synced document count beside its title, a cloud icon that is the **Sync now** button, and any sync error directly on the page.
 
 Preparation yields to live speech: while a reader or voice preview is sending speech requests through the web server to the same VoiceStudio, background passages pause there, and resume fifteen seconds after the last live request. VoiceStudio runs one GPU worker with a one-deep queue, so this keeps live requests from being refused as busy and keeps two engines from evicting each other from memory.
 
@@ -142,7 +157,7 @@ ReadAloud talks to [VoiceStudio](https://github.com/debpalash/VoiceStudio) throu
 
 ### 1. Run VoiceStudio and ReadAloud (Docker Compose)
 
-Your user needs access to the Docker socket (`sudo usermod -aG docker $USER`, then log in again). `compose.yaml` defines VoiceStudio (CPU) with its `voicestudio-data` volume and the web app, built and served by `vite preview` with its proxies. It reads settings from `.env` in the repo root (gitignored):
+Your user needs access to the Docker socket (`sudo usermod -aG docker $USER`, then log in again). `compose.yaml` defines VoiceStudio (CPU) with its `voicestudio-data` volume, [Phonon](#phonon-voices), and the web app, built and served by `vite preview` with its proxies. It reads settings from `.env` in the repo root (gitignored):
 
 ```sh
 echo "VOICESTUDIO_API_KEY=$(openssl rand -hex 32)" > .env
@@ -193,11 +208,11 @@ curl -X POST -H "Authorization: Bearer $VOICESTUDIO_API_KEY" -H "Content-Type: a
 
 #### Or run it in a local kind cluster
 
-`deploy/kind` runs the same two services in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged. Both host ports lead to a [Traefik](https://doc.traefik.io/traefik/) ingress controller (namespace `traefik`), and an Ingress routes each port to its app's ClusterIP Service.
+`deploy/kind` runs the same services (VoiceStudio, Phonon and the web app) in a single-node [kind](https://kind.sigs.k8s.io/) cluster (context `kind-readaloud`, namespace `readaloud`). It reads the same root `.env` and replaces Compose: the cluster binds 127.0.0.1:4179 (web) and 127.0.0.1:3900 (VoiceStudio) and mounts the Compose volumes (`readaloud_library-data`, `readaloud_preparation-data`, `voicestudio-data`), so the library, prepared audio, models, and voices carry over unchanged. Both host ports lead to a [Traefik](https://doc.traefik.io/traefik/) ingress controller (namespace `traefik`), and an Ingress routes each port to its app's ClusterIP Service.
 
 Terraform owns all of it in two stages: `deploy/kind/terraform/cluster` creates the kind cluster (ports, mounts, node image) and `deploy/kind/terraform/app` calls the shared `deploy/terraform/modules/readaloud` module for everything in it (Traefik, the Deployments, Services, Ingresses, config and secrets from `.env`). The state lives in `~/.local/state/readaloud/terraform`, outside the repository, so every checkout deploys the same cluster; the app state holds the `.env` secrets.
 
-Set `READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:<port>` in `.env` and Terraform also has Tailscale serve the web port at that address (`deploy/kind/terraform/app/public-url.tf`): it runs `tailscale serve` when the address is first set or changes, runs it again if Tailscale has stopped serving it, and refuses an address that names another machine. Each deploy then ends by checking that the address serves the new build, and fails if it does not. The iOS app can be built to load from the same address ([iOS app](#load-the-app-from-the-server)), which makes this deploy the way the phone is updated. Without the setting, Terraform leaves Tailscale alone.
+Set `READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:<port>` in `.env` and Terraform also has Tailscale serve the web port at that address (`deploy/kind/terraform/app/public-url.tf`): it runs `tailscale serve` when the address is first set or changes, runs it again if Tailscale has stopped serving it, and refuses an address that names another machine. Each deploy then ends by checking that the address serves the new build, and fails if it does not. The iOS app can be built to load from the same address ([iOS app](#load-the-app-from-the-server)), which makes this deploy the way the phone is updated. Without the setting, Terraform leaves Tailscale alone. `READALOUD_FUNNEL_PORT` also opens the app to the internet through Tailscale Funnel, behind `READALOUD_ACCESS_TOKEN` ([without Tailscale on the phone](#without-tailscale-on-the-phone)).
 
 ```sh
 deploy/kind/deploy.sh   # build the web image, load it into kind, roll out
@@ -216,12 +231,12 @@ The Omarchy `readaloud` cluster completed this cutover on 6 Nov 2026. Terraform 
 
 #### Or host it privately on AWS
 
-`deploy/aws` runs the same web app and Traefik module on one EC2 host with k3s. VoiceStudio stays on the Mac mini (or another tailnet machine); no speech models run on EC2. Access is through Tailscale Serve at `https://readaloud-aws.tail1b9428.ts.net`. The AWS security group admits only Tailscale's UDP port; HTTP, SSH and the Kubernetes API have no public inbound rule. Tailnet policy controls who can reach the app, the API on TCP 6443, and the remote VoiceStudio.
+`deploy/aws` runs the same web app and Traefik module on one EC2 host with k3s. VoiceStudio stays on the Mac mini (or another tailnet machine); the only speech model on EC2 is [Phonon](#phonon-voices), which runs on the host's CPU. Access is through Tailscale Serve at `https://readaloud-aws.tail1b9428.ts.net`. The AWS security group admits only Tailscale's UDP port; HTTP, SSH and the Kubernetes API have no public inbound rule. Tailnet policy controls who can reach the app, the API on TCP 6443, and the remote VoiceStudio.
 
 Terraform has two independent stages:
 
 - `deploy/aws/terraform/infra`: a VPC, public subnet with outbound internet, EC2 (`t3a.medium`, amd64), ECR, IAM, an encrypted 10 GB EBS data volume, and seven daily snapshots. The 30 GB root disk is disposable. The data disk holds the library, preparations, k3s state, and Tailscale identity.
-- `deploy/aws/terraform/app`: the shared Kubernetes module, with only the web app and Traefik. A [CoreDNS zone override](https://docs.k3s.io/advanced#coredns-custom-configuration-imports) forwards tailnet DNS to Tailscale so the web pod can find the Mac; ordinary DNS uses the [VPC resolver](https://docs.aws.amazon.com/vpc/latest/userguide/AmazonDNS-concepts.html). ECR pulls use the instance role through a [kubelet credential provider](https://kubernetes.io/docs/tasks/administer-cluster/kubelet-credential-provider/); there is no expiring registry password to renew manually.
+- `deploy/aws/terraform/app`: the shared Kubernetes module, with the web app, Phonon and Traefik. The host pulls the Phonon image from ghcr.io and the model from Hugging Face on first start. A [CoreDNS zone override](https://docs.k3s.io/advanced#coredns-custom-configuration-imports) forwards tailnet DNS to Tailscale so the web pod can find the Mac; ordinary DNS uses the [VPC resolver](https://docs.aws.amazon.com/vpc/latest/userguide/AmazonDNS-concepts.html). ECR pulls use the instance role through a [kubelet credential provider](https://kubernetes.io/docs/tasks/administer-cluster/kubelet-credential-provider/); there is no expiring registry password to renew manually.
 
 Prerequisites: Docker with Compose, Terraform, `kubectl`, AWS CLI v2 with a working profile or SSO session, and Tailscale on the deployment machine. AWS credentials need permission to manage the resources above, pass the instance and backup roles, push to ECR, and use SSM Run Command. Enable MagicDNS and HTTPS certificates in the tailnet; its policy must permit the AWS host to reach VoiceStudio and this machine to reach the host's Kubernetes API. A first-boot Tailscale auth key must be approved for the intended tailnet and any required tags.
 
@@ -302,7 +317,26 @@ VITE_OPENAI_TTS_MODEL=gpt-4o-mini-tts   # or tts-1 / tts-1-hd
 OPENAI_API_KEY=sk-...                     # read by the proxy only
 ```
 
-The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa` and VoiceStudio voices to `/api/vs`; Settings → Engine selects VoiceStudio’s active engine for saved profiles or enables the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → API usage & spending shows monthly requests, reported input/audio output tokens, and list-price cost estimates. GPT-4o mini TTS requests use speech events to retain reported usage; binary-only compatible servers remain playable, with tokens and cost marked unavailable. Every gpt-4o-mini-tts request also carries a fixed `instructions` line asking for one steady delivery, so passages match each other. Every passage sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
+The Voices page then lists Alloy, Ash, Ballad, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer and Verse. Each voice carries its own engine, so OpenAI voices go to `/api/oa`, Phonon voices to `/api/phonon` and VoiceStudio voices to `/api/vs`; Settings → Engine selects VoiceStudio’s active engine for saved profiles or enables the browser-voice override. OpenAI requests are not serialized (it handles concurrency); clips are still cached at 1×. Settings → API usage & spending shows monthly requests, reported input/audio output tokens, and list-price cost estimates. GPT-4o mini TTS requests use speech events to retain reported usage; binary-only compatible servers remain playable, with tokens and cost marked unavailable. Every gpt-4o-mini-tts request also carries a fixed `instructions` line asking for one steady delivery, so passages match each other. Every passage sent to an OpenAI voice leaves the machine; VoiceStudio keeps everything local.
+
+### Phonon voices
+
+[Phonon](https://huggingface.co/gradium/phonon-31m-en) is Gradium's small English speech model. It runs on the CPU in its own server ([`ptts-openai-server`](https://github.com/gradium-ai/xn-ptts), Apache 2.0 weights), so it needs no GPU and nothing leaves the machine. On this laptop (Intel i7, CPU only) it renders a passage about 7× faster than it plays, and does the same when limited to two CPUs. The server generates one clip at a time and answers 429 to a request that arrives meanwhile (`PTTS_MAX_CONCURRENT_REQUESTS`, default 1); raising it on a small machine makes each clip slower, so the deployments leave it alone.
+
+Docker Compose and the kind and AWS deployments run it beside the web app and show its voices without further settings: Compose adds a `phonon` service (loopback port 8880, `PHONON_TAG` picks the image version), and each cluster adds a `phonon` pod that only the web pod can reach. The model, about 65 MB, is downloaded from Hugging Face on first start. For `npm run dev`, start the server and point the app at it in `apps/web/.env.local`:
+
+```sh
+docker run --rm -p 127.0.0.1:8880:8880 -e PTTS_LANG=en -e PTTS_QUANT=q8 ghcr.io/gradium-ai/ptts-openai-server:0.7.0
+```
+
+```sh
+VITE_PHONON_BASE=/api/phonon
+PHONON_URL=http://127.0.0.1:8880
+```
+
+The Voices page lists the 37 voices the server offers under **Phonon**: 12 American, 13 British and 12 character voices. The list follows the server, so a voice added there appears after a reload, and a saved document keeps its voice if the server later drops it. The proxy at `/api/phonon` forwards only the voice list and speech generation, and the server needs no key. Zoey is the app's default voice until you pick another; a deployment without Phonon defaults to KittenTTS's Bella on VoiceStudio.
+
+Phonon speaks the same OpenAI-style `POST /v1/audio/speech` as VoiceStudio and returns MP3. Each device sends it one request at a time, on a queue separate from VoiceStudio's, and asks again when another device's clip is in progress. About a minute is generated ahead as for other free voices, and clips are cached with the model name. **Prepare audio** and Library preparation run on the web server as for VoiceStudio voices: the Phonon server is a preparation machine of its own (shown as **Phonon** in the queue) that takes Phonon readings and nothing else, one whole reading at a time, and pauses while someone is listening to a Phonon voice. The audio is kept on the server and shared with every device. English only: other languages are read with English pronunciation.
 
 ### Fish Audio voices
 
@@ -336,9 +370,9 @@ Daily aggregates live in `readaloud:usage` in this browser's local storage. They
 
 ### Slow engines (cloned voices on CPU)
 
-Starting a VoiceStudio reading from Compose (typed text, an uploaded file, a URL, or the clipboard) automatically prepares the whole document in the background while playback starts. The player shows preparation progress; use **Stop preparing** in its menu to cancel. Browser-only playback and paid voices keep their usual playback behavior.
+Audio is prepared only when you ask. Opening or listening to a reading, from Compose, the clipboard, or a book's chapters, generates just the passages being played. To prepare a whole VoiceStudio or Phonon reading, choose **Prepare audio** in the player menu, or use the Library's **Prepare** actions. The player shows preparation progress; use **Stop preparing** in its menu to cancel.
 
-The Library shows listening progress and a separate preparation ring for each cached voice, in both list and card views. Coverage comes from audio saved on this device and follows the selected speech model; clearing or evicting cached audio reduces it. Select documents, choose **Prepare selected**, and check one or more voices to queue every document/voice combination. Each document also has a **Prepare audio** action. VoiceStudio prepares one whole reading per machine, finishing it before starting the next voice on that machine. With only the primary configured, local readings run one at a time. The Mac mini is the preferred machine: new readings always go there whenever its single preparation slot is free. With a compatible secondary configured, Omarchy can run one overflow reading while the Mac is occupied, and the rest wait in the server queue. Each machine runs at most one preparing reading at a time, and a busy Mac takes its next queued reading as soon as its current one finishes. When the Mac frees up, it takes the oldest reading in a voice that only it has before readings Omarchy could also prepare, so those can run on Omarchy in the meantime. The queue shows the actual machine name, waiting readings (with the machine a reading is waiting for when only one can prepare it), and audio being saved on this device. OpenAI and Fish keep independent pools of up to three readings each. The queue is saved on this device: reopening or refreshing the app resumes interrupted and queued readings with their original voices and model settings, reusing completed audio. Cached audio downloads bypass synthesis. Identical readings share server work, and cancelling one keeps that work running while another reading still needs it. Active VoiceStudio readings render on the server while the app is inactive; keep the tab open to advance through queued readings or prepare paid voices. Saved audio is reused on subsequent preparations. Preparing voices does not change the document's listening voice or saved position. Browser speech is live and cannot be prepared.
+The Library shows listening progress and a separate preparation ring for each cached voice, in both list and card views. Coverage comes from audio saved on this device and follows the selected speech model; clearing or evicting cached audio reduces it. Select documents, choose **Prepare selected**, and check one or more voices to queue every document/voice combination. Each document also has a **Prepare audio** action. VoiceStudio prepares one whole reading per machine, finishing it before starting the next voice on that machine. With only the primary configured, local readings run one at a time. The Mac mini is the preferred machine: new readings always go there whenever its single preparation slot is free. With a compatible secondary configured, Omarchy can run one overflow reading while the Mac is occupied, and the rest wait in the server queue. Each machine runs at most one preparing reading at a time, and a busy Mac takes its next queued reading as soon as its current one finishes. When the Mac frees up, it takes the oldest reading in a voice that only it has before readings Omarchy could also prepare, so those can run on Omarchy in the meantime. The queue shows the actual machine name, waiting readings (with the machine a reading is waiting for when only one can prepare it), and audio being saved on this device. Phonon readings wait for the Phonon server instead, which prepares one at a time alongside the VoiceStudio machines. OpenAI and Fish keep independent pools of up to three readings each, generated from this device. The queue is saved on this device: reopening or refreshing the app resumes interrupted and queued readings with their original voices and model settings, reusing completed audio. Cached audio downloads bypass synthesis. Identical readings share server work, and cancelling one keeps that work running while another reading still needs it. Active VoiceStudio and Phonon readings render on the server while the app is inactive; keep the tab open to advance through queued readings or prepare paid voices. Saved audio is reused on subsequent preparations. Preparing voices does not change the document's listening voice or saved position. Browser speech is live and cannot be prepared.
 
 Cloning engines such as OmniVoice are built for a GPU. On a CPU they can take ten times longer to generate a passage than to play it, so the reader pauses between passages while the next one renders (the player's spinner shows the wait). The app detects this and points to **Prepare audio** in the player menu (offered for VoiceStudio voices only). This submits the whole document to the web server as one background job, starting at the current passage and wrapping around. Rendering continues when the phone switches apps, locks, or closes the page. Progress reconnects when the reading is reopened, and playback reuses completed audio. **Stop preparing** cancels the remaining passages; a passage already rendering can finish.
 
@@ -401,6 +435,55 @@ Opening or preparing a reading uses the saved **Settings → Summaries** connect
 Descriptions are saved and synced with the document, reused across voices, and used by live, browser, prepared, and downloaded audio. If vision is unavailable, the reader explicitly uses the article's caption or alt text; without either, it announces the unavailable description and continues. Broken images never stop the article. Up to eight uncached visuals are described per opening, two at a time, with a one-minute overall deadline; remaining visuals use article metadata. Previously saved descriptions remain available offline, though remote images themselves may not.
 
 This applies to new imports. Re-import older articles whose images were already stripped. Fetching cannot recover diagrams drawn only by page JavaScript or canvas, and a provider may not be able to load protected or unsupported image URLs. Inline SVG requires a browser with canvas support. Large embedded visuals are bounded to keep the shared library small. Old positions in documents with newly recognized visual blocks restart once because sentence indices changed.
+## Books
+
+A book published as a website, one page per chapter, is read as a book rather than as a pile of articles. When a fetched page lists its chapters in order, the Reader offers to add them: paste the contents page and the chapters take its place, or paste any chapter and the others join it. Each chapter is its own document, so it keeps its own position, voice, prepared audio and summary.
+
+The Library shows the book as one row with how many chapters are read and how long the whole book is; open it for the chapters in order, press play to continue at the first unfinished one, or prepare audio for all of them at once. A lone chapter stays an ordinary row that names its book. In the Reader a chapter says where it sits ("Chapter 8 of 27"), links to the chapters either side at the foot of the text, and points to the next one when it finishes. A book with chapters missing can fetch them later, from its Library row or from any of its chapters.
+
+Detection (`src/lib/book.ts`) looks for a run of same-site links numbered 1, 2, 3… in their text or addresses, anywhere on the page including its navigation, and needs one more sign that it is a contents list: numbered addresses, "Chapter"-style labels, a `rel="next"`/`rel="prev"` link into the run, or a navigation or contents container. The page is a chapter when it is in the run and the contents page when the run sits beneath its address. Every page of a book yields the same book id (from the first chapter's address), so chapters imported at different times or on different devices still meet. Sites that number chapters only with CSS, or that list them only after running JavaScript, are not detected.
+
+### Courses
+
+A course page is read the same way, with lectures for chapters. When a page links a numbered series of PDFs, one per lecture (`slides/lecture01.pdf`, `lec3.pdf`, `05-trees.pdf`), the Reader offers to add them as a shelf: paste the course page and its decks take its place, in order, each read as [a slide deck](#pdfs). The files can be kept on another site than the page, and a number may be skipped (a lecture with no slides).
+
+- A lecture is named by its row of the schedule, since its link usually says only "Slides": an element whose class says title or topic, then a heading or bold text, then the first text in the row that is not a date, a number or a label. A link that names its lecture ("Lecture 3: Trees") is used as written. Failing all of those it is "Lecture N".
+- The course is named by the page's main heading.
+- A course posts lectures as it runs, so its Library row has **Check for new lectures**. This reads the course page again, adds the decks that have appeared, and renumbers the ones already shelved if the list has shifted. Each lecture remembers the course page for this, because a PDF cannot list its siblings.
+- A series is a course when its files or folder say so (`lecture`, `lec`, `slides`, `week`, `class`, `session`); numbered `chapter` or `part` PDFs make a book with chapters.
+
+Lectures are numbered by their place among the decks that exist, so the deck after a skipped lecture is "Lecture 14" even if its file is `lecture15.pdf`. Only PDFs are followed: recordings, readings and PowerPoint files are left on the course page.
+
+### Books from the Internet Archive
+
+Paste a link to a book on [archive.org](https://archive.org) (its details page, or any page of its viewer) and the book itself is imported, not the viewer's page. The Reader opens the first chapter and offers the others, which are added at once since the whole text has already arrived. `src/lib/archive.ts` asks the Archive's metadata API which files the item has, downloads the full text (a scan's OCR, or the largest plain-text transcription), and takes title, author and date from the item's record. Links to audio, video and collections are still read as pages.
+
+Only books that are free to download can be imported. A book the Archive lends (most in-copyright scans) keeps its text locked; the app says so and imports nothing. The same work usually has a public-domain edition, and a Project Gutenberg transcription hosted on the Archive reads far better than a scan.
+
+`src/lib/bookText.ts` turns the one long text into chapters. It removes page numbers and running headers, rejoins lines, hyphenated words and paragraphs cut by a page break, drops Project Gutenberg's licence, Google's notice, the title page, the contents list and whatever follows "THE END", and cuts at headings such as "CHAPTER II", "Chapter 3. The Arrival", "STAVE ONE" or "LETTER IV" (parts, books and volumes when there are no chapters). Each chapter opens with its heading, which is read out. OCR misreads headings too, so numerals are corrected against the sequence ("CHAPTER XL" after X is 11), text before the first heading found is kept as the first chapter or the preface, and a heading the scan lost leaves two chapters as one. A book with no recognisable headings is cut into parts of about 25 minutes. Misread words in a scan are not corrected and are read as they stand.
+
+Imported pages keep their structure: headings are stored as Markdown headings (`## Title`) and shown as headings without the marker being read out, callouts written as `<aside>` notes are kept while sidebars are dropped, and tables are read row by row under their column headings. This applies to new imports; headings typed or pasted as Markdown are recognised in any document.
+
+## PDFs
+
+A link to a PDF, or a PDF chosen with **Upload file**, is read by the server and opens like any other page. The browser never parses the file: `/api/fetch` answers a PDF link with an HTML page of its text, and `POST /api/fetch/pdf` does the same for an uploaded file (`vite.pdf.ts`, up to 60 MB). The app needs its server for this, so an iOS build that runs its own files cannot open PDFs.
+
+- **Slide decks** (wide pages) become one section per slide. Text set clearly larger than the rest of a slide is its heading; the bullets under it are read as one paragraph, a sentence each. A slide exported once per animation step is kept only in its finished state. A slide with no title is headed "Slide N", and the line crediting a picture's source is left out.
+- **Papers and handouts** (tall pages) become headings and paragraphs. Lines are joined across hyphenation, columns and page breaks, and running headers, footers and page numbers are dropped. Text set sideways, such as arXiv's margin stamp, is left out.
+
+A scanned PDF has no text layer and is refused. Section headings set in the body's size are read as ordinary paragraphs, and a paper's reference list is read with the rest. A diagram's scattered labels are read once as a short list, and its stray symbols and numbers are dropped.
+
+### Slide pictures
+
+A slide that shows more than its text carries a picture of the whole slide, shown in the Reader under the slide's title and described aloud before the slide's own words.
+
+- **Which slides.** The server reads what each page draws. A slide counts when pictures cover at least 3% of it, or when it draws 40 more shapes than the deck's plainest slides do (a diagram, not a rule or a text box). A picture in the same place on at least half the slides is the template's logo or background and does not count. Slides with only text stay as text. A slide with a picture and no words is kept, headed "Slide N".
+- **The pictures.** Each such page is drawn as a 1280-pixel-wide JPEG with pdf.js and `@napi-rs/canvas` (`drawPages` in `vite.pdf.ts`) and kept in `LIBRARY_DATA_DIR/slides/<deck>/<page>.jpg`, where `<deck>` is a fingerprint of the file, so importing a deck again reuses them. Drawing happens in the background after the import answers, one deck at a time; the PDF is kept only until its pictures are drawn, and a restart picks a half-drawn deck up again. `GET /api/slides/<deck>/<page>.jpg` serves a picture and waits for one that is still being drawn (`vite.slides.ts`). Budget about 100 KB a slide. Nothing removes a deck's pictures when its document is deleted.
+- **The descriptions.** These come from the same vision model as article images (`VITE_VISUAL_MODEL`, through the OpenCode key in **Settings → Summaries**), with a prompt for slides: say what the slide shows beyond its text, which the model is given, in at most 70 words. The model cannot reach this server, so the picture is sent to it as data. Describing starts when you start listening, not when the deck is opened, runs up to three slides at a time from your place onwards, and covers every pictured slide of the deck (an article stops at eight images). Descriptions take the place of the stand-in sentence as they arrive and are saved with the document. **Prepare audio** describes the whole deck first, so the audio keeps its wording.
+- **Until described**, or with no key, a slide's picture is read as "This slide has a picture."
+
+Keynote and other macOS exports draw letter pairs such as "tt" and "ti" as one glyph and record the letters beside it as replacement text. pdf.js ignores that text, which turns "patterns" into "pa=erns", so `patches/pdfjs-dist@6.5.438.patch` makes it report the replacement. The version is pinned to match the patch; re-create the patch with `pnpm patch` when upgrading.
+
 ## Library catalogue
 
 Each document carries a catalogue record for later research. The Reader's **Details** button (books icon, in the header) opens it above the text: title, the original link (with a button to open it), author, published date, site, category, summary status, the page's description, and your notes. Fields save when they lose focus (Enter for one-line fields, Escape discards) and are shared through library sync. **Copy citation** copies `Author (Date). Title. Site. Link`.

@@ -59,6 +59,12 @@ variable "typesafe_api_key" {
   default   = null
 }
 
+variable "readaloud_access_token" {
+  type      = string
+  sensitive = true
+  default   = null
+}
+
 locals {
   env = {
     voicestudio_remote_url           = var.voicestudio_remote_url
@@ -74,5 +80,6 @@ locals {
     fish_api_key                     = var.fish_api_key
     llm_api_key                      = var.llm_api_key
     typesafe_api_key                 = var.typesafe_api_key
+    access_token                     = var.readaloud_access_token
   }
 }

@@ -49,6 +49,7 @@ describe("usage ledger", () => {
     expect(priceUsage("openai", "tts-1", 100, 200).costUsd).toBeCloseTo(0.0015);
     expect(priceUsage("openai", "tts-1-hd", 100, 200).costUsd).toBeCloseTo(0.003);
     expect(priceUsage("openai", "future-model", 100, 200).costUsd).toBeNull();
+    expect(priceUsage("phonon", "gradium/phonon-31m-en", 100, 200)).toEqual({ costUsd: null, pricing: "Server costs are not reported" });
   });
 
   it("accumulates concurrent requests and retains days, months and models", async () => {

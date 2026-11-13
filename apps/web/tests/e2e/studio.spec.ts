@@ -3,17 +3,17 @@ import AxeBuilder from "@axe-core/playwright";
 
 test.use({ launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } });
 
-type MockProfile = { id: string; name: string; kind: string; language: string; personality?: string };
+type MockProfile = { id: string; name: string; kind: string; language: string; personality?: string; ref_audio_path?: string };
 const LIBRARIAN_PROFILE: MockProfile = { id: "voice-3", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" };
 
 async function mockStudio(page: Page, extraProfiles: MockProfile[] = []) {
   const profiles: MockProfile[] = [{ id: "voice-1", name: "My narrator", kind: "clone", language: "English" }, ...extraProfiles];
-  const calls: { path: string; body: string }[] = [];
+  const calls: { path: string; body: string; method: string }[] = [];
   await page.route("**/api/vs/**", async (route) => {
     const req = route.request();
     const url = new URL(req.url());
     const path = url.pathname.replace("/api/vs", "");
-    calls.push({ path, body: req.postData() || "" });
+    calls.push({ path, body: req.postData() || "", method: req.method() });
     let body: unknown;
     if (path === "/setup/status") body = { models_ready: true };
     else if (path === "/dictation/readiness") body = { ready: true };
@@ -22,6 +22,8 @@ async function mockStudio(page: Page, extraProfiles: MockProfile[] = []) {
     else if (path === "/v1/audio/voices") body = { voices: profiles.map((p) => ({ ...p, type: "profile" })), engines: [{ id: "kittentts", available: true }] };
     else if (path === "/profiles" && req.method() === "GET") body = profiles;
     else if (path === "/profiles") { body = { id: "voice-2", name: "New voice", kind: req.postData()?.includes('name="vd_states"') ? "design" : "clone", language: "English" }; profiles.push(body as MockProfile); }
+    else if (/^\/profiles\/[^/]+\/audio$/.test(path) && req.method() === "PUT") { const profile = profiles.find((p) => p.id === path.split("/")[2]); if (!profile) return route.fulfill({ status: 404, json: { detail: "That voice profile doesn't exist." } }); profile.ref_audio_path = `${profile.id}-9f8e7d6c.webm`; if (req.postData()?.includes('name="name"')) profile.name = "Renamed narrator"; body = profile; }
+    else if (/^\/profiles\/[^/]+$/.test(path) && req.method() === "GET") { const profile = profiles.find((p) => p.id === path.split("/")[2]); if (!profile) return route.fulfill({ status: 404, json: { detail: "That voice profile doesn't exist." } }); body = profile; }
     else if (path.startsWith("/profiles/") && req.method() === "DELETE") { const id = path.slice("/profiles/".length); const at = profiles.findIndex((p) => p.id === id); if (at < 0) return route.fulfill({ status: 404, json: { detail: "Profile not found" } }); profiles.splice(at, 1); body = { deleted: id }; }
     else if (path === "/design/describe") body = { attrs: { Gender: "female", Pitch: "low pitch" }, instruct: "female, low pitch", unmatched: ["raspy"] };
     else if (path === "/archetypes") body = { total: 1, items: [{ id: "librarian", name: "The Librarian", language: "English", use_case: "narration", instruct: "female, low pitch, british accent" }] };
@@ -93,7 +95,9 @@ test("Voices sends a gallery voice back to Studio but never offers that for clon
   const librarian = page.locator('[data-voice="voice-3"]');
   await expect(librarian.getByText("designed", { exact: true })).toBeVisible();
   await expect(page.locator('[data-voice="voice-1"]').getByRole("button", { name: /back to Studio/ })).toHaveCount(0);
-  // The Librarian is the default voice once VoiceStudio lists it.
+  // The Phonon stub does not offer Zoey, so the default falls back to Bella; sending back the selected voice returns to it.
+  await expect(page.locator('[data-voice="expr-voice-2-f"]').getByRole("button", { name: "Selected" })).toBeVisible();
+  await librarian.getByRole("button", { name: "Use" }).click();
   await expect(librarian.getByRole("button", { name: "Selected" })).toBeVisible();
   await librarian.getByRole("button", { name: "Send The Librarian back to Studio" }).click();
   await expect(page.getByText("The Librarian sent back to the Studio gallery")).toBeVisible();
@@ -104,6 +108,57 @@ test("Voices sends a gallery voice back to Studio but never offers that for clon
   await page.getByRole("link", { name: "Voice gallery" }).click();
   await expect(page.getByRole("article", { name: "The Librarian" })).toBeVisible();
   await expect(page.getByRole("article", { name: "The Librarian" }).getByRole("button", { name: "Add to Voices" })).toBeEnabled();
+});
+
+test("deletes a clone only after confirming", async ({ page }) => {
+  const calls = await mockStudio(page);
+  await page.goto("/voices");
+  const narrator = page.locator('[data-voice="voice-1"]');
+  await narrator.getByRole("button", { name: "Delete My narrator" }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete My narrator?" });
+  await expect(dialog.getByText("Its reference recording is removed")).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(narrator).toBeVisible();
+  expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  await narrator.getByRole("button", { name: "Delete My narrator" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete voice" }).click();
+  await expect(page.getByText("My narrator deleted")).toBeVisible();
+  await expect(narrator).toHaveCount(0);
+  expect(calls.some((c) => c.method === "DELETE" && c.path === "/profiles/voice-1")).toBe(true);
+});
+
+test("re-records a clone in place, keeping its id", async ({ page }) => {
+  const calls = await mockStudio(page);
+  await page.goto("/voices");
+  await page.locator('[data-voice="voice-1"]').getByRole("button", { name: "Re-record My narrator" }).click();
+  await expect(page).toHaveURL(/\/studio\/clone\?voice=voice-1$/);
+  await expect(page.getByRole("heading", { name: "Re-record My narrator" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Replace recording" })).toBeDisabled();
+  await page.getByLabel("New reference audio").setInputFiles({ name: "take-2.wav", mimeType: "audio/wav", buffer: Buffer.from("test") });
+  await page.getByRole("button", { name: "Replace recording" }).click();
+  await expect(page.getByText("My narrator now speaks with the new recording.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Saved" })).toBeDisabled();
+  const put = calls.filter((c) => c.method === "PUT" && c.path === "/profiles/voice-1/audio");
+  expect(put).toHaveLength(1);
+  expect(put[0].body).toContain('name="ref_audio"');
+  // An unchanged name is not resent; no new voice is created.
+  expect(put[0].body).not.toContain('name="name"');
+  expect(calls.some((c) => c.method === "POST" && c.path === "/profiles")).toBe(false);
+  await page.getByRole("link", { name: "Back to My narrator in Voices" }).click();
+  await expect(page.locator('[data-voice="voice-1"]')).toBeVisible();
+  // Audio cached for the old recording no longer matches.
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("readaloud:voice-revisions") || "{}"))).toEqual({ "voice-1": "9f8e7d6c" });
+});
+
+test("designed voices can be deleted but not re-recorded", async ({ page }) => {
+  await mockStudio(page, [{ id: "voice-4", name: "Soft reader", kind: "design", language: "English" }]);
+  await page.goto("/voices");
+  const designed = page.locator('[data-voice="voice-4"]');
+  await expect(designed.getByRole("button", { name: "Delete Soft reader" })).toBeVisible();
+  await expect(designed.getByRole("button", { name: /Re-record/ })).toHaveCount(0);
+  await page.goto("/studio/clone?voice=voice-4");
+  await expect(page.getByText("Soft reader is a designed voice")).toBeVisible();
 });
 
 test("a refused removal keeps the voice and explains why", async ({ page }) => {
@@ -125,7 +180,7 @@ test("transcribes a file and saves edited text to Library", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Download subtitles" })).toBeDisabled();
   await page.getByRole("button", { name: "Save to Library" }).click();
   await expect(page).toHaveURL(/\/library$/);
-  await expect(page.getByText("meeting", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-screen="library"]').getByText("meeting", { exact: true })).toBeVisible();
 });
 
 test("dubs a video through upload, script review and resumable render", async ({ page }) => {

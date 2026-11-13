@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
-import { FISH_MODEL, OPENAI_MODEL, hasApi, hasFish, hasOpenAI } from "../engine/providers";
+import { FISH_MODEL, OPENAI_MODEL, PHONON_MODEL, hasApi, hasFish, hasOpenAI, hasPhonon } from "../engine/providers";
 import { monthKey } from "../lib/dates";
 import { formatUsd, getUsageSnapshot, summarizeUsage, USAGE_EVENT, USAGE_KEY, type UsageProvider, type UsageRow } from "../lib/usage";
 
@@ -8,6 +8,7 @@ const providers: { id: UsageProvider; name: string; configured: () => boolean; m
   { id: "openai", name: "OpenAI", configured: hasOpenAI, model: OPENAI_MODEL, href: "https://platform.openai.com/usage", link: "OpenAI usage dashboard" },
   { id: "fish", name: "Fish Audio", configured: hasFish, model: FISH_MODEL, href: "https://fish.audio/", link: "Fish Audio account" },
   { id: "voicestudio", name: "VoiceStudio", configured: hasApi },
+  { id: "phonon", name: "Phonon", configured: hasPhonon, model: PHONON_MODEL },
   { id: "unknown", name: "Earlier usage", configured: () => false },
 ];
 const monthLabel = (month: string) => new Date(`${month}-01T12:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" });
@@ -110,7 +111,7 @@ export function ApiUsage() {
       <div className="mt-2 flex flex-col gap-2">
         <p className="m-0">Completed speech requests include prefetched sentences, even if you do not listen to them. Replaying cached audio and using the browser voice add no API charges. Failed or interrupted responses may still be billed by the provider and are not included here.</p>
         <p className="m-0">OpenAI token totals use reported input and audio output tokens. Fish Audio bills by UTF-8 bytes; TTS-1 models bill by characters. Missing tokens and unknown prices stay unavailable. Earlier character counts are preserved, but their costs cannot be reconstructed.</p>
-        <p className="m-0">History stays in this browser and is removed if you clear site data. It combines keys used with each provider. Other devices, other apps, and Studio operations such as dubbing or transcription are not included. VoiceStudio server and hosting costs are not reported.</p>
+        <p className="m-0">History stays in this browser and is removed if you clear site data. It combines keys used with each provider. Other devices, other apps, and Studio operations such as dubbing or transcription are not included. VoiceStudio and Phonon server and hosting costs are not reported.</p>
         <p className="m-0">Estimates use list prices checked November 5, 2026, and retain the rate used at generation time. Account dashboards show your actual charges, credits, and discounts.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <a className="text-accent hover:underline" href="https://developers.openai.com/api/docs/models/gpt-4o-mini-tts" target="_blank" rel="noreferrer">OpenAI pricing</a>

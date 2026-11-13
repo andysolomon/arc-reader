@@ -8,10 +8,12 @@ import { siteFavicons } from "./vite.favicon";
 import { audioPreparation } from "./vite.prepare";
 import { sharedLibrary } from "./vite.library";
 import { SpeechActivity } from "./vite.speech-activity";
+import { voiceAvatars } from "./vite.avatars";
 import { llm } from "./vite.llm";
 import { jev } from "./vite.jev";
 import { shellFallback } from "./vite.shell";
-import { serverUrl, UNREACHABLE_PAGE } from "./capacitor.config";
+import { publicAccess } from "./vite.gate";
+import { serverUrl, startUrl, UNREACHABLE_PAGE } from "./capacitor.config";
 
 export default defineConfig(({ mode }) => {
   // Server-side only (no VITE_ prefix): never reaches the bundle.
@@ -21,15 +23,17 @@ export default defineConfig(({ mode }) => {
   const proxy = voiceStudioProxy(env, activity);
   return {
   plugins: [
+    publicAccess(env),
     react(),
     tailnetUrl(),
-    pageFetch(),
+    pageFetch(env),
     siteFavicons(),
     audioPreparation(env, activity),
     sharedLibrary(env),
+    voiceAvatars(env),
     llm(env),
     jev(env),
-    shellFallback(serverUrl, UNREACHABLE_PAGE),
+    shellFallback(serverUrl, UNREACHABLE_PAGE, startUrl),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icons/*.svg", "icons/*.png", "splash.svg"],
@@ -55,7 +59,7 @@ export default defineConfig(({ mode }) => {
           params: { title: "title", text: "text", url: "url" },
         },
         shortcuts: [
-          { name: "Compose", url: "/", description: "Paste something to listen to" },
+          { name: "Compose", url: "/compose", description: "Paste something to listen to" },
           { name: "Library", url: "/library" },
         ],
       },

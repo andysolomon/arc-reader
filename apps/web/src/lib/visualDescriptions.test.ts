@@ -46,6 +46,14 @@ describe("image understanding", () => {
     expect(prepared.visualDescriptions?.[visualKey(other)]).toBe(description);
     expect(prepared.visualDescriptions?.[visualKey(visual)]).toBeUndefined();
   });
+  it("counts the descriptions done so a bar can show how far along they are", async () => {
+    const other = { ...visual, src: "https://example.com/other.png" };
+    const record = { ...rec, text: rec.text + '\n\n' + visualBlock(other) };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ configured: true })).mockResolvedValueOnce(new Response("unavailable", { status: 400 })).mockResolvedValueOnce(response()));
+    const progress = vi.fn();
+    await prepareVisualDescriptions(record, record.text, new AbortController().signal, progress);
+    expect(progress.mock.calls.map(([, step]) => step)).toEqual([{ done: 0, total: 2 }, { done: 1, total: 2 }, { done: 2, total: 2 }]);
+  });
   it("cancellation stops waiting and does not save partial descriptions", async () => {
     const controller = new AbortController();
     const fetch = vi.fn().mockResolvedValueOnce(Response.json({ configured: true })).mockImplementationOnce((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))));
@@ -55,5 +63,65 @@ describe("image understanding", () => {
     controller.abort();
     await expect(task).rejects.toThrow();
     expect(fetch.mock.calls[1][1].signal.aborted).toBe(true);
+  });
+});
+
+describe("describing a deck's slides", () => {
+  const slide = (page: number): ArticleVisual => ({ kind: "slide", src: `/api/slides/${"a".repeat(32)}/${page}.jpg`, alt: `Slide ${page}: Topic ${page}`, caption: "" });
+  const deck = (pages: number): DocRecord => ({ ...rec, id: "deck", title: "Agent Design",
+    text: Array.from({ length: pages }, (_, i) => `## Topic ${i + 1}\n\n${visualBlock(slide(i + 1))}\n\nWhat slide ${i + 1} says.`).join("\n\n") });
+  /** Answers each slide with a description naming its page, and records the order they were asked in. */
+  const model = () => {
+    const asked: number[] = [];
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/llm/config") return Response.json({ configured: true });
+      if (url.startsWith("/api/slides/")) return new Response(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { "content-type": "image/jpeg" } });
+      const page = Number(JSON.parse(JSON.parse(init!.body as string).input[0].content[0].text).slide.match(/Slide (\d+)/)[1]);
+      asked.push(page);
+      return response(`Slide ${page} shows a diagram of its topic.`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    return { asked, fetch };
+  };
+
+  it("sends the slide's picture itself, with the words that will follow it", async () => {
+    const { fetch } = model();
+    const prepared = await prepareVisualDescriptions(deck(2), deck(2).text, new AbortController().signal, vi.fn(), { all: true });
+    expect(prepared.visualDescriptions).toEqual({ [visualKey(slide(1))]: "Slide 1 shows a diagram of its topic.", [visualKey(slide(2))]: "Slide 2 shows a diagram of its topic." });
+    const body = JSON.parse(fetch.mock.calls.find(([url]) => url === "/api/llm/v1/responses")![1]!.body as string);
+    // The model cannot reach this server, so it is given the picture, not its address.
+    expect(body.input[0].content[1].image_url).toBe("data:image/jpeg;base64,/9j/");
+    expect(body.instructions).toContain("one slide from a lecture deck");
+    // Not the next slide's title or words.
+    expect(JSON.parse(body.input[0].content[0].text)).toEqual({ deck: "Agent Design", slide: "Slide 1: Topic 1", text: "What slide 1 says." });
+  });
+
+  it("describes every slide when asked to, from the listener's place on, and a handful otherwise", async () => {
+    const some = model();
+    const few = await prepareVisualDescriptions(deck(20), deck(20).text, new AbortController().signal, vi.fn());
+    expect(Object.keys(few.visualDescriptions ?? {})).toHaveLength(8);
+    expect(some.asked).toHaveLength(8);
+    const all = model();
+    const whole = await prepareVisualDescriptions(deck(20), deck(20).text, new AbortController().signal, vi.fn(), { all: true, heard: () => 12 });
+    expect(Object.keys(whole.visualDescriptions ?? {})).toHaveLength(20);
+    // Three at a time, beginning with the slide being listened to, then back round to the start.
+    expect(all.asked.slice(0, 3).sort((a, b) => a - b)).toEqual([13, 14, 15]);
+    expect(all.asked.slice(8).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  });
+
+  it("hands over the first description at once and the rest as they come", async () => {
+    model();
+    const batches: string[][] = [];
+    const whole = await prepareVisualDescriptions(deck(6), deck(6).text, new AbortController().signal, vi.fn(), { all: true, found: (found) => { batches.push(Object.values(found)); } });
+    expect(batches.length).toBeGreaterThanOrEqual(2);
+    expect(batches[0]).toHaveLength(1);
+    expect(batches.flat().sort()).toEqual(Object.values(whole.visualDescriptions ?? {}).sort());
+    // An article's pictures still arrive together.
+    const article: ArticleVisual[] = [1, 2, 3].map((n) => ({ kind: "image", src: `https://example.com/${n}.png`, alt: "", caption: "" }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/llm/config" ? Response.json({ configured: true }) : response()));
+    const together: number[] = [];
+    const record = { ...rec, text: article.map(visualBlock).join("\n\nBetween.\n\n") };
+    await prepareVisualDescriptions(record, record.text, new AbortController().signal, vi.fn(), { all: true, found: (found) => { together.push(Object.keys(found).length); } });
+    expect(together).toEqual([3]);
   });
 });

@@ -37,6 +37,9 @@ export interface EngineSnapshot {
   seeks: number;
 }
 
+/** Passages ready so far; `unreachable` while the server that prepares them is not answering. */
+export type PrepareProgress = (done: number, total: number, status?: { unreachable?: boolean }) => void;
+
 export interface EngineOptions {
   /** Engine for a voice: presets name their own, cloned profiles use the chosen one, local is local */
   engine: (voiceId: string) => EngineId;
@@ -46,7 +49,7 @@ export interface EngineOptions {
   isProfileVoice: (voiceId: string) => boolean;
   offline: () => boolean;
   /** Submit all passages as one server-owned job before hydrating the local cache. */
-  prepareAudio?: (requests: SynthOptions[], start: number, progress?: (done: number, total: number) => void, signal?: AbortSignal) => Promise<void>;
+  prepareAudio?: (requests: SynthOptions[], start: number, progress?: PrepareProgress, signal?: AbortSignal) => Promise<void>;
   onRejected: (message: string) => void;
   onOffline: () => void;
   onOnline: () => void;
@@ -55,8 +58,9 @@ export interface EngineOptions {
   /**
    * The chosen voice could not be generated (server down, busy, or rejecting).
    * Playback stops; the host decides whether to retry or switch to the browser voice.
+   * `unreachable` is set when no answer came back at all, rather than a refusal.
    */
-  onUnavailable: (message: string) => void;
+  onUnavailable: (message: string, unreachable: boolean) => void;
   /** Once per load: the voice generates slower than it plays (factor = render seconds ÷ audio seconds), so playback will stall between sentences. */
   onSlow: (factor: number) => void;
 }
@@ -284,7 +288,7 @@ export class PlaybackEngine {
       this.playing = false;
       this.emit();
       this.persistSoon(0);
-      this.opts.onUnavailable(unavailableMessage(e));
+      this.opts.onUnavailable(unavailableMessage(e), e instanceof ApiUnreachable);
       return;
     }
     if (token !== this.token) return;
@@ -382,7 +386,7 @@ export class PlaybackEngine {
    * from the start, so a slow engine never stalls playback. Safe alongside playback:
    * the server job owns generation and the browser hydrates completed clips.
    */
-  async prepare(onProgress?: (done: number, total: number) => void, signal?: AbortSignal): Promise<void> {
+  async prepare(onProgress?: PrepareProgress, signal?: AbortSignal): Promise<void> {
     const doc = this.doc;
     if (!doc) return;
     const n = this.passageList.length;

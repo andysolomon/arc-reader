@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { hostOf } from "../lib/fetchUrl";
 import { followLinks, linksPassed, placeLinks, type LinkFollower, type PlacedLink } from "../lib/linkPlaces";
-import { linksInMarkdown, type DocLink } from "../lib/links";
+import { linksInMarkdown, uniqueLinks, type DocLink } from "../lib/links";
 import { usePlayer, type PlayerState } from "./player";
 import { useSettings } from "./settings";
 import { toast } from "./toast";
@@ -13,12 +13,13 @@ let cache: { sentences: unknown; links: DocLink[] | undefined; text: string; pla
 
 /**
  * The open reading's links in the order they are read. Empty while its summary is read.
- * Documents saved before links were kept still get the addresses written into their text.
+ * Documents saved before links were kept still get the addresses written into their text,
+ * and links saved before placeholders were left out are filtered here.
  */
 export function docLinks({ doc, record, summary }: Reading): PlacedLink[] {
   if (!doc || !record || record.id !== doc.id || summary) return NONE;
   if (cache?.sentences !== doc.sentences || cache.links !== record.links || cache.text !== record.text) {
-    const placed = placeLinks(record.links ?? linksInMarkdown(record.text), doc.sentences);
+    const placed = placeLinks(record.links ? uniqueLinks(record.links) : linksInMarkdown(record.text), doc.sentences);
     cache = { sentences: doc.sentences, links: record.links, text: record.text, placed: placed.length ? placed : NONE };
   }
   return cache.placed;

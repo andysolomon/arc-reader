@@ -117,6 +117,15 @@ describe("shared server library", () => {
     ]) expect(() => service.sync({ changes: [{ kind: "doc", record: record as unknown as DocRecord }] })).toThrow("Invalid library change");
   });
 
+  it("stores a chapter's place in its book and rejects malformed ones", async () => {
+    const book = { id: "book:25aafcfe", title: "Backend from First Principles", chapter: 8, chapters: 27 };
+    const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), book } }] });
+    expect(result.docs[0].book).toEqual(book);
+    for (const bad of [{ ...book, id: "" }, { ...book, title: 5 }, { ...book, chapter: 0 }, { ...book, chapter: 1.5 }, { ...book, chapters: "27" }, "book"]) {
+      expect(() => service.sync({ changes: [{ kind: "doc", record: { ...doc("b"), book: bad } as unknown as DocRecord }] })).toThrow("Invalid library change");
+    }
+  });
+
   it("serves JSON sync over HTTP and rejects cross-site writes and malformed requests", async () => {
     const handler = libraryMiddleware(service);
     server = createServer((req, res) => { req.url = req.url?.replace("/api/library", ""); handler(req, res, () => {}); });
@@ -130,5 +139,32 @@ describe("shared server library", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect((await response.json()).docs[0].id).toBe("http");
+    // Large answers are compressed for clients that accept it; fetch undoes it.
+    await service.sync({ changes: [{ kind: "doc", record: { ...doc("long"), text: "word ".repeat(10_000) } }] });
+    const zipped = await post(JSON.stringify({ changes: [] }));
+    expect(zipped.headers.get("content-encoding")).toBe("gzip");
+    expect(Number(zipped.headers.get("content-length"))).toBeLessThan(5_000);
+    expect((await zipped.json()).docs).toHaveLength(2);
+    const docsUrl = url.replace("/sync", "/docs");
+    const fetched = await fetch(docsUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: ["long", "gone"] }) });
+    expect(await fetched.json()).toMatchObject({ docs: [{ id: "long" }], missing: ["gone"] });
+  });
+
+  it("answers a manifest of versions, and document bodies a piece at a time", async () => {
+    const big = (id: string) => ({ ...doc(id, 3), text: "x".repeat(600_000), chars: 600_000 });
+    const manifest = await service.manifest({ changes: [{ kind: "doc", record: big("a") }, { kind: "doc", record: big("b") }, { kind: "position", record: position("a") }] });
+    expect(manifest).toEqual({ docs: [{ id: "a", updatedAt: 3 }, { id: "b", updatedAt: 3 }], positions: [position("a")], deleted: [] });
+    // Both together exceed one answer, so the first comes alone; a single large document still goes.
+    expect((await service.docs({ ids: ["a", "b", "a"] })).docs.map((r) => r.id)).toEqual(["a"]);
+    expect((await service.docs({ ids: ["b"] })).docs.map((r) => r.id)).toEqual(["b"]);
+    expect(await service.request("/sync", { changes: [], view: "manifest" })).toEqual(manifest);
+    await expect(service.docs({ ids: "a" })).rejects.toThrow("Invalid document request");
+    await expect(service.request("/other", {})).rejects.toThrow("not found");
+  });
+
+  it("reads the library file again when something else replaces it", async () => {
+    await service.sync({ changes: [{ kind: "doc", record: doc("a") }] });
+    await writeFile(join(directory, "library.json"), JSON.stringify({ docs: [doc("restored")], positions: [], deleted: [] }));
+    expect((await service.sync({ changes: [] })).docs.map((r) => r.id)).toEqual(["restored"]);
   });
 });

@@ -19,7 +19,7 @@ describe("offline library synchronization", () => {
     const d = await db();
     await Promise.all([d.clear("docs"), d.clear("positions"), d.clear("outbox"), d.clear("meta"), d.clear("audio")]);
     network.mockReset();
-    network.mockImplementation(async (_url, options) => Response.json(await service.sync(JSON.parse(options!.body as string))));
+    network.mockImplementation(async (url, options) => Response.json(await service.request(String(url).replace("/api/library", ""), JSON.parse(options!.body as string))));
     vi.stubGlobal("fetch", network);
   });
   afterEach(async () => { vi.unstubAllGlobals(); await rm(directory, { recursive: true, force: true }); });
@@ -34,8 +34,47 @@ describe("offline library synchronization", () => {
     expect((await docs.all()).map((r) => r.id).sort()).toEqual(["legacy", "remote"]);
     expect((await service.sync({ changes: [] })).positions[0].docId).toBe("legacy");
     expect(await d.count("audio")).toBe(1);
+    network.mockClear();
     await syncLibrary();
-    expect(JSON.parse(network.mock.calls[1][1]!.body as string).changes).toEqual([]);
+    // Nothing changed: one small request, no document bodies.
+    expect(network).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(network.mock.calls[0][1]!.body as string)).toEqual({ changes: [], view: "manifest" });
+  });
+
+  it("downloads only documents it lacks or holds an older version of, keeping each piece as it arrives", async () => {
+    const big = (id: string, updatedAt = 1) => ({ ...doc(id, updatedAt), text: "x".repeat(600_000), chars: 600_000 });
+    await service.sync({ changes: [{ kind: "doc", record: big("one") }, { kind: "doc", record: big("two") }, { kind: "doc", record: doc("three") }] });
+    // The second piece is lost, as on a tunnel that drops partway.
+    let docsRequests = 0;
+    network.mockImplementation(async (url, options) => {
+      const path = String(url).replace("/api/library", "");
+      if (path === "/docs" && ++docsRequests === 2) throw new TypeError("Load failed");
+      return Response.json(await service.request(path, JSON.parse(options!.body as string)));
+    });
+    expect(await syncLibrary()).toBe(false);
+    expect((await docs.all()).map((r) => r.id).sort()).toEqual(["one", "three"]);
+    network.mockClear();
+    expect(await syncLibrary()).toBe(true);
+    const asked = network.mock.calls.filter(([url]) => String(url).endsWith("/docs")).map(([, init]) => JSON.parse(init!.body as string).ids);
+    expect(asked).toEqual([["two"]]);
+    expect((await docs.all()).map((r) => r.id).sort()).toEqual(["one", "three", "two"]);
+    // Another device edits one document: only that one comes down.
+    await service.sync({ changes: [{ kind: "doc", record: { ...doc("three", 5), title: "Renamed" } }] });
+    network.mockClear();
+    await syncLibrary();
+    expect(network.mock.calls.filter(([url]) => String(url).endsWith("/docs")).map(([, init]) => JSON.parse(init!.body as string).ids)).toEqual([["three"]]);
+    expect((await docs.get("three"))?.title).toBe("Renamed");
+  });
+
+  it("takes the server's copy when the server refused this device's older edit", async () => {
+    await service.sync({ changes: [{ kind: "doc", record: { ...doc("a", 100), title: "Server" } }] });
+    // A device whose clock runs behind edits its copy with an earlier time.
+    const d = await db();
+    await d.put("meta", true, "shared-library-imported");
+    await d.put("docs", { ...doc("a", 50), title: "Behind" });
+    await d.put("outbox", { key: "doc:a", token: "t", change: { kind: "doc", record: { ...doc("a", 50), title: "Behind" } } });
+    expect(await syncLibrary()).toBe(true);
+    expect((await docs.get("a"))?.title).toBe("Server");
   });
 
   it("retains offline writes and deletes across reloads, then drains them on reconnect", async () => {

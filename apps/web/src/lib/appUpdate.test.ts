@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { create } from "zustand";
-import { entryScript, reloadWhenIdle, serverHasNewBuild } from "./appUpdate";
+import { entryScript, reloadWhenIdle, serverHasNewBuild, serverReachable, serverReturned } from "./appUpdate";
 
 const store = (playing: boolean) => create(() => ({ playing, loading: false, preparing: null as string | null }));
 
@@ -45,5 +45,38 @@ describe("serverHasNewBuild", () => {
     expect(await serverHasNewBuild("/assets/index-aaa.js", async () => { throw new TypeError("Load failed"); })).toBe(false);
     expect(await serverHasNewBuild("/assets/index-aaa.js", async () => "<h1>502 Bad Gateway</h1>")).toBe(false);
     expect(await serverHasNewBuild(null, async () => page("/assets/index-bbb.js"))).toBe(false);
+  });
+});
+
+describe("serverReachable", () => {
+  it("is true when the server answers", async () => {
+    expect(await serverReachable(1000, async () => new Response("ok"))).toBe(true);
+  });
+
+  it("is false on an error status, a network failure, or no answer in time", async () => {
+    expect(await serverReachable(1000, async () => new Response("", { status: 502 }))).toBe(false);
+    expect(await serverReachable(1000, async () => { throw new TypeError("Load failed"); })).toBe(false);
+    const hang: typeof fetch = (_url, init) =>
+      new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
+    expect(await serverReachable(20, hang)).toBe(false);
+  });
+});
+
+describe("serverReturned", () => {
+  it("waits through failed probes until the server answers", async () => {
+    const probe = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValue(true);
+    expect(await serverReturned(() => true, { every: 1, probe })).toBe(true);
+    expect(probe).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops asking once the wait is no longer wanted", async () => {
+    let wanted = true;
+    const probe = vi.fn(async () => { wanted = false; return false; });
+    expect(await serverReturned(() => wanted, { every: 1, probe })).toBe(false);
+    expect(probe).toHaveBeenCalledOnce();
+  });
+
+  it("gives up when the server stays away", async () => {
+    expect(await serverReturned(() => true, { every: 5, patience: 30, probe: async () => false })).toBe(false);
   });
 });

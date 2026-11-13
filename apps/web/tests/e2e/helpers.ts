@@ -22,11 +22,23 @@ export async function composeText(page: Page, text: string) {
   await page.getByLabel("Text to read").fill(text);
 }
 
-/** Compose → Listen with real text. Returns once the Reader is showing. */
+/** Compose → Listen with real text. Returns once the Reader is showing. A phone opens on the Library, so Compose is asked for by name. */
 export async function composeAndListen(page: Page) {
-  await page.goto("/");
+  await page.goto("/compose");
   await composeText(page, TEXT);
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   await page.getByRole("region", { name: "Player" }).waitFor();
+}
+
+/** Ask the player to prepare the open reading. Opening a reading never prepares it by itself. */
+export async function prepareFromPlayer(page: Page) {
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Prepare audio", exact: true }).click();
+}
+
+/** The Library keeps its sort order and its list or cards view behind one icon. */
+export async function libraryOption(page: Page, name: "Newest first" | "Shortest first" | "Longest first" | "List" | "Cards") {
+  await page.getByRole("button", { name: "Sort and view", exact: true }).click();
+  await page.getByRole("menuitemradio", { name, exact: true }).click();
 }

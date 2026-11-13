@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
+import { libraryOption } from "./helpers";
 
 async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null]) {
   await page.goto("/library");
@@ -25,15 +26,60 @@ async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null
     database.close();
   }, voiceIds);
   await page.reload();
-  await expect(page.getByRole("checkbox", { name: /Select .* document/ })).toHaveCount(voiceIds.length);
+  await expect(page.locator('[data-screen="library"] li').getByRole("button", { name: / document$/ })).toHaveCount(voiceIds.length);
 }
+
+/** Rows carry no checkboxes: Select starts picking, and the bar that appears picks every document shown. */
+async function selectAll(page: Page, name = "Select all") {
+  const selection = page.getByRole("toolbar", { name: "Selection" });
+  if (!(await selection.isVisible())) await page.getByRole("button", { name: "Select", exact: true }).click();
+  await selection.getByRole("button", { name, exact: true }).click();
+}
+
+test("filters are icons that open their choices, so a phone shows documents first", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedLibrary(page, [null, "alloy", "alloy", "local"]);
+  const library = page.locator('[data-screen="library"]');
+  const titles = library.locator("li").getByRole("button", { name: / document$/ });
+  // The title, search and every filter fit in two lines above the first document.
+  expect((await titles.first().boundingBox())!.y).toBeLessThan(180);
+  expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  const voice = page.getByRole("button", { name: "Filter by voice" });
+  await voice.click();
+  const menu = page.getByRole("menu", { name: "Filter by voice" });
+  await expect(menu.getByRole("menuitemradio", { name: "All voices" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { name: "All voices" })).toBeFocused();
+  // Arrow keys move through the choices, and each says how many documents it holds.
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitemradio", { name: "All voices" })).toBeFocused();
+  await menu.getByRole("menuitemradio", { name: /Alloy.*2$/ }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(titles).toHaveCount(2);
+  await expect(library).toContainText("2 of 4 documents");
+  await expect(voice).toHaveAttribute("data-on", "true");
+
+  // Escape puts the menu away and hands focus back to its icon.
+  await voice.click();
+  await expect(menu.getByRole("menuitemradio", { name: /Alloy/ })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(voice).toBeFocused();
+
+  // The filter in force is named where the list starts, and goes with a press.
+  await page.getByRole("group", { name: "Active filters" }).getByRole("button", { name: /^Remove filter: Alloy/ }).click();
+  await expect(titles).toHaveCount(4);
+  await expect(page.getByRole("group", { name: "Active filters" })).toHaveCount(0);
+  await expect(voice).not.toHaveAttribute("data-on", "true");
+});
 
 test("Library identifies voice services in both views even outside the available catalogue", async ({ page }) => {
   await seedLibrary(page, [null, "alloy", "fish:saved-narrator", "local"]);
   const library = page.locator('[data-screen="library"]');
   const identities = [["First", "VoiceStudio", "Bella"], ["Second", "ChatGPT", "Alloy"], ["Third", "Fish", "Fish Audio voice"], ["Fourth", "Browser", "Browser voice"]];
-  for (const view of ["List", "Cards"]) {
-    await page.getByRole("button", { name: view, exact: true }).click();
+  for (const view of ["List", "Cards"] as const) {
+    await libraryOption(page, view);
     for (const [document, source, voice] of identities) {
       const item = library.getByRole("listitem").filter({ has: page.getByRole("button", { name: `${document} document`, exact: true }) });
       await expect(item.locator(`[data-voice-source="${source}"]`).first()).toBeVisible();
@@ -44,8 +90,8 @@ test("Library identifies voice services in both views even outside the available
   }
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  // On a phone the text starts beside the checkbox instead of behind a wide gutter.
-  await page.getByRole("button", { name: "List", exact: true }).click();
+  // On a phone the text starts beside the source mark instead of behind a wide gutter.
+  await libraryOption(page, "List");
   const title = page.getByRole("button", { name: "First document", exact: true });
   const row = library.getByRole("listitem").filter({ has: title });
   expect((await title.boundingBox())!.x - (await row.boundingBox())!.x).toBeLessThan(64);
@@ -62,7 +108,7 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   });
   let requests = 0;
   page.on("request", (request) => { if (/\/api\/preparations\/[^/]+\/audio\//.test(request.url())) requests++; });
-  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
   await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).toBeChecked();
@@ -70,6 +116,8 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   expect(accessibility.violations).toEqual([]);
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
+  // Queueing ends the selection, so a press opens a document again.
+  await expect(page.getByRole("toolbar", { name: "Selection" })).toHaveCount(0);
   try {
     await expect.poll(() => submissions).toBe(4);
     await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("0 active · 4 queued");
@@ -83,26 +131,34 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   expect(requests).toBe(8);
   await expect(page.getByRole("region", { name: "Player", exact: true })).toBeHidden();
 
+  // Selecting ends with the page; while it is on, a press picks a document instead of opening it.
   await page.reload();
-  await page.getByRole("checkbox", { name: "Select First document", exact: true }).check();
+  await expect(page.locator('[data-screen="library"]').getByRole("checkbox")).toHaveCount(0);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const first = page.getByRole("button", { name: "First document", exact: true });
+  await first.click();
+  await expect(first).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("toolbar", { name: "Selection" })).toContainText("1 selected");
   await page.getByRole("button", { name: "Prepare selected" }).click();
-  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).toBeChecked();
-  await expect(dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" })).toBeChecked();
+  // Voices with complete audio are not preselected.
+  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" })).not.toBeChecked();
   await expect(dialog.getByRole("checkbox", { name: "Alloy ChatGPT" })).not.toBeChecked();
-  await expect(dialog.getByRole("button", { name: "Prepare 2 readings" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Prepare 0 readings" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 
-  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
-  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).toBeChecked();
-  await expect(dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).not.toBeChecked();
+  await dialog.getByRole("checkbox", { name: "Bella VoiceStudio" }).check();
+  await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
   await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished");
   expect(requests).toBe(8);
 
   await page.reload();
   await expect(page.getByRole("img", { name: "Jasper: 100% prepared", exact: true })).toHaveCount(2);
-  await page.getByRole("button", { name: "Cards", exact: true }).click();
+  await libraryOption(page, "Cards");
   await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toHaveCount(2);
   await expect(page.getByRole("img", { name: "0% listened", exact: true })).toHaveCount(2);
   const library = page.locator('[data-screen="library"]');
@@ -130,7 +186,7 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     await route.continue();
   });
   try {
-    await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+    await selectAll(page);
     await page.getByRole("button", { name: "Prepare selected" }).click();
     await page.getByRole("dialog", { name: "Prepare audio", exact: true }).getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
     await expect(page.getByRole("img", { name: "Bella: 0% generated · 0/2 passages · Queued", exact: true })).toBeVisible();
@@ -144,7 +200,7 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     const halfRing = await live.locator("circle").nth(1).getAttribute("stroke-dasharray");
     expect(Number(halfRing!.split(" ")[0]) / Number(halfRing!.split(" ")[1])).toBeCloseTo(0.5);
     expect(downloads).toBe(0);
-    await page.getByRole("button", { name: "Cards", exact: true }).click();
+    await libraryOption(page, "Cards");
     await expect(live).toBeVisible();
     await page.reload();
     await expect(live).toBeVisible();
@@ -158,6 +214,50 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     await page.reload();
     await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
   } finally { release(); }
+});
+
+test("the sidebar shows the audio made for each document and what is being made now, on every screen", async ({ page }) => {
+  await seedLibrary(page);
+  const status = { id: "", state: "running", done: 0, total: 2, queued: true, worker: undefined as string | undefined };
+  await page.route("**/api/preparations", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const response = await route.fetch();
+    status.id = (await response.json()).id;
+    await route.fulfill({ response, json: status });
+  });
+  await page.route("**/api/preparations/*", (route) => route.fulfill({ json: status }));
+  const made = page.getByRole("navigation", { name: "Primary" }).getByRole("group", { name: "Audio made" });
+  // A document nothing was made for carries no extra line.
+  await expect(made).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: "First document", exact: true }).click();
+  await page.getByRole("button", { name: "Prepare selected" }).click();
+  await page.getByRole("dialog", { name: "Prepare audio", exact: true }).getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
+  const chip = made.getByRole("button", { name: /Bella/ });
+  await expect(chip).toContainText("Queued");
+
+  // The status follows you away from the Library.
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  Object.assign(status, { done: 1, queued: false, worker: "Mac" });
+  await expect(chip).toContainText("50% · 1/2");
+  await expect(chip).toContainText("Preparing on Mac");
+  expect((await new AxeBuilder({ page }).include('nav[aria-label="Primary"]').withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
+
+  // The reading's details open from here too.
+  await chip.click();
+  const details = page.getByRole("dialog", { name: "Audio preparation", exact: true });
+  await expect(details).toContainText("First document");
+  await expect(details).toContainText("Preparing on Mac");
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+
+  Object.assign(status, { done: 2, state: "done" });
+  await expect(chip).toHaveAttribute("title", "Bella: 100% prepared");
+  // Only the document that has audio says so.
+  await expect(made).toHaveCount(1);
+  await page.reload();
+  await expect(chip).toHaveAttribute("title", "Bella: 100% prepared");
 });
 
 test("shows one reading per machine, waiting readings, and restores their assignments after reload", async ({ page }) => {
@@ -177,7 +277,7 @@ test("shows one reading per machine, waiting readings, and restores their assign
     if (route.request().method() === "DELETE") job.state = "cancelled";
     await route.fulfill({ json: job });
   });
-  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
   await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
@@ -195,11 +295,93 @@ test("shows one reading per machine, waiting readings, and restores their assign
   await expect(queue.getByText("Cancelled · saved audio kept", { exact: true })).toHaveCount(4);
 });
 
+test("a voice opens its preparation details, where a waiting reading is moved up or started now", async ({ page }) => {
+  await seedLibrary(page, [null]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  interface Job { id: string; state: string; done: number; total: number; queued: boolean; worker?: string; waitingFor?: string; ahead?: number; busy?: boolean; prioritized?: boolean }
+  const jobs = new Map<string, Job>();
+  const moves: boolean[] = [];
+  await page.route("**/api/preparations", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const voice = route.request().postDataJSON().requests[0].voice as string;
+    // Bella has the Mac; Jasper waits behind a reading from another device.
+    const job: Job = voice === "expr-voice-2-f"
+      ? { id: "00000000-0000-0000-0000-000000000001", state: "running", done: 1, total: 2, queued: false, worker: "Mac" }
+      : { id: "00000000-0000-0000-0000-000000000002", state: "running", done: 0, total: 2, queued: true, waitingFor: "Mac", ahead: 1, busy: true };
+    jobs.set(voice, job);
+    await route.fulfill({ status: 202, json: job });
+  });
+  await page.route("**/api/preparations/*", async (route) => {
+    const job = [...jobs.values()].find((job) => route.request().url().endsWith(job.id));
+    if (!job) return route.continue();
+    if (route.request().method() === "DELETE") {
+      job.state = "cancelled";
+      // The machine it held is free for whoever is waiting.
+      for (const other of jobs.values()) other.busy = undefined;
+    }
+    await route.fulfill({ json: job });
+  });
+  await page.route("**/api/preparations/*/priority", async (route) => {
+    const { now } = route.request().postDataJSON() as { now: boolean };
+    moves.push(now);
+    const [bella, jasper] = [jobs.get("expr-voice-2-f")!, jobs.get("expr-voice-2-m")!];
+    if (now) {
+      Object.assign(bella, { queued: true, worker: undefined, waitingFor: "Mac", ahead: 0, busy: true });
+      Object.assign(jasper, { queued: false, worker: "Mac", waitingFor: undefined, ahead: undefined, busy: undefined, prioritized: undefined });
+    } else Object.assign(jasper, { ahead: 0, prioritized: true });
+    await route.fulfill({ json: jasper });
+  });
+  await selectAll(page);
+  await page.getByRole("button", { name: "Prepare selected" }).click();
+  const prepare = page.getByRole("dialog", { name: "Prepare audio", exact: true });
+  await prepare.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
+  await prepare.getByRole("button", { name: "Prepare 2 readings" }).click();
+  const queue = page.getByRole("region", { name: "Audio preparation queue" });
+  await expect(queue).toContainText("1 active · 1 queued");
+
+  const voices = page.getByRole("group", { name: "Prepared audio" });
+  await voices.getByRole("button", { name: /Jasper/ }).click();
+  const details = page.getByRole("dialog", { name: "Audio preparation", exact: true });
+  await expect(details).toContainText("First document");
+  await expect(details).toContainText("Queued · waiting for Mac");
+  await expect(details).toContainText("1 reading ahead");
+  await expect(details).toContainText("0 of 2 passages");
+  await expect(details).toContainText("0% saved");
+  await expect(details).toContainText("Extra prepared voice");
+  const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  expect(accessibility.violations).toEqual([]);
+  expect(await details.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  await details.getByRole("button", { name: "Prepare next" }).click();
+  await expect(details).toContainText("Next, after the reading in progress · moved to the front");
+  await expect(details.getByRole("button", { name: "Prepare next" })).toBeDisabled();
+  await details.getByRole("button", { name: "Start now" }).click();
+  await expect(details).toContainText("Preparing on Mac");
+  await expect(details.getByRole("button", { name: "Prepare next" })).toHaveCount(0);
+  expect(moves).toEqual([false, true]);
+  // The reading that gave way is waiting again, and says so wherever it is shown.
+  await expect(queue).toContainText("Queued · waiting for Mac");
+
+  await details.getByRole("button", { name: "Cancel preparation" }).click();
+  await expect(details).toContainText("Cancelled · saved audio kept");
+  await expect(details.getByRole("button", { name: "Prepare audio" })).toBeVisible();
+  await details.getByRole("button", { name: "Close" }).click();
+  await expect(details).toHaveCount(0);
+
+  // The queue opens the same details, and they lead on to the other voices.
+  await queue.getByRole("button", { name: "First document Bella" }).click();
+  await expect(details.getByText("Reading voice", { exact: true })).toBeVisible();
+  await expect(details).toContainText("Next in line");
+  await details.getByRole("button", { name: "More voices…" }).click();
+  await expect(details).toHaveCount(0);
+  await expect(prepare).toContainText("First document");
+});
+
 test("selects filtered documents and offers explicit paid voice preparation", async ({ page }) => {
   await seedLibrary(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("textbox", { name: "Search library" }).fill("First");
-  await page.getByRole("checkbox", { name: "Select visible" }).check();
+  await selectAll(page, "Select visible");
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
   await expect(dialog).toContainText("First document");
@@ -218,7 +400,7 @@ test("selects filtered documents and offers explicit paid voice preparation", as
 
 test("the player only offers voices with prepared audio for the open document", async ({ page }) => {
   await seedLibrary(page, [null]);
-  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
   await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
@@ -269,4 +451,89 @@ test("opening from the Library does not start playback, and finished readings st
   await expect(item.getByRole("img", { name: /^(?!100%)\d+% listened$/ })).toBeVisible();
   await page.reload();
   await expect(item.getByLabel("Read once", { exact: true })).toBeVisible();
+});
+
+test("keeps documents in the order they were added and sorts by duration on request", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("heading", { name: "Library", exact: true }).waitFor();
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("readaloud");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    // Oldest was edited last (say, filed by Jev); that must not move it to the top.
+    const seeds = [["Oldest", 1, 900, 30], ["Middle", 2, 2, 5], ["Newest", 3, 3, 80]] as const;
+    await new Promise<void>((resolve, reject) => {
+      const tx = database.transaction("docs", "readwrite");
+      for (const [id, createdAt, updatedAt, sentences] of seeds) {
+        const text = Array.from({ length: sentences }, (_, i) => `${id} sentence number ${i} carries on for a while.`).join(" ");
+        tx.objectStore("docs").put({ id, title: `${id} document`, text, voice: null, source: "paste", domain: "Pasted text", chars: text.length, createdAt, updatedAt });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    database.close();
+  });
+  await page.reload();
+  const titles = page.locator('[data-screen="library"] li').getByRole("button", { name: / document$/ });
+  await expect(titles).toHaveText(["Newest document", "Middle document", "Oldest document"]);
+  await libraryOption(page, "Shortest first");
+  await expect(titles).toHaveText(["Middle document", "Oldest document", "Newest document"]);
+  await libraryOption(page, "Longest first");
+  await expect(titles).toHaveText(["Newest document", "Oldest document", "Middle document"]);
+  // The choice survives a reload, and the menu shows it as the one in force.
+  await page.reload();
+  await expect(titles).toHaveText(["Newest document", "Oldest document", "Middle document"]);
+  await page.getByRole("button", { name: "Sort and view", exact: true }).click();
+  await expect(page.getByRole("menuitemradio", { name: "Longest first" })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "Newest first" }).click();
+  await expect(titles).toHaveText(["Newest document", "Middle document", "Oldest document"]);
+});
+
+test("a row opens its document wherever it is clicked, and Back returns to the Library as it was left", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 520 });
+  await seedLibrary(page, ["local", "local", "local", "local"]);
+  const library = page.locator('[data-screen="library"]');
+  const row = (name: string) => library.getByRole("listitem").filter({ has: page.getByRole("button", { name: `${name} document`, exact: true }) });
+
+  // While selecting, a press picks the row instead of opening its document.
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await row("First").getByText("Pasted text").click();
+  await expect(page.getByRole("button", { name: "First document", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/\/library$/);
+  await page.getByRole("button", { name: "Done selecting" }).click();
+
+  // Narrow to one document, then open it by its details rather than its title.
+  await page.getByLabel("Search library").fill("Fourth");
+  await expect(library.getByRole("button", { name: / document$/ })).toHaveCount(1);
+  await row("Fourth").getByText("Pasted text").click();
+  await expect(page).toHaveURL(/\/read\/Fourth$/);
+  await expect(page.locator('[data-screen="reader"] h1')).toHaveText("Fourth document");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(page.getByLabel("Search library")).toHaveValue("Fourth");
+
+  // Back also returns to the same place in a long list.
+  await page.getByLabel("Search library").fill("");
+  await library.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  const top = await library.evaluate((el) => el.scrollTop);
+  expect(top).toBeGreaterThan(0);
+  await row("First").getByText("Pasted text").click();
+  await expect(page).toHaveURL(/\/read\/First$/);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect.poll(() => library.evaluate((el) => el.scrollTop)).toBe(top);
+
+  // Cards open the same way.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await libraryOption(page, "Cards");
+  await row("Second").getByText("Pasted text").click();
+  await expect(page).toHaveURL(/\/read\/Second$/);
+
+  // A document opened by its link has no screen behind it, so Back leads to the Library.
+  await page.goto("/read/Third");
+  await expect(page.locator('[data-screen="reader"] h1')).toHaveText("Third document");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
 });

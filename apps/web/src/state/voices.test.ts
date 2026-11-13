@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchFishVoices, fetchServerVoices } from "../engine/providers";
+import { fetchFishVoices, fetchPhononVoices, fetchServerVoices } from "../engine/providers";
 import { getVoice, useVoices } from "./voices";
-import { DEFAULT_VOICE_ID, LOCAL_VOICE, voiceSource } from "../data/voices";
+import { DEFAULT_VOICE_ID, FALLBACK_VOICE_ID, LOCAL_VOICE, PHONON_VOICES, voiceSource } from "../data/voices";
 import { useSettings } from "./settings";
 
 vi.mock("../engine/providers", async (original) => ({
   ...await original<typeof import("../engine/providers")>(),
-  fetchFishVoices: vi.fn(), fetchServerVoices: vi.fn(),
+  fetchFishVoices: vi.fn(), fetchPhononVoices: vi.fn(), fetchServerVoices: vi.fn(),
 }));
-const profiles: { id: string; name: string; kind: string; language: string; personality?: string | null }[] = [];
+const profiles: { id: string; name: string; kind: string; language: string; personality?: string | null; instruct?: string }[] = [];
 const studioFetch = vi.fn(async () => new Response("{}"));
 vi.mock("../lib/studio", async (original) => ({
   ...await original<typeof import("../lib/studio")>(),
@@ -62,6 +62,39 @@ describe("voice providers", () => {
     expect(voices.map((v) => v.id)).toEqual(expect.arrayContaining(["fish:narrator", "profile", "nova", "local"]));
     expect(getVoice("fish:narrator")).toMatchObject({ name: "Narrator", engine: "fish", kind: "preset" });
   });
+  it("lists every Phonon voice before its server answers and when it is unreachable", async () => {
+    const phonon = () => useVoices.getState().voices.filter((v) => v.engine === "phonon");
+    expect(phonon()).toHaveLength(37);
+    expect(new Set(phonon().map((v) => v.id)).size).toBe(37);
+    expect(phonon().every((v) => voiceSource(v) === "Phonon" && v.kind === "preset")).toBe(true);
+    expect(getVoice("phonon:Harper")).toMatchObject({ name: "Harper", lang: "EN-US", engine: "phonon" });
+    expect(getVoice("phonon:Hugh").lang).toBe("EN-GB");
+    vi.mocked(fetchPhononVoices).mockRejectedValueOnce(new Error("offline"));
+    await useVoices.getState().loadPhonon();
+    expect(phonon()).toEqual(PHONON_VOICES);
+  });
+
+  it("follows the Phonon server's list, between VoiceStudio's voices and the cloud services", async () => {
+    vi.mocked(fetchServerVoices).mockResolvedValue(local);
+    await useVoices.getState().loadServer();
+    vi.mocked(fetchPhononVoices).mockResolvedValueOnce(["default", "Newcomer", "Hugh", "Azgorath", "Zoey"]);
+    await useVoices.getState().loadPhonon();
+    const { voices } = useVoices.getState();
+    const ids = voices.map((v) => v.id);
+    // Narrators before characters, as in the catalogue; a voice it does not know goes last.
+    expect(voices.filter((v) => v.engine === "phonon").map((v) => v.id)).toEqual(["phonon:Zoey", "phonon:Hugh", "phonon:Azgorath", "phonon:Newcomer"]);
+    expect(getVoice("phonon:Hugh").tags).toEqual(["male", "British"]);
+    expect(getVoice("phonon:Newcomer")).toMatchObject({ name: "Newcomer", lang: "EN", engine: "phonon", kind: "preset" });
+    expect(ids.indexOf("profile")).toBeLessThan(ids.indexOf("phonon:Zoey"));
+    expect(ids.indexOf("phonon:Newcomer")).toBeLessThan(ids.indexOf("nova"));
+    expect(ids.at(-1)).toBe("local");
+    // A reload of VoiceStudio's voices keeps them, and a saved document still resolves a voice the server dropped.
+    await useVoices.getState().loadServer();
+    expect(useVoices.getState().voices.map((v) => v.id)).toEqual(ids);
+    expect(getVoice("phonon:Easton")).toMatchObject({ name: "Easton", lang: "EN-US", engine: "phonon" });
+    expect(getVoice("phonon:Retired")).toMatchObject({ name: "Retired", engine: "phonon", kind: "preset" });
+  });
+
   it("labels a cloned voice's automatic language as Auto, not as a country code", async () => {
     vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [
       { id: "auto-clone", name: "Me", type: "profile", language: "Auto" },
@@ -96,12 +129,12 @@ describe("voice providers", () => {
   });
   it("links voices added from the Studio gallery to their recipe and sends them back on removal", async () => {
     profiles.push(
-      { id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" },
+      { id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian", instruct: "A calm, gentle narrator" },
       { id: "mine", name: "My voice", kind: "clone", language: "English", personality: null },
     );
     vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "lib", name: "The Librarian", type: "profile" }, { id: "mine", name: "My voice", type: "profile" }], engines: [] });
     await useVoices.getState().loadServer();
-    expect(getVoice("lib")).toMatchObject({ kind: "profile", archetype: "librarian", tags: ["designed"] });
+    expect(getVoice("lib")).toMatchObject({ kind: "profile", archetype: "librarian", tags: ["designed"], description: "A calm, gentle narrator" });
     expect(getVoice("mine").archetype).toBeUndefined();
     profiles.splice(0, 1);
     vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "mine", name: "My voice", type: "profile" }], engines: [] });
@@ -110,21 +143,29 @@ describe("voice providers", () => {
     expect(useVoices.getState().voices.some((v) => v.id === "lib")).toBe(false);
     expect(getVoice("mine").id).toBe("mine");
   });
-  it("makes the Librarian the default voice unless the user picked one", async () => {
-    profiles.push({ id: "e43fa21f", name: "The Librarian", kind: "design", language: "English", personality: "archetype:feat_00_the_librarian" });
-    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "e43fa21f", name: "The Librarian", type: "profile" }, { id: "mine", name: "My voice", type: "profile" }], engines: [] });
-    useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
-    await useVoices.getState().loadServer();
-    expect(useSettings.getState().voice).toBe("e43fa21f");
-    expect(getVoice(null).name).toBe("The Librarian");
-
-    useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: true });
-    await useVoices.getState().loadServer();
+  it("makes Phonon's Zoey the default voice, and Bella where Phonon is missing, unless the user picked one", async () => {
+    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "mine", name: "My voice", type: "profile" }], engines: [] });
+    expect(DEFAULT_VOICE_ID).toBe("phonon:Zoey");
+    useSettings.getState().patch({ voice: FALLBACK_VOICE_ID, voiceChosen: false });
+    await useVoices.getState().load();
     expect(useSettings.getState().voice).toBe(DEFAULT_VOICE_ID);
+    expect(getVoice(null)).toMatchObject({ name: "Zoey", engine: "phonon" });
+
+    useSettings.getState().patch({ voice: FALLBACK_VOICE_ID, voiceChosen: true });
+    await useVoices.getState().load();
+    expect(useSettings.getState().voice).toBe(FALLBACK_VOICE_ID);
 
     useSettings.getState().patch({ voice: "mine", voiceChosen: false });
-    await useVoices.getState().loadServer();
+    await useVoices.getState().load();
     expect(useSettings.getState().voice).toBe("mine");
+
+    // Without Phonon, the default falls back to Bella on VoiceStudio.
+    useVoices.setState({ voices: useVoices.getState().voices.filter((v) => v.engine !== "phonon") });
+    vi.mocked(fetchPhononVoices).mockResolvedValue([]);
+    useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
+    await useVoices.getState().load();
+    expect(useSettings.getState().voice).toBe(FALLBACK_VOICE_ID);
+    expect(getVoice(null)).toMatchObject({ name: "Bella", engine: "kittentts" });
   });
   it("keeps a voice when VoiceStudio refuses to delete it", async () => {
     profiles.push({ id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" });
@@ -142,12 +183,13 @@ describe("voice providers", () => {
     expect(getVoice("nova")).toMatchObject({ id: "nova", name: "Nova", engine: "openai" });
     expect(getVoice("coral~georgia")).toMatchObject({ name: "Savannah", engine: "openai" });
     expect(getVoice("fish:saved-voice").engine).toBe("fish");
-    expect(getVoice(DEFAULT_VOICE_ID)).toMatchObject({ name: "Bella", engine: "kittentts" });
+    expect(getVoice(DEFAULT_VOICE_ID)).toMatchObject({ name: "Zoey", engine: "phonon" });
+    expect(getVoice(FALLBACK_VOICE_ID)).toMatchObject({ name: "Bella", engine: "kittentts" });
     expect(getVoice("saved-profile")).toMatchObject({ id: "saved-profile", kind: "profile", engine: "omnivoice" });
     expect(voiceSource(getVoice("saved-profile"))).toBe("VoiceStudio");
   });
-  it("keeps VoiceStudio as the default even when cloud voices arrive first", () => {
-    useVoices.setState({ voices: [getVoice("nova"), LOCAL_VOICE] });
-    expect(getVoice(null)).toMatchObject({ id: DEFAULT_VOICE_ID, engine: "kittentts" });
+  it("keeps Zoey as the default even when cloud voices come first", () => {
+    useVoices.setState({ voices: [getVoice("nova"), ...PHONON_VOICES, LOCAL_VOICE] });
+    expect(getVoice(null)).toMatchObject({ id: DEFAULT_VOICE_ID, engine: "phonon" });
   });
 });

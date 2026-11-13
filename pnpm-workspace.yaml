@@ -6,3 +6,5 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - lucide-react@1.68.0
   - lucide@1.68.0
+patchedDependencies:
+  pdfjs-dist@6.5.438: patches/pdfjs-dist@6.5.438.patch

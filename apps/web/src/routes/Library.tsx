@@ -1,21 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star } from "lucide-react";
-import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { Link, useNavigate, useNavigationType } from "react-router-dom";
+import { Search, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, Speech, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X, CloudCheck, CloudOff, CloudUpload, RefreshCw, LoaderCircle } from "lucide-react";
+import { Button, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
-import { useLibrary, type LibraryItem } from "../state/library";
+import { searchable, useLibrary, type LibraryItem } from "../state/library";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { usePreparation } from "../state/preparation";
 import { toast } from "../state/toast";
-import { dateLabel } from "../lib/dates";
+import { agoLabel, dateLabel } from "../lib/dates";
 import { openDocument } from "../lib/openDoc";
 import { FOCUS_SEARCH_EVENT } from "../hooks/useShortcuts";
 import { useBreakpoint, useIsTouch } from "../hooks/useMedia";
 import { audioCache } from "../lib/db";
 import { syncLibrary, useLibrarySync } from "../lib/librarySync";
-import { PreparationQueue, PrepareDialog, PreparedStatus } from "../components/LibraryPreparation";
+import { ICON_ON, IconMenu, MenuAction, MenuDivider, MenuGroup, MenuOption } from "../components/IconMenu";
+import { PreparationDetails, PreparationQueue, PrepareDialog, PreparedStatus, type Reading } from "../components/LibraryPreparation";
 import { useCategories } from "../state/categories";
 import { useJev } from "../state/llm";
 import { useFavorites } from "../state/favorites";
@@ -23,12 +24,24 @@ import { usePremiumContext } from "../state/premium";
 import { estimatePremium, type PremiumEstimate } from "../lib/premiumEstimate";
 import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
+import { catalogue } from "../lib/postTitle";
+import { entriesOf, finished, nextUnread, shelves, useBooks, type LibraryEntry, type Shelf } from "../state/books";
+import { BookMark, SourceMark } from "../components/SourceMark";
+import { partNames } from "../lib/book";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
 
-/** Everything a researcher might remember a document by. */
-const searchable = ({ rec }: LibraryItem) => [rec.title, rec.domain, rec.category?.name, ...Object.values(rec.meta ?? {})].join("\n").toLowerCase();
+const SORTS = [["created", "Newest first"], ["shortest", "Shortest first"], ["longest", "Longest first"]] as const;
+
+/** Books left open stay open while you go and read a chapter. */
+const openBooks = new Set<string>();
+
+/** How the Library was left, so stepping back from a document lands on the same row. */
+const left = { q: "", vf: null as string | null, cf: null as string | null, favoritesOnly: false, top: 0 };
+
+/** A click on a row is for the row (open its document, or pick it while selecting) unless it landed on one of the row's own controls or finished a text selection. */
+const opensDocument = (e: MouseEvent<HTMLElement>) => !(e.target as Element).closest("button, a, input, label") && !window.getSelection()?.toString();
 
 export function LibraryPage() {
   const navigate = useNavigate();
@@ -36,23 +49,39 @@ export function LibraryPage() {
   const touch = useIsTouch();
   const { items, loaded, refresh, remove } = useLibrary();
   const libView = useSettings((s) => s.libView);
+  const libSort = useSettings((s) => s.libSort);
   const set = useSettings((s) => s.set);
   const defaultVoice = useSettings((s) => s.voice);
   const openaiModel = useSettings((s) => s.openaiModel);
   const voices = useVoices((s) => s.voices);
   const hasDoc = usePlayer((s) => !!s.doc);
   const sync = useLibrarySync();
-  const [q, setQ] = useState("");
-  const [vf, setVf] = useState<string | null>(null);
-  const [cf, setCf] = useState<string | null>(null);
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  // Back and forward return to the Library as it was; arriving any other way starts it afresh.
+  const returning = useNavigationType() === "POP";
+  const [q, setQ] = useState(returning ? left.q : "");
+  const [vf, setVf] = useState<string | null>(returning ? left.vf : null);
+  const [cf, setCf] = useState<string | null>(returning ? left.cf : null);
+  const [favoritesOnly, setFavoritesOnly] = useState(returning && left.favoritesOnly);
   const [filing, setFiling] = useState(false);
   const jevReady = useJev((s) => !!s.config?.configured);
+  // Selecting is a mode: rows show no checkboxes until you ask to pick several, and it ends once they are queued.
+  const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const stopSelecting = useCallback(() => { setSelecting(false); setSelected(new Set()); }, []);
   const [prepareIds, setPrepareIds] = useState<string[] | null>(null);
   const closePrepare = useCallback(() => setPrepareIds(null), []);
+  const [details, setDetails] = useState<Reading | null>(null);
+  const closeDetails = useCallback(() => setDetails(null), []);
+  const detailsItem = details ? items.find((it) => it.rec.id === details.docId) : undefined;
   const searchRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLElement>(null);
 
+  useLayoutEffect(() => {
+    if (returning && scrollRef.current) scrollRef.current.scrollTop = left.top;
+    else left.top = 0;
+    // Only how the Library was entered matters.
+  }, []);
+  useEffect(() => { Object.assign(left, { q, vf, cf, favoritesOnly }); }, [q, vf, cf, favoritesOnly]);
   useEffect(() => {
     void refresh();
   }, [refresh, voices, openaiModel]);
@@ -70,8 +99,22 @@ export function LibraryPage() {
     return () => window.removeEventListener(FOCUS_SEARCH_EVENT, on);
   }, []);
 
+  useEffect(() => {
+    if (!selecting || prepareIds) return;
+    const on = (e: KeyboardEvent) => { if (e.key === "Escape") stopSelecting(); };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [selecting, prepareIds, stopSelecting]);
+
   const usedVoices = useMemo(() => Array.from(new Set(items.flatMap((i) => [i.rec.voice ?? defaultVoice, ...i.prepared.map((v) => v.voiceId)]))), [items, defaultVoice]);
-  const voiceName = (id: string) => voices.find((v) => v.id === id)?.name ?? items.flatMap((i) => i.prepared).find((v) => v.voiceId === id)?.name ?? id;
+  const voiceName = (id: string) => voices.find((v) => v.id === id)?.name ?? items.flatMap((i) => i.prepared).find((v) => v.voiceId === id)?.name ?? getVoice(id).name;
+  const sourceOf = (id: string) => voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id));
+  /** How many documents each voice reads or has prepared: what choosing it would show. */
+  const voiceCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const it of items) for (const id of new Set([it.rec.voice ?? defaultVoice, ...it.prepared.map((v) => v.voiceId)])) counts.set(id, (counts.get(id) ?? 0) + 1);
+    return counts;
+  }, [items, defaultVoice]);
   const categories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const it of items) if (it.rec.category) counts.set(it.rec.category.name, (counts.get(it.rec.category.name) ?? 0) + 1);
@@ -92,6 +135,19 @@ export function LibraryPage() {
       return searchable(it).includes(needle);
     });
   }, [items, q, vf, cf, favoritesOnly, defaultVoice]);
+  const library = useMemo(() => shelves(items), [items]);
+  const entries = useMemo(() => {
+    const list = entriesOf(filtered);
+    // Items arrive newest first; equal durations keep that order.
+    if (libSort === "created") return list;
+    const length = (entry: LibraryEntry) => entry.kind === "doc" ? entry.it.duration : entry.duration;
+    return list.sort((a, b) => libSort === "shortest" ? length(a) - length(b) : length(b) - length(a));
+  }, [filtered, libSort]);
+  const [, setOpened] = useState(0);
+  const toggleBook = (id: string) => {
+    if (!openBooks.delete(id)) openBooks.add(id);
+    setOpened((n) => n + 1);
+  };
   const fileUncategorized = async () => {
     setFiling(true);
     try {
@@ -104,11 +160,32 @@ export function LibraryPage() {
   };
 
   const grid = bp === "md" || libView === "grid";
+  // Fingers get the full 44px; a pointer can do with less.
+  const size = touch ? 44 : 36;
+  const glyph = touch ? 20 : 18;
+  const SortIcon = libSort === "created" ? CalendarArrowDown : libSort === "longest" ? ArrowDownWideNarrow : ArrowDownNarrowWide;
+  const syncLabel = sync.status === "synced" ? "Shared library · Synced" : sync.status === "syncing" ? "Shared library · Syncing…" : sync.pending ? "Saved on this device · Waiting to sync" : "Server unavailable · Showing saved library";
+  const documentCount = sync.status === "synced" ? sync.documents : items.length;
+  /** The filters in force, each removable where the list starts. */
+  const narrowed = [
+    favoritesOnly && { name: "Favorites", label: <span className="inline-flex items-center gap-1.5"><Star size={12} strokeWidth={1.5} fill="currentColor" className="text-accent" aria-hidden />Favorites</span>, clear: () => setFavoritesOnly(false) },
+    vf !== null && { name: voiceName(vf), label: <VoiceServiceName source={sourceOf(vf)}>{voiceName(vf)}</VoiceServiceName>, clear: () => setVf(null) },
+    cf !== null && { name: cf === UNCATEGORIZED ? "Uncategorized" : cf, label: cf === UNCATEGORIZED ? "Uncategorized" : cf, clear: () => setCf(null) },
+  ].filter((filter) => !!filter);
+  const narrowing = narrowed.length > 0 || q.trim() !== "";
   const selectedItems = items.filter((it) => selected.has(it.rec.id));
   const allVisibleSelected = filtered.length > 0 && filtered.every((it) => selected.has(it.rec.id));
-  const toggleSelected = (id: string) => setSelected((prev) => {
+  const toggleSelected = (id: string) => {
+    setSelecting(true);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleVisible = () => setSelected((prev) => {
     const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
+    for (const it of filtered) { if (allVisibleSelected) next.delete(it.rec.id); else next.add(it.rec.id); }
     return next;
   });
 
@@ -117,6 +194,7 @@ export function LibraryPage() {
     resume: (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: true, resume: it.progress < 1 }),
     revoice: (it: LibraryItem) => navigate(`/voices?for=${it.rec.id}`),
     prepare: (it: LibraryItem) => setPrepareIds([it.rec.id]),
+    details: setDetails,
     favorite: (it: LibraryItem) => {
       void useFavorites.getState().toggle(it.rec);
       toast(it.rec.favoritedAt ? "Removed from favorites" : "Added to favorites · estimating a premium read");
@@ -129,82 +207,152 @@ export function LibraryPage() {
     },
   };
 
+  const bookProps = (shelf: Shelf) => {
+    const whole = library.get(shelf.id) ?? shelf;
+    const source = whole.items.find((it) => it.rec.book?.contents) ?? whole.items.find((it) => it.rec.meta?.url);
+    return {
+      shelf, whole, grid, open: openBooks.has(shelf.id),
+      onToggle: () => toggleBook(shelf.id),
+      onContinue: () => act.resume(nextUnread(whole)),
+      onPrepare: () => setPrepareIds(whole.items.map((it) => it.rec.id)),
+      onComplete: source ? () => void useBooks.getState().complete(source.rec) : undefined,
+    };
+  };
+
   return (
-    <section data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
-      <div className="mx-auto flex max-w-[880px] flex-col gap-5">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="m-0 flex-1 font-serif text-[26px] font-medium">Library</h1>
-          <Input ref={searchRef} leading={<Search size={16} strokeWidth={1.5} aria-hidden />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search  /" aria-label="Search library" wrapperClassName="w-full sm:w-[240px]" />
-          {bp !== "md" && (
-            <div className="flex overflow-hidden rounded-control border border-line bg-bg2" role="group" aria-label="View">
-              <IconButton label="List" active={!grid} onClick={() => set("libView", "list")} className="rounded-none">
-                <LayoutList size={16} strokeWidth={1.5} />
-              </IconButton>
-              <IconButton label="Cards" active={grid} onClick={() => set("libView", "grid")} className="rounded-none">
-                <LayoutGrid size={16} strokeWidth={1.5} />
-              </IconButton>
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-[13px] text-fg2" role="status" aria-label="Library sync">
-          <span>{sync.status === "synced" ? "Shared library · Synced" : sync.status === "syncing" ? "Shared library · Syncing…" : sync.pending ? "Saved on this device · Waiting to sync" : "Server unavailable · Showing saved library"}</span>
-          {sync.status === "synced" && <span aria-label="Synced document count">· {sync.documents} {sync.documents === 1 ? "document" : "documents"}</span>}
-          <button type="button" disabled={sync.status === "syncing"} className="ml-1.5 text-accent hover:text-fg disabled:opacity-50" onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}>{sync.status === "offline" ? "Retry sync" : "Sync now"}</button>
-          {sync.status === "offline" && sync.error && <span className="basis-full">{sync.error}</span>}
-        </div>
-        {favorites.length > 0 && (
-          <FavoritesBar count={favorites.length} selected={favoritesOnly} onSelect={setFavoritesOnly} estimates={[...estimates.values()]} />
-        )}
-        {items.length > 0 && (
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by voice">
-            <Chip size="sm" selected={vf === null} onClick={() => setVf(null)}>
-              All voices
-            </Chip>
-            {usedVoices.map((id) => (
-              <Chip key={id} size="sm" selected={vf === id} onClick={() => setVf(id)}>
-                <VoiceServiceName source={voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id))} inherit={vf === id}>{voiceName(id)}</VoiceServiceName>
-              </Chip>
-            ))}
+    <section ref={scrollRef} onScroll={(e) => { left.top = e.currentTarget.scrollTop; }} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
+      <div className="mx-auto flex max-w-[880px] flex-col gap-4">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex min-w-0 flex-1 items-baseline gap-2.5 sm:flex-none">
+            <h1 className="m-0 font-serif text-[26px] font-medium">Library</h1>
+            {loaded && items.length > 0 && (
+              <span className="truncate text-[13px] tabular-nums text-fg2" aria-label={sync.status === "synced" ? "Synced document count" : undefined}>
+                {narrowing ? `${filtered.length} of ${items.length}` : documentCount} {documentCount === 1 ? "document" : "documents"}
+              </span>
+            )}
           </div>
-        )}
-        {(categories.length > 0 || (jevReady && uncategorized.length > 0)) && (
-          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by category">
-            {categories.length > 0 && (
-              <>
-                <Chip size="sm" selected={cf === null} onClick={() => setCf(null)}>All categories</Chip>
-                {categories.map(([name, count]) => (
-                  <Chip key={name} size="sm" selected={cf === name} onClick={() => setCf(name)}>{name} <span className="tabular-nums opacity-70">{count}</span></Chip>
-                ))}
-                {uncategorized.length > 0 && (
-                  <Chip size="sm" selected={cf === UNCATEGORIZED} onClick={() => setCf(UNCATEGORIZED)}>Uncategorized <span className="tabular-nums opacity-70">{uncategorized.length}</span></Chip>
+          {/* On a phone the search and its filters take the second line; from a tablet up everything shares one, and the search gives way first. */}
+          <div className="order-last -mr-2 flex min-w-0 basis-full items-center gap-1 sm:order-none sm:mr-0 sm:flex-1 sm:basis-0 sm:justify-end">
+            <Input ref={searchRef} leading={<Search size={16} strokeWidth={1.5} aria-hidden />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search  /" aria-label="Search library" wrapperClassName={cn("min-w-0 flex-1 sm:max-w-[240px]", touch && "h-10")} />
+            {items.length > 0 && (
+              <div className="flex gap-0.5" role="group" aria-label="Filters">
+                {(favorites.length > 0 || favoritesOnly) && (
+                  <IconButton label="Favorites" size={size} active={favoritesOnly} onClick={() => setFavoritesOnly(!favoritesOnly)} className={cn(favoritesOnly && ICON_ON)}>
+                    <Star size={glyph} strokeWidth={1.5} fill={favoritesOnly ? "currentColor" : "none"} />
+                  </IconButton>
                 )}
-              </>
-            )}
-            {jevReady && uncategorized.length > 0 && (
-              <Button variant="ghost" leading={<Sparkles size={14} strokeWidth={1.5} />} loading={filing} onClick={() => void fileUncategorized()}>
-                File {uncategorized.length} uncategorized with Jev
-              </Button>
+                <IconMenu label="Filter by voice" icon={<Speech size={glyph} strokeWidth={1.5} />} on={vf !== null} size={size} width={264}>
+                  {(close) => (
+                    <>
+                      <MenuOption checked={vf === null} onSelect={() => { setVf(null); close(); }}>All voices</MenuOption>
+                      {usedVoices.map((id) => (
+                        <MenuOption key={id} checked={vf === id} count={voiceCounts.get(id)} onSelect={() => { setVf(id); close(); }}>
+                          <VoiceServiceName source={sourceOf(id)}>{voiceName(id)}</VoiceServiceName>
+                        </MenuOption>
+                      ))}
+                    </>
+                  )}
+                </IconMenu>
+                {(categories.length > 0 || (jevReady && uncategorized.length > 0)) && (
+                  <IconMenu label="Filter by category" icon={filing ? <LoaderCircle size={glyph} strokeWidth={1.5} className="animate-spin motion-reduce:animate-none" /> : <Tag size={glyph} strokeWidth={1.5} />} on={cf !== null} size={size} width={288}>
+                    {(close) => (
+                      <>
+                        {categories.length > 0 && (
+                          <>
+                            <MenuOption checked={cf === null} onSelect={() => { setCf(null); close(); }}>All categories</MenuOption>
+                            {categories.map(([name, count]) => (
+                              <MenuOption key={name} checked={cf === name} count={count} onSelect={() => { setCf(name); close(); }}>{name}</MenuOption>
+                            ))}
+                            {uncategorized.length > 0 && (
+                              <MenuOption checked={cf === UNCATEGORIZED} count={uncategorized.length} onSelect={() => { setCf(UNCATEGORIZED); close(); }}>Uncategorized</MenuOption>
+                            )}
+                          </>
+                        )}
+                        {jevReady && uncategorized.length > 0 && (
+                          <>
+                            {categories.length > 0 && <MenuDivider />}
+                            <MenuAction icon={<Sparkles size={15} strokeWidth={1.5} />} disabled={filing} onSelect={() => { close(); void fileUncategorized(); }}>
+                              {filing ? "Jev is filing…" : `File ${uncategorized.length} uncategorized with Jev`}
+                            </MenuAction>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </IconMenu>
+                )}
+              </div>
             )}
           </div>
-        )}
-        {items.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex cursor-pointer items-center gap-2 text-[13px] text-fg2">
-              <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={allVisibleSelected} disabled={filtered.length === 0} onChange={() => setSelected((prev) => {
-                const next = new Set(prev);
-                for (const it of filtered) { if (allVisibleSelected) next.delete(it.rec.id); else next.add(it.rec.id); }
-                return next;
-              })} />
-              Select {q || vf || cf || favoritesOnly ? "visible" : "all"}
-            </label>
-            <span className="flex-1 text-[13px] text-fg2">{selectedItems.length > 0 ? `${selectedItems.length} selected` : "Select documents to prepare together"}</span>
-            {selectedItems.length > 0 && <Button variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>}
-            <Button leading={<Zap size={15} />} disabled={selectedItems.length === 0} onClick={() => setPrepareIds(selectedItems.map((it) => it.rec.id))}>Prepare selected</Button>
+          <div className="-mr-2 flex sm:mr-0" role="group" aria-label="Library tools">
+            <IconButton
+              label={sync.status === "offline" ? "Retry sync" : "Sync now"}
+              title={`${syncLabel} · ${sync.status === "offline" ? "Retry sync" : "Sync now"}`}
+              size={size}
+              disabled={sync.status === "syncing"}
+              className={cn(sync.status === "offline" && "text-danger")}
+              onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}
+            >
+              {sync.status === "syncing" ? <RefreshCw size={glyph} strokeWidth={1.5} className="animate-spin motion-reduce:animate-none" />
+                : sync.status === "synced" ? <CloudCheck size={glyph} strokeWidth={1.5} />
+                : sync.pending ? <CloudUpload size={glyph} strokeWidth={1.5} /> : <CloudOff size={glyph} strokeWidth={1.5} />}
+            </IconButton>
+            <IconMenu label="Sort and view" icon={<SortIcon size={glyph} strokeWidth={1.5} />} size={size} width={216}>
+              {(close) => (
+                <>
+                  <MenuGroup label="Sort">
+                    {SORTS.map(([id, name]) => (
+                      <MenuOption key={id} checked={libSort === id} onSelect={() => { set("libSort", id); close(); }}>{name}</MenuOption>
+                    ))}
+                  </MenuGroup>
+                  {/* A tablet always shows cards. */}
+                  {bp !== "md" && (
+                    <>
+                      <MenuDivider />
+                      <MenuGroup label="View">
+                        <MenuOption checked={!grid} onSelect={() => { set("libView", "list"); close(); }}>List</MenuOption>
+                        <MenuOption checked={grid} onSelect={() => { set("libView", "grid"); close(); }}>Cards</MenuOption>
+                      </MenuGroup>
+                    </>
+                  )}
+                </>
+              )}
+            </IconMenu>
+            {items.length > 0 && (
+              <IconButton label="Select" size={size} active={selecting} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+                <ListChecks size={glyph} strokeWidth={1.5} />
+              </IconButton>
+            )}
+          </div>
+        </header>
+        {/* Syncing well is the cloud icon's to say; trouble is spelled out. */}
+        <p role="status" aria-label="Library sync" className={cn("m-0 text-[13px] text-fg2", sync.status !== "offline" && "sr-only")}>
+          <span>{syncLabel}</span>
+          {sync.status === "offline" && sync.error && <span className="block">{sync.error}</span>}
+        </p>
+        {narrowed.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Active filters">
+            {narrowed.map((filter) => (
+              <button key={filter.name} type="button" aria-label={`Remove filter: ${filter.name}`} title="Remove filter" onClick={filter.clear} className="inline-flex h-8 max-w-full items-center gap-1 rounded-pill border border-line bg-bg2 pl-3 pr-2 text-[13px] text-fg transition-colors duration-fast hover:bg-bg3">
+                <span className="truncate">{filter.label}</span>
+                <X size={14} strokeWidth={1.5} className="shrink-0 text-fg2" aria-hidden />
+              </button>
+            ))}
+            {favoritesOnly && <FavoritesEstimate count={favorites.length} estimates={[...estimates.values()]} />}
           </div>
         )}
-        <PreparationQueue />
+        {selecting && (
+          <div role="toolbar" aria-label="Selection" className="sticky top-2 z-20 -mx-2 flex flex-wrap items-center gap-1.5 rounded-panel border border-line bg-bg2 py-1.5 pl-1.5 pr-2 shadow-overlay">
+            <IconButton label="Done selecting" onClick={stopSelecting}>
+              <X size={18} strokeWidth={1.5} />
+            </IconButton>
+            <span className="min-w-0 flex-1 truncate text-[13px] text-fg" role="status">{selectedItems.length > 0 ? `${selectedItems.length} selected` : "Choose documents to prepare together"}</span>
+            <Button variant="ghost" aria-pressed={allVisibleSelected} disabled={filtered.length === 0} onClick={toggleVisible}>Select {q || vf || cf || favoritesOnly ? "visible" : "all"}</Button>
+            <Button variant="primary" leading={<Zap size={15} />} disabled={selectedItems.length === 0} onClick={() => setPrepareIds(selectedItems.map((it) => it.rec.id))}>Prepare selected</Button>
+          </div>
+        )}
+        <PreparationQueue onDetails={setDetails} />
         {loaded && items.length === 0 && (
-          <EmptyState action={<Link to="/">Paste something to listen to</Link>}>Nothing here yet. Documents you listen to appear here with your place saved.</EmptyState>
+          <EmptyState action={<Link to="/compose">Paste something to listen to</Link>}>Nothing here yet. Documents you listen to appear here with your place saved.</EmptyState>
         )}
         {items.length > 0 && filtered.length === 0 && (
           <EmptyState
@@ -218,33 +366,52 @@ export function LibraryPage() {
           </EmptyState>
         )}
         {filtered.length > 0 && !grid && (
-          <ul className="-mx-5 m-0 flex list-none flex-col overflow-hidden border-y border-line bg-bg2 p-0 sm:mx-0 sm:rounded-card sm:border-x">
-            {filtered.map((it) => (
-              <Row key={it.rec.id} it={it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+          <ul className="m-0 -mx-5 flex list-none flex-col border-t border-line p-0 sm:-mx-4">
+            {entries.map((entry) => entry.kind === "doc" ? (
+              <Row key={entry.it.rec.id} it={entry.it} touch={touch} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
+            ) : (
+              <BookGroup key={entry.shelf.id} {...bookProps(entry.shelf)}>
+                {entry.shelf.items.map((it) => (
+                  <Row key={it.rec.id} it={it} inBook touch={touch} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+                ))}
+              </BookGroup>
             ))}
           </ul>
         )}
         {filtered.length > 0 && grid && (
           <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 p-0">
-            {filtered.map((it) => (
-              <CardItem key={it.rec.id} it={it} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+            {entries.map((entry) => entry.kind === "doc" ? (
+              <CardItem key={entry.it.rec.id} it={entry.it} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
+            ) : (
+              <BookGroup key={entry.shelf.id} {...bookProps(entry.shelf)}>
+                {entry.shelf.items.map((it) => (
+                  <CardItem key={it.rec.id} it={it} inBook defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+                ))}
+              </BookGroup>
             ))}
           </ul>
         )}
       </div>
-      {prepareIds && <PrepareDialog documents={items.filter((it) => prepareIds.includes(it.rec.id))} onClose={closePrepare} />}
+      {detailsItem && details && !prepareIds && <PreparationDetails it={detailsItem} reading={details} defaultVoice={defaultVoice} onClose={closeDetails} onChooseVoices={() => { setDetails(null); setPrepareIds([details.docId]); }} />}
+      {prepareIds && <PrepareDialog documents={items.filter((it) => prepareIds.includes(it.rec.id))} onClose={closePrepare} onQueued={stopSelecting} />}
     </section>
   );
 }
 
 interface ItemProps {
   it: LibraryItem;
+  /** Listed under its book, which already names the book and orders the chapters */
+  inBook?: boolean;
   defaultVoice: string;
+  /** Picking several documents: a press picks one instead of opening it */
+  selecting: boolean;
   selected: boolean;
   /** Premium read estimate, for favorites */
   estimate?: PremiumEstimate;
   toggleSelected: (id: string) => void;
   prepare: (it: LibraryItem) => void;
+  /** Show what one voice has prepared for a document. */
+  details: (reading: Reading) => void;
   favorite: (it: LibraryItem) => void;
   /** Open in the Reader without starting playback. */
   open: (it: LibraryItem) => void;
@@ -252,6 +419,15 @@ interface ItemProps {
   revoice: (it: LibraryItem) => void;
   del: (it: LibraryItem) => void;
 }
+
+/** Open a document, or pick it while selecting. Ctrl or ⌘ starts a selection from an ordinary click. */
+function activate(e: MouseEvent<HTMLElement>, { it, selecting, toggleSelected, open }: ItemProps) {
+  if (selecting || e.metaKey || e.ctrlKey) toggleSelected(it.rec.id);
+  else open(it);
+}
+
+const TITLE = "line-clamp-2 border-0 bg-transparent p-0 text-left text-[16px] font-medium leading-[22px] text-fg sm:text-[15px]";
+const PICKED = "!bg-[color-mix(in_oklch,var(--accent)_8%,var(--bg))]";
 
 function Actions({ it, resume, revoice, prepare, favorite, del, size = 36, className }: ItemProps & { size?: 32 | 36 | 44; className?: string }) {
   const starred = !!it.rec.favoritedAt;
@@ -276,22 +452,43 @@ function Actions({ it, resume, revoice, prepare, favorite, del, size = 36, class
   );
 }
 
+/** What leads a row: where the document came from, or while selecting, whether it is picked. */
+function Lead({ it, inBook, selecting, selected, className }: Pick<ItemProps, "it" | "inBook" | "selecting" | "selected"> & { className?: string }) {
+  if (selecting) {
+    return (
+      <span aria-hidden className={cn("grid size-6 shrink-0 place-items-center", className)}>
+        <span className={cn("grid size-[22px] place-items-center rounded-full border-[1.5px] transition-colors duration-fast", selected ? "border-accent bg-accent text-accent-fg" : "border-fg3")}>
+          {selected && <Check size={13} strokeWidth={3} />}
+        </span>
+      </span>
+    );
+  }
+  // A chapter sits under its book's mark.
+  if (inBook) return <span aria-hidden className={cn("size-6 shrink-0", className)} />;
+  return <SourceMark rec={it.rec} className={className} />;
+}
+
 /**
  * Facts about a document, shortest first so a narrow row breaks before the long ones.
  * Each separator belongs to the fact after it and the one starting a line is clipped,
  * so a wrap never strands a dot. The reading voice is in the prepared-audio chips.
  */
-function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate?: boolean; estimate?: PremiumEstimate; className?: string }) {
+function Meta({ it, inBook, card, estimate, className }: { it: LibraryItem; inBook?: boolean; /** A card has no trailing edge, so its facts carry the date and readings too */ card?: boolean; estimate?: PremiumEstimate; className?: string }) {
+  const { author } = catalogue(it.rec);
   return (
-    <div className={cn("min-w-0 overflow-hidden text-[12px] leading-[18px] text-fg2", className)}>
+    <div className={cn("min-w-0 overflow-hidden text-[13px] leading-5 text-fg2", className)}>
       <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
-        <Fact>
-          <SourceIcon rec={it.rec} />
-          <span className="truncate">{it.rec.domain}</span>
-        </Fact>
+        {author && <Fact title="Author"><span className="truncate">{author}</span></Fact>}
+        <Fact><span className="truncate">{it.rec.domain}</span></Fact>
         <Fact className="tabular-nums">{fmtTime(it.duration)}</Fact>
-        {withDate && <Fact>{dateLabel(it.rec.updatedAt)}</Fact>}
-        {it.reads > 0 && <Fact><ReadBadge reads={it.reads} /></Fact>}
+        {it.rec.book && !inBook && (
+          <Fact title={`${partNames(it.rec.book).One} ${it.rec.book.chapter} of ${it.rec.book.title}`}>
+            <BookOpen size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
+            <span className="truncate">{partNames(it.rec.book).short} {it.rec.book.chapter} · {it.rec.book.title}</span>
+          </Fact>
+        )}
+        {card && <Fact title={`Added ${dateLabel(it.rec.createdAt)}`} className="tabular-nums">{agoLabel(it.rec.createdAt)}</Fact>}
+        {card && it.reads > 0 && <Fact><ReadBadge reads={it.reads} /></Fact>}
         {it.rec.category && (
           <Fact title={it.rec.category.by === "jev" ? "Filed by Jev" : "Category"}>
             <Tag size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
@@ -301,6 +498,78 @@ function Meta({ it, withDate, estimate, className }: { it: LibraryItem; withDate
         {it.rec.favoritedAt && <Fact><PremiumBadge it={it} estimate={estimate} /></Fact>}
       </div>
     </div>
+  );
+}
+
+/** A chapter listed under its book leads with its number. */
+const rowTitle = ({ it, inBook }: Pick<ItemProps, "it" | "inBook">) => `${inBook && it.rec.book ? `${it.rec.book.chapter}. ` : ""}${catalogue(it.rec).title}`;
+
+/**
+ * A book's chapters behind one row: how far through the book you are, with the chapters
+ * a press away. Continue picks up at the first chapter you haven't finished.
+ */
+function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, onComplete, children }: {
+  /** The chapters that pass the current filters */
+  shelf: Shelf;
+  /** Every chapter in the library */
+  whole: Shelf;
+  grid: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onContinue: () => void;
+  onPrepare: () => void;
+  /** Fetch the chapters the library is missing */
+  onComplete?: () => void;
+  children: ReactNode;
+}) {
+  const adding = useBooks((s) => s.adding[shelf.id]);
+  const total = whole.items.reduce((sum, it) => sum + it.duration, 0);
+  const heard = whole.items.reduce((sum, it) => sum + it.duration * (finished(it) ? 1 : it.progress), 0);
+  const read = whole.items.filter(finished).length;
+  const have = new Set(whole.items.map((it) => it.rec.book!.chapter)).size;
+  const missing = whole.chapters - have;
+  const { one, many, One } = partNames(whole);
+  // A course posts lectures as it runs, so its page is worth asking again even when nothing is missing.
+  const growing = whole.kind === "course" && !!whole.contents;
+  const started = heard > 0;
+  const panel = `book-${shelf.id.replace(/\W/g, "-")}`;
+  return (
+    <li data-book={shelf.title} className={cn(grid ? "col-span-full overflow-hidden rounded-card border border-line bg-bg2" : "border-b border-line")}>
+      <div
+        onClick={(e) => { if (opensDocument(e)) onToggle(); }}
+        className={cn("grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 transition-colors duration-fast", grid ? "p-4" : "px-5 py-3.5 active:bg-bg2 sm:px-4 [@media(hover:hover)]:hover:bg-bg2")}
+      >
+        <BookMark />
+        <div className={cn(TITLE, "min-w-0")}>{shelf.title}</div>
+        <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} ${many} of ${shelf.title}`} onClick={onToggle} className="-mr-1 grid size-[22px] shrink-0 place-items-center rounded-control border-0 bg-transparent text-fg3 hover:text-fg">
+          <ChevronRight size={16} strokeWidth={1.5} className={cn("transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
+        </button>
+        <div className="col-span-2 col-start-2 mt-0.5 min-w-0 overflow-hidden text-[13px] leading-5 text-fg2">
+          <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
+            <Fact>{whole.kind === "course" ? "Course" : "Book"}</Fact>
+            <Fact className="tabular-nums">{missing > 0 ? `${have} of ${whole.chapters} ${many}` : `${have} ${many}`}</Fact>
+            <Fact className="tabular-nums">{fmtTime(total)}</Fact>
+            {read > 0 && <Fact className="tabular-nums text-accent">{read === have ? "All read" : `${read} read`}</Fact>}
+            {shelf.items.length < whole.items.length && <Fact className="tabular-nums">{shelf.items.length} shown</Fact>}
+          </div>
+        </div>
+        <div className="col-span-2 col-start-2 mt-1 flex items-start justify-between gap-3">
+          <div className="-ml-2 flex flex-wrap items-center gap-x-1 text-[13px] text-fg2">
+            <Button variant="ghost" className="px-2" aria-label={`${started ? "Continue" : "Start"} ${shelf.title}`} leading={<Play size={15} strokeWidth={1.5} />} onClick={onContinue}>{started ? "Continue" : "Start"}</Button>
+            <Button variant="ghost" className="px-2" aria-label={`Prepare audio for ${shelf.title}`} leading={<Zap size={15} strokeWidth={1.5} />} onClick={onPrepare}>Prepare</Button>
+            {adding
+              ? <span role="status" className="px-2 tabular-nums">{adding.total ? `Adding ${many} · ${adding.done} of ${adding.total}` : `Checking for new ${many}…`}</span>
+              : (missing > 0 || growing) && onComplete && <Button variant="ghost" className="px-2" leading={<ListPlus size={15} strokeWidth={1.5} />} onClick={onComplete}>{missing <= 0 ? `Check for new ${many}` : missing === 1 ? `Add the missing ${one}` : `Add the ${missing} missing ${many}`}</Button>}
+          </div>
+          <Progress value={total ? heard / total : 0} className="h-[34px]" />
+        </div>
+      </div>
+      {open && (
+        <ul id={panel} aria-label={`${One}s of ${shelf.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 bg-bg p-4" : "flex flex-col [&>li:last-child]:border-b-0")}>
+          {children}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -330,8 +599,8 @@ function PremiumBadge({ it, estimate }: { it: LibraryItem; estimate?: PremiumEst
   );
 }
 
-/** Favorites filter, with what a premium read of every favorite would cost per paid voice. */
-function FavoritesBar({ count, selected, onSelect, estimates }: { count: number; selected: boolean; onSelect: (on: boolean) => void; estimates: PremiumEstimate[] }) {
+/** What a premium read of every favorite would cost per paid voice, shown while the favorites are what is listed. */
+function FavoritesEstimate({ count, estimates }: { count: number; estimates: PremiumEstimate[] }) {
   const totals = new Map<string, { label: string; cost: number }>();
   for (const estimate of estimates) {
     for (const option of estimate.options) {
@@ -340,20 +609,11 @@ function FavoritesBar({ count, selected, onSelect, estimates }: { count: number;
       totals.set(option.id, total);
     }
   }
+  if (!totals.size) return null;
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <div className="flex gap-1.5" role="group" aria-label="Filter by favorites">
-        <Chip size="sm" selected={!selected} onClick={() => onSelect(false)}>All documents</Chip>
-        <Chip size="sm" selected={selected} onClick={() => onSelect(true)}>
-          <Star size={12} strokeWidth={1.5} fill="currentColor" aria-hidden /> Favorites <span className="tabular-nums opacity-70">{count}</span>
-        </Chip>
-      </div>
-      {totals.size > 0 && (
-        <span className="text-[12px] text-fg2" aria-label="Premium read estimate for all favorites">
-          Premium read of {count === 1 ? "your favorite" : `all ${count} favorites`}: {[...totals.values()].map((t) => `${t.label} ≈${formatUsd(t.cost)}`).join(" · ")}
-        </span>
-      )}
-    </div>
+    <span className="basis-full text-[12px] text-fg2" aria-label="Premium read estimate for all favorites">
+      Premium read of {count === 1 ? "your favorite" : `all ${count} favorites`}: {[...totals.values()].map((t) => `${t.label} ≈${formatUsd(t.cost)}`).join(" · ")}
+    </span>
   );
 }
 
@@ -368,12 +628,14 @@ function ReadBadge({ reads }: { reads: number }) {
   );
 }
 
-/** Listening progress: a ring with the percentage inside, or a check once finished. */
-function ReadProgress({ value, size = 40, className }: { value: number; size?: 36 | 40; className?: string }) {
-  const percent = Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+const percentOf = (value: number) => Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+
+/** Listening progress for a card: a ring with the percentage inside, or a check once finished. */
+function ReadProgress({ value, className }: { value: number; className?: string }) {
+  const percent = percentOf(value);
   return (
-    <div className={cn("relative grid shrink-0 place-items-center", className)} style={{ width: size, height: size }}>
-      <ProgressRing value={value} size={size} />
+    <div className={cn("relative grid size-9 shrink-0 place-items-center", className)}>
+      <ProgressRing value={value} size={36} />
       <span aria-hidden className="absolute inset-0 grid place-items-center text-[10px] font-medium tabular-nums text-fg2">
         {percent >= 100 ? <Check size={14} strokeWidth={2} className="text-accent" /> : `${percent}%`}
       </span>
@@ -381,28 +643,36 @@ function ReadProgress({ value, size = 40, className }: { value: number; size?: 3
   );
 }
 
-/** Site favicon for articles, via the server so the browser never reports library sites elsewhere. */
-function SourceIcon({ rec }: { rec: LibraryItem["rec"] }) {
-  const [failed, setFailed] = useState(false);
-  const site = (rec.source === "url" || rec.source === "share") && rec.domain.includes(".") && !/[\s/]/.test(rec.domain);
-  if (site && !failed) {
-    return <img src={`/api/favicon?host=${encodeURIComponent(rec.domain)}`} alt="" width={14} height={14} loading="lazy" decoding="async" onError={() => setFailed(true)} className="size-3.5 shrink-0 rounded-[3px]" />;
-  }
-  const Icon = site ? Globe : rec.source === "file" ? FileText : ClipboardList;
-  return <Icon size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />;
+/** Listening progress on a row's trailing edge: past readings, the percentage once begun, and a small ring. */
+function Progress({ value, reads = 0, className }: { value: number; reads?: number; className?: string }) {
+  const percent = percentOf(value);
+  return (
+    <span className={cn("flex h-7 shrink-0 items-center gap-1.5 text-[12px] text-fg2", className)}>
+      {reads > 0 && <ReadBadge reads={reads} />}
+      {percent > 0 && percent < 100 && <span aria-hidden className="tabular-nums">{percent}%</span>}
+      {percent >= 100 && reads === 0 && <Check size={13} strokeWidth={2} className="text-accent" aria-hidden />}
+      <ProgressRing value={value} size={22} stroke={2} />
+    </span>
+  );
 }
 
 /** Five 44px actions, their gaps and the panel's padding. */
 const SWIPE_W = 5 * 44 + 4 * 2 + 16;
 
-/** List row. Hover reveals actions; on touch, swipe left reveals them. */
+/**
+ * List row, edge to edge: a press anywhere opens the document. Hover reveals its actions
+ * over the trailing edge; on touch, swipe left reveals them.
+ */
 function Row(props: ItemProps & { touch: boolean }) {
-  const { it, touch } = props;
+  const { it, touch, selecting, selected, inBook } = props;
   const [dx, setDx] = useState(0);
   const [open, setOpen] = useState(false);
   const start = useRef<{ x: number; y: number; id: number } | null>(null);
+  /** The press now ending was a swipe, so it must not also open the document */
+  const swiped = useRef(false);
 
   const onDown = (e: PointerEvent<HTMLLIElement>) => {
+    swiped.current = false;
     if (!touch || e.pointerType === "mouse") return;
     start.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
   };
@@ -411,6 +681,7 @@ function Row(props: ItemProps & { touch: boolean }) {
     const ddx = e.clientX - start.current.x;
     const ddy = e.clientY - start.current.y;
     if (Math.abs(ddy) > Math.abs(ddx)) return;
+    if (Math.abs(ddx) > 8) swiped.current = true;
     setDx(Math.max(-SWIPE_W, Math.min(0, (open ? -SWIPE_W : 0) + ddx)));
   };
   const onUp = () => {
@@ -421,10 +692,17 @@ function Row(props: ItemProps & { touch: boolean }) {
     setDx(o ? -SWIPE_W : 0);
   };
   const offset = touch ? dx : 0;
+  const press = (e: MouseEvent<HTMLElement>) => {
+    // The click that ends a swipe only reveals the actions.
+    if (swiped.current) { swiped.current = false; return; }
+    // With its actions swiped into view, a press on the row puts them away.
+    if (touch && open) { setOpen(false); setDx(0); return; }
+    activate(e, props);
+  };
 
   return (
     <li
-      className="group relative touch-pan-y overflow-hidden border-b border-line last:border-b-0"
+      className="group relative touch-pan-y overflow-hidden border-b border-line"
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
@@ -436,45 +714,56 @@ function Row(props: ItemProps & { touch: boolean }) {
           <Actions {...props} size={44} />
         </div>
       )}
-      {/* The checkbox hangs in a narrow margin and the progress ring trails the title, so text runs the width of the row. */}
       <div
-        className={cn("relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 bg-bg2 px-5 py-4 transition-[background-color,transform] duration-fast group-hover:bg-bg3 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:gap-x-3.5", props.selected && "!bg-bg3")}
+        onClick={(e) => { if (opensDocument(e)) press(e); }}
+        className={cn(
+          "relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 bg-bg px-5 py-3.5 transition-[background-color,transform] duration-fast active:bg-bg2 sm:px-4 [@media(hover:hover)]:group-hover:bg-bg2",
+          selected && PICKED,
+        )}
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
       >
-        <DocumentSelection {...props} className="col-start-1 row-start-1 mt-1" />
-        <button type="button" onClick={() => props.open(it)} className="col-start-2 row-start-1 line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
-          {it.rec.title}
-        </button>
-        <Meta it={it} estimate={props.estimate} withDate className="col-start-2 row-start-2" />
-        <div className="col-span-2 col-start-2 row-start-3 mt-1.5 sm:col-span-1 sm:col-start-2"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
-        <ReadProgress value={it.progress} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3 sm:row-start-1" />
-        {!touch && <Actions {...props} className="col-span-2 col-start-2 row-start-4 -ml-2 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 sm:col-span-1 sm:col-start-3 sm:row-span-3 sm:row-start-1 sm:-my-0.5 sm:ml-0 sm:opacity-0" />}
+        <Lead {...props} />
+        <div className="min-w-0">
+          <button type="button" aria-pressed={selecting ? selected : undefined} onClick={press} className={cn(TITLE, inBook && "font-normal")}>
+            {rowTitle(props)}
+          </button>
+        </div>
+        <time dateTime={Number.isFinite(it.rec.createdAt) ? new Date(it.rec.createdAt).toISOString() : undefined} title={`Added ${dateLabel(it.rec.createdAt)}`} className="shrink-0 text-[12px] leading-[22px] tabular-nums text-fg2">
+          {agoLabel(it.rec.createdAt)}
+        </time>
+        <Meta it={it} inBook={inBook} estimate={props.estimate} className="col-span-2 col-start-2 mt-0.5" />
+        <div className="col-span-2 col-start-2 mt-2 flex items-start justify-between gap-3">
+          <PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} />
+          <Progress value={it.progress} reads={it.reads} />
+        </div>
+        {!touch && !selecting && (
+          <Actions {...props} size={32} className="absolute right-2 top-2 rounded-control bg-bg2 opacity-0 shadow-[-12px_0_10px_var(--bg2)] transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 sm:right-2.5" />
+        )}
       </div>
     </li>
   );
 }
 
 function CardItem(props: ItemProps) {
-  const { it } = props;
+  const { it, selecting, selected } = props;
   return (
-    <li className={cn("group flex min-h-[170px] flex-col gap-3.5 rounded-card border border-line bg-bg2 p-[18px] transition-colors duration-fast hover:border-fg3", props.selected && "!border-accent")}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-3"><DocumentSelection {...props} /><ReadProgress value={it.progress} size={36} /></div>
-        <Actions {...props} size={32} className="opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100" />
+    <li
+      onClick={(e) => { if (opensDocument(e)) activate(e, props); }}
+      className={cn("group flex min-h-[170px] cursor-pointer flex-col gap-3 rounded-card border border-line bg-bg2 p-4 transition-colors duration-fast hover:border-fg3", selected && "!border-accent")}
+    >
+      <div className="flex h-9 items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5"><Lead {...props} inBook={false} /><ReadProgress value={it.progress} /></div>
+        {!selecting && <Actions {...props} size={32} className="-mr-1.5 opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100" />}
       </div>
       <div className="flex-1">
-        <button type="button" onClick={() => props.open(it)} className="line-clamp-3 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
-          {it.rec.title}
+        <button type="button" aria-pressed={selecting ? selected : undefined} onClick={(e) => activate(e, props)} className={cn(TITLE, "line-clamp-3 sm:text-[16px]")}>
+          {rowTitle(props)}
         </button>
+        <Meta it={it} inBook={props.inBook} estimate={props.estimate} card className="mt-1" />
       </div>
-      <div className="flex flex-col gap-2.5 border-t border-line pt-3">
-        <Meta it={it} estimate={props.estimate} />
-        <PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} />
+      <div className="border-t border-line pt-3">
+        <PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} />
       </div>
     </li>
   );
-}
-
-function DocumentSelection({ it, selected, toggleSelected, className }: ItemProps & { className?: string }) {
-  return <input type="checkbox" aria-label={`Select ${it.rec.title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} onPointerDown={(e) => e.stopPropagation()} className={cn("size-4 shrink-0 cursor-pointer accent-[var(--accent)]", className)} />;
 }

@@ -43,7 +43,8 @@ test("pasting in text fields and editable content leaves normal editing alone", 
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByLabel("Text to read")).toHaveValue("Existing draft");
   await page.getByRole("link", { name: "Library", exact: true }).click();
-  await paste(page, TEXT, "input");
+  // Named, so the paste waits for the Library instead of catching Compose on its way out.
+  await paste(page, TEXT, 'input[aria-label="Search library"]');
   await page.evaluate(() => {
     const editor = document.createElement("div");
     editor.contentEditable = "true";
@@ -95,5 +96,5 @@ test("repeated paste while fetching imports only one document", async ({ page })
   finishFetch();
   await expectReading(page);
   await page.getByRole("link", { name: "Library", exact: true }).click();
-  await expect(page.locator("li")).toHaveCount(1);
+  await expect(page.locator('[data-screen="library"] li')).toHaveCount(1);
 });

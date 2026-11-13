@@ -4,7 +4,7 @@ import { FISH_PRESET_VOICES, JAMAICAN_PATOIS_VOICE_ID, LOCAL_VOICE, OPENAI_VOICE
 import { cacheKey } from "../engine/providers";
 import type { DocRecord } from "./db";
 import { codeKey } from "./codeBlocks";
-import { preparedVoices } from "./prepared";
+import { planReading, preparedVoices, sharedPassages } from "./prepared";
 
 const rec: DocRecord = { id: "d", title: "Document", text: "One two. Three four.\n\nFive six.", source: "paste", domain: "Text", voice: null, chars: 32, createdAt: 0, updatedAt: 0 };
 const [bella, jasper] = PRESET_VOICES;
@@ -53,5 +53,32 @@ describe("prepared audio coverage", () => {
     expect(preparedVoices(adapted, [voice], keys, "gpt-4o-mini-tts")[0].fraction).toBe(1);
     expect(preparedVoices({ ...adapted, text: "Changed." }, [voice], keys, "gpt-4o-mini-tts")).toEqual([]);
     expect(preparedVoices(rec, [voice], keys, "gpt-4o-mini-tts")).toEqual([]);
+  });
+});
+
+describe("passages shared between documents", () => {
+  const notice = "A code example appears here. Its spoken explanation is unavailable, so we’ll skip the code and continue.";
+  const chapter = (id: string, body: string): DocRecord => ({ ...rec, id, text: `${body}\n\n${notice}\n\nNote` });
+  const first = chapter("one", "The first chapter explains routing in detail.");
+  const second = chapter("two", "The second chapter explains caching in detail.");
+  const shared = sharedPassages([first, second].map(planReading));
+
+  it("finds passages read word for word by more than one document", () => {
+    expect([...shared].sort()).toEqual([notice, "Note"].sort());
+  });
+
+  it("doesn't count a sibling's shared audio as preparing this document", () => {
+    const keys = new Set([key(notice), key("Note"), key("The first chapter explains routing in detail.")]);
+    expect(preparedVoices(second, [bella], keys, "gpt-4o-mini-tts", shared)).toEqual([]);
+    expect(preparedVoices(first, [bella], keys, "gpt-4o-mini-tts", shared)[0].fraction).toBe(1);
+    // Without the shared set, the boilerplate alone would read as partly prepared.
+    expect(preparedVoices(second, [bella], keys, "gpt-4o-mini-tts")[0].fraction).toBeGreaterThan(0);
+  });
+
+  it("measures a document made only of shared passages by all of them", () => {
+    const copy = { ...first, id: "copy" };
+    const all = sharedPassages([first, copy].map(planReading));
+    const keys = new Set(planReading(first).original.passages.map((passage) => key(passage.text)));
+    expect(preparedVoices(copy, [bella], keys, "gpt-4o-mini-tts", all)[0].fraction).toBe(1);
   });
 });

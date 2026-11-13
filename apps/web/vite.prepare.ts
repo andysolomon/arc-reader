@@ -4,9 +4,10 @@ import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
 import type { PreparationRequest, PreparationStatus, SharedPreparation } from "./src/engine/preparation";
-import { PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
+import { PHONON_ENGINE, PHONON_WORKER, forPhonon, PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
 import { SpeechActivity } from "./vite.speech-activity";
 import { mp3VoicedShare } from "./vite.voicing";
+import { sendJson } from "./vite.json";
 import { GARBLED_BELOW, GARBLED_RETRIES } from "./src/engine/voicing";
 
 interface Job extends PreparationStatus {
@@ -15,6 +16,10 @@ interface Job extends PreparationStatus {
   start: number;
   workerId?: string;
   createdAt?: number;
+  /** When a reader moved it to the front of the queue; the latest move goes first. */
+  priority?: number;
+  /** It also takes its machine from the reading being prepared there, which resumes afterwards. */
+  urgent?: boolean;
 }
 interface Audio { body: Buffer; type: string; duration?: string; words?: string }
 class HttpError extends Error {
@@ -22,9 +27,13 @@ class HttpError extends Error {
 }
 class RetryableError extends Error {}
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** Times a refused passage is asked for again in a reading the speech server has already rendered part of. */
+const REFUSAL_RETRIES = 3;
 const ALIAS = /^(alloy|ash|ballad|cedar|coral|echo|fable|marin|nova|onyx|sage|shimmer|verse)$/;
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const signature = (requests: PreparationRequest[]) => digest(requests.map(({ cached: _, ...item }) => item));
+/** Readings a reader moved up come first, the latest move leading; the rest keep arrival order. */
+const inOrder = (a: Job, b: Job) => (b.priority || 0) - (a.priority || 0) || (a.createdAt || 0) - (b.createdAt || 0);
 
 /** Disk-backed jobs belong to the web server, never to an HTTP connection. */
 export class PreparationService {
@@ -40,9 +49,12 @@ export class PreparationService {
   private retryTimer?: ReturnType<typeof setTimeout>;
   private uploaded = new Set<string>();
   private discovery: PreparationWorkers;
+  private phononModel: string;
   private ready: Promise<void>;
   constructor(env: Record<string, string>, private directory = resolve(env.PREPARATION_DATA_DIR || ".readaloud-preparations"), private activity = new SpeechActivity()) {
     this.discovery = new PreparationWorkers(env);
+    // The same model the bundle was built with, so prepared audio matches the device's cache keys.
+    this.phononModel = env.VITE_PHONON_TTS_MODEL || "gradium/phonon-31m-en";
     this.ready = this.restore();
   }
 
@@ -58,7 +70,8 @@ export class PreparationService {
       try {
         const job = JSON.parse(await readFile(path, "utf8")) as Job;
         this.jobs.set(job.id, job);
-        if (job.state === "running" && job.workerId && !this.discovery.workers.some((worker) => worker.id === job.workerId)) {
+        const machine = job.workerId || (forPhonon(job.requests) ? PHONON_WORKER : undefined);
+        if (job.state === "running" && machine && !this.discovery.workers.some((worker) => worker.id === machine)) {
           job.state = "error";
           job.error = "The preparation machine is no longer configured. Prepare this reading again.";
           await this.persist(job);
@@ -84,14 +97,42 @@ export class PreparationService {
   private status(job: Job): PreparationStatus {
     const worker = this.discovery.workers.find((worker) => worker.id === job.workerId);
     const queued = job.state === "running" && !this.active.has(job.id);
-    // A reading kept on its original machine, or one only the Mac has the voice for,
-    // waits for that machine even when the other one is free.
-    const waitingFor = !queued ? undefined : worker
-      ? worker.name : this.discovery.workers.length > 1 && this.overflow.get(job.id) === false ? this.discovery.workers[0].name : undefined;
+    // A reading kept on its original machine, a Phonon reading, or one only the Mac has
+    // the voice for, waits for that machine even when another one is free.
+    const reserved = worker || this.discovery.only(job.requests);
+    const waitingFor = !queued ? undefined : reserved
+      ? reserved.name : this.overflow.get(job.id) === false ? this.discovery.workers[0].name : undefined;
     return { id: job.id, state: job.state, done: job.done, total: job.total, queued,
       ...(waitingFor ? { waitingFor } : {}),
+      ...(queued ? this.place(job) : {}),
       ...(worker && (job.state !== "running" || this.active.has(job.id)) ? { worker: worker.name } : {}),
       ...(job.error ? { error: job.error } : {}) };
+  }
+
+  private waiting() {
+    return [...this.jobs.values()].filter((job) => job.state === "running" && !this.active.has(job.id));
+  }
+
+  /** The machine a waiting reading goes to: the one holding its audio, Phonon's, or the
+   * primary, which takes new readings whenever it is free. */
+  private machineFor(job: Job) {
+    return job.workerId || this.discovery.only(job.requests)?.id || this.discovery.workers[0].id;
+  }
+
+  /** Where a waiting reading stands among the others that could take its machine. */
+  private place(job: Job): Pick<PreparationStatus, "ahead" | "prioritized" | "busy"> {
+    // Readings submitted in the same millisecond keep the order they were stored in, as assignment does.
+    const waiting = this.waiting().sort(inOrder);
+    const ahead = waiting.slice(0, waiting.indexOf(job)).filter((other) => forPhonon(other.requests) === forPhonon(job.requests)
+      && (!other.workerId || !job.workerId || other.workerId === job.workerId)).length;
+    const machine = this.machineFor(job);
+    return { ahead, ...(job.priority ? { prioritized: true } : {}),
+      ...([...this.active.values()].some((worker) => worker.id === machine) ? { busy: true } : {}) };
+  }
+
+  /** A reading asked to start now takes this machine once the passage in hand is finished. */
+  private outranked(job: Job, worker: PreparationWorker) {
+    return this.waiting().some((other) => other.urgent && (other.priority || 0) > (job.priority || 0) && this.machineFor(other) === worker.id);
   }
 
   private notify(job: Job) {
@@ -117,9 +158,9 @@ export class PreparationService {
   private schedule() {
     // Discovery on a disconnected secondary must never stall the primary, so the
     // primary only reads answers that have already arrived.
-    const secondary = this.discovery.workers.find((worker) => worker.id !== "primary");
+    const secondary = this.discovery.workers.find((worker) => worker.id === "secondary");
     for (const job of this.jobs.values()) {
-      if (!secondary || job.state !== "running" || job.workerId || this.active.has(job.id)) continue;
+      if (!secondary || job.state !== "running" || job.workerId || this.active.has(job.id) || this.discovery.only(job.requests)) continue;
       void this.discovery.supports(secondary, job.requests).then((supported) => { this.overflow.set(job.id, supported); });
     }
     for (const worker of this.discovery.workers) {
@@ -135,19 +176,25 @@ export class PreparationService {
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     // The Mac takes the oldest reading only it can prepare before ones the secondary
     // can take while the Mac is busy. Unknown support keeps arrival order.
+    const overflow = worker.id === "secondary";
     if (worker.id === "primary") pending.sort((a, b) => Number(this.overflow.get(a.id) !== false) - Number(this.overflow.get(b.id) !== false));
+    // A reading a reader moved up goes before all of that.
+    pending.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     for (const job of pending) {
       // Keep partial audio on its original machine after a web restart.
       if (job.workerId && job.workerId !== worker.id) continue;
+      // Phonon readings wait for the Phonon server, which takes nothing else.
+      if (forPhonon(job.requests) !== (worker.id === PHONON_WORKER)) continue;
       // New readings belong to the primary whenever it is free. The secondary
       // is overflow capacity; discovery completion order must not decide priority.
-      if (worker.id !== "primary" && !job.workerId && !this.primaryBusy()) return;
+      if (overflow && !job.workerId && !this.primaryBusy()) return;
       const supported = await this.discovery.supports(worker, job.requests);
-      if (worker.id !== "primary" && !job.workerId) this.overflow.set(job.id, supported);
-      if (!supported) continue;
+      if (overflow && !job.workerId) this.overflow.set(job.id, supported);
+      // A reading this machine cannot take must not keep pausing the ones it can.
+      if (!supported) { if (this.machineFor(job) === worker.id) job.urgent = undefined; continue; }
       if (job.state !== "running" || this.active.has(job.id)) continue;
       // The primary may have finished while secondary discovery was in flight.
-      if (worker.id !== "primary" && !job.workerId && !this.primaryBusy()) return;
+      if (overflow && !job.workerId && !this.primaryBusy()) return;
       job.workerId = worker.id;
       this.active.set(job.id, worker);
       this.notify(job);
@@ -172,8 +219,10 @@ export class PreparationService {
     this.retryTimer = undefined;
     // A restored secondary job can outlive a temporary outage, even when the
     // primary has no work whose completion could wake the scheduler.
-    if ([...this.jobs.values()].some((job) => job.state === "running" && !this.active.has(job.id))
-      && this.discovery.workers.some((worker) => ![...this.active.values()].some((active) => active.id === worker.id))) {
+    const idle = this.discovery.workers.filter((worker) => ![...this.active.values()].some((active) => active.id === worker.id));
+    // An idle Phonon server is no reason to keep asking on behalf of a VoiceStudio reading, or the reverse.
+    if ([...this.jobs.values()].some((job) => job.state === "running" && !this.active.has(job.id)
+      && idle.some((worker) => forPhonon(job.requests) === (worker.id === PHONON_WORKER)))) {
       this.retryTimer = setTimeout(() => this.schedule(), 5000);
       this.retryTimer.unref();
     }
@@ -194,9 +243,15 @@ export class PreparationService {
         || (item.profile !== undefined && typeof item.profile !== "boolean")
         || (item.cached !== undefined && typeof item.cached !== "boolean")
         || !["openai", "readaloud"].includes(item.protocol)) {
-        throw new HttpError(400, "Preparation supports VoiceStudio voices only.");
+        throw new HttpError(400, "Preparation supports VoiceStudio and Phonon voices only.");
       }
     }
+    // A reading has one voice, so one machine. Phonon voices are presets on its own server.
+    const phonon = requests.filter((item) => item.engine === PHONON_ENGINE);
+    if (phonon.length && (phonon.length !== requests.length || phonon.some((item) => item.profile || item.protocol !== "openai"))) {
+      throw new HttpError(400, "Invalid audio preparation request.");
+    }
+    if (phonon.length && !this.discovery.only(requests)) throw new HttpError(400, "No Phonon server is configured for audio preparation.");
     const fingerprint = signature(requests);
     const existing = [...this.jobs.values()].find((job) => job.state === "running" && signature(job.requests) === fingerprint);
     if (existing) return this.status(existing);
@@ -237,12 +292,28 @@ export class PreparationService {
     return this.status(job);
   }
 
+  /** Move a waiting reading to the front of its queue. With `now`, the reading its machine
+   * is preparing stops after the passage in hand and resumes once this one is done. */
+  async prioritize(id: string, now = false) {
+    const job = await this.job(id);
+    if (job.state === "running" && !this.active.has(job.id)) {
+      job.priority = Math.max(Date.now(), ...[...this.jobs.values()].map((other) => (other.priority || 0) + 1));
+      job.urgent = now || undefined;
+      await this.persist(job);
+      this.schedule();
+    }
+    return this.status(job);
+  }
+
   private async run(job: Job, worker: PreparationWorker) {
     try {
       for (let k = 0; k < job.total; k++) {
         if (job.state !== "running") return;
+        // Still running, so it rejoins the queue with its finished passages kept.
+        if (this.outranked(job, worker)) return;
         const index = (job.start + k) % job.total;
         if (job.completed.includes(index)) continue;
+        let refusals = 0;
         for (let attempt = 0; ; attempt++) {
           try {
             if (!job.requests[index].cached) {
@@ -258,7 +329,12 @@ export class PreparationService {
             if (job.state !== "running") return;
             // A restarting speech server must not turn durable work into a
             // terminal error. Keep this passage pending until it comes back.
-            if (!(error instanceof TypeError) && !(error instanceof RetryableError) && (error as Error)?.name !== "TimeoutError") throw error;
+            const restarting = error instanceof TypeError || error instanceof RetryableError || (error as Error)?.name === "TimeoutError";
+            // Nor must one refusal partway through: a speech server whose own storage
+            // hiccups rejects a single request for a voice it rendered a second earlier.
+            // A reading refused from its first passage still fails at once.
+            const rendered = job.requests.some((request, done) => !request.cached && job.completed.includes(done));
+            if (!restarting && (!rendered || refusals++ >= REFUSAL_RETRIES)) throw error;
             await this.wait(job, Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5)));
             if (job.state !== "running") return;
           }
@@ -293,7 +369,7 @@ export class PreparationService {
     while (job.state === "running" && !this.active.has(job.id) && !job.completed.includes(index)) await this.wait(job);
     // Only read completed or in-flight work; playback never starts a cancelled job.
     if (job.state === "error" && !job.completed.includes(index)) throw new HttpError(410, "This passage was not prepared. Retry speech generation.");
-    const worker = this.discovery.workers.find((worker) => worker.id === job.workerId) || this.discovery.workers[0];
+    const worker = this.discovery.workers.find((worker) => worker.id === job.workerId) || this.discovery.only(job.requests) || this.discovery.workers[0];
     return this.audioFor(job.requests[index], () => job.state === "running" && this.active.has(job.id), worker);
   }
 
@@ -389,6 +465,10 @@ export class PreparationService {
   }
 
   private async synthesize(item: PreparationRequest, worker: PreparationWorker) {
+    if (worker.id === PHONON_WORKER) {
+      // The device's voice id is `phonon:<name>`; the server knows the bare name.
+      return this.upstream(worker, "/v1/audio/speech", { model: this.phononModel, input: item.text, voice: item.voice.replace(/^phonon:/, ""), response_format: "mp3" });
+    }
     if (item.protocol === "readaloud") return this.upstream(worker, "/tts", { text: item.text, voice: item.voice, provider: item.engine, format: "mp3" });
     if (item.profile) {
       const response = await this.upstream(worker, "/engines");
@@ -405,10 +485,7 @@ export class PreparationService {
   }
 }
 
-function send(res: ServerResponse, status: number, data: unknown) {
-  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
-  res.end(JSON.stringify(data));
-}
+const send = (res: ServerResponse, status: number, data: unknown) => sendJson(res.req, res, status, data);
 async function body(req: IncomingMessage) {
   let length = 0;
   const chunks: Buffer[] = [];
@@ -430,10 +507,15 @@ export function audioPreparation(env: Record<string, string>, activity?: SpeechA
           throw new HttpError(403, "Use the app to prepare audio.");
         }
         const path = new URL(req.url || "/", "http://localhost").pathname;
-        if (req.method === "GET" && path === "/") return send(res, 200, await service.list());
+        // Every open app polls this list; an unchanged list answers 304 with no body.
+        if (req.method === "GET" && path === "/") return sendJson(req, res, 200, await service.list(), { etag: true });
         if (req.method === "POST" && path === "/") return send(res, 202, await service.submit(await body(req)));
-        const match = /^\/([a-f0-9-]{36})(?:\/audio\/(\d+))?$/.exec(path);
+        const match = /^\/([a-f0-9-]{36})(?:\/audio\/(\d+)|\/(priority))?$/.exec(path);
         if (!match) throw new HttpError(404, "Not found.");
+        if (match[3]) {
+          if (req.method !== "POST") throw new HttpError(405, "Method not allowed.");
+          return send(res, 200, await service.prioritize(match[1], (await body(req))?.now === true));
+        }
         if (req.method === "PUT" && match[2] !== undefined) {
           const chunks: Buffer[] = [];
           let bytes = 0;

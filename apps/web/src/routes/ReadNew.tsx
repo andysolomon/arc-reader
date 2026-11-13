@@ -4,7 +4,9 @@ import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 import { fetchReadable, hostOf } from "../lib/fetchUrl";
+import { EXPLAIN_MS, ReadError } from "../lib/readError";
 import { openDocument } from "../lib/openDoc";
+import { importPage, isContentsPage } from "../state/books";
 
 /**
  * Web Share Target: /read/new?title=&text=&url=
@@ -28,8 +30,8 @@ export function ReadNew() {
         if (url) {
           toast(`Fetching ${hostOf(url)}…`);
           const f = await fetchReadable(url);
-          const rec = await create({ text: f.text, title: title ?? f.title, source: "share", domain: f.domain, meta: f.meta, links: f.links });
-          await openDocument(rec, navigate, { autoplay, resume: false, replace: true });
+          const rec = await importPage(f, { source: "share", title });
+          await openDocument(rec, navigate, { autoplay: autoplay && !isContentsPage(f), resume: false, replace: true });
           return;
         }
         if (text) {
@@ -38,8 +40,9 @@ export function ReadNew() {
           return;
         }
         navigate("/", { replace: true });
-      } catch {
-        toast("Couldn't read what was shared");
+      } catch (e) {
+        if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
+        else toast("Couldn't read what was shared");
         navigate("/", { replace: true });
       }
     })();

@@ -10,6 +10,10 @@ import type { CapacitorConfig } from "@capacitor/cli";
  *   server, so every deploy reaches the phone and the server's /api routes
  *   (speech proxy, shared library, preparation) are on the page's own origin.
  *   When the server cannot be reached, the bundled `unreachable.html` is shown.
+ *   READALOUD_APP_URL, when set, is loaded instead: the public Tailscale Funnel
+ *   address, which does not need Tailscale on the phone. READALOUD_ACCESS_TOKEN
+ *   is then added to the start address so the server lets the phone in
+ *   (vite.gate.ts).
  * - Unset: the web view loads the production bundle copied into the app
  *   (`webDir`), and never opens a remote page.
  */
@@ -29,26 +33,35 @@ function envFile(path: string): Record<string, string> {
 }
 
 /** An absolute http(s) origin without a trailing slash, or empty. */
-export function publicUrl(value: string | undefined): string {
+export function publicUrl(value: string | undefined, name = "READALOUD_PUBLIC_URL"): string {
   if (!value?.trim()) return "";
   let url: URL;
   try {
     url = new URL(value.trim());
   } catch {
-    throw new Error(`READALOUD_PUBLIC_URL is not a URL: ${value}`);
+    throw new Error(`${name} is not a URL: ${value}`);
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error(`READALOUD_PUBLIC_URL must be http(s): ${value}`);
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error(`${name} must be http(s): ${value}`);
   return url.origin;
 }
 
+/** The address the web view opens: the server, with the access token when there is one. */
+export function startAddress(server: string, token: string | undefined): string {
+  return server && token ? `${server}/?access=${encodeURIComponent(token)}` : server;
+}
+
 // The environment wins, then the files the web build and the deploy read.
-const setting =
-  process.env.READALOUD_PUBLIC_URL ??
-  envFile(resolve(".env.local")).READALOUD_PUBLIC_URL ??
-  envFile(resolve("../../.env")).READALOUD_PUBLIC_URL;
+const setting = (name: string): string | undefined =>
+  process.env[name] ?? envFile(resolve(".env.local"))[name] ?? envFile(resolve("../../.env"))[name];
+const appUrl = setting("READALOUD_APP_URL");
 
 /** The server the shell loads the app from. Empty means the bundled files. */
-export const serverUrl = publicUrl(setting);
+export const serverUrl = appUrl?.trim()
+  ? publicUrl(appUrl, "READALOUD_APP_URL")
+  : publicUrl(setting("READALOUD_PUBLIC_URL"));
+
+/** Where the shell starts: serverUrl, carrying the token that unlocks public access. */
+export const startUrl = startAddress(serverUrl, setting("READALOUD_ACCESS_TOKEN")?.trim());
 
 const config: CapacitorConfig = {
   appId: "dev.andrewsolomon.arcreader",
@@ -56,7 +69,16 @@ const config: CapacitorConfig = {
   webDir: "dist",
   // Shown behind the web view until the first paint. Matches the dark theme.
   backgroundColor: "#161412",
-  ...(serverUrl && { server: { url: serverUrl, errorPath: UNREACHABLE_PAGE } }),
+  ...(serverUrl && {
+    server: {
+      url: startUrl,
+      errorPath: UNREACHABLE_PAGE,
+      // Capacitor keeps a page in the web view only when its address starts with `url`
+      // or its host is listed here, and hands anything else to Safari. With the access
+      // token in `url`, the server's redirect to the same page without it would leave.
+      allowNavigation: [new URL(serverUrl).hostname],
+    },
+  }),
   ios: {
     backgroundColor: "#161412",
     // The shell pads itself with env(safe-area-inset-*). Automatic insets

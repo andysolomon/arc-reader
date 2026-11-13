@@ -20,6 +20,13 @@ variable "voicestudio_image" {
   description = "Run VoiceStudio in the cluster from this image. Null leaves it out; voicestudio_remote_url must then be set."
 }
 
+# The node pulls this image itself (it is multi-platform, like Traefik's).
+variable "phonon_image" {
+  type        = string
+  default     = null
+  description = "Run Gradium's Phonon speech server in the cluster from this image. Null leaves it out and hides its /api/phonon route."
+}
+
 # kind load cannot import multi-platform images; the node pulls this one itself.
 variable "traefik_image" {
   type     = string
@@ -111,4 +118,12 @@ variable "typesafe_api_key" {
   sensitive = true
   nullable  = false
   default   = ""
+}
+
+variable "access_token" {
+  type        = string
+  sensitive   = true
+  nullable    = false
+  default     = ""
+  description = "READALOUD_ACCESS_TOKEN: requests through Tailscale Funnel need it (apps/web/vite.gate.ts). Empty refuses them all."
 }

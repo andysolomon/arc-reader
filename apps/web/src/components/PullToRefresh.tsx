@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { RotateCw } from "lucide-react";
 import { cn } from "@readaloud/ui";
+import { serverReachable } from "../lib/appUpdate";
+import { toast } from "../state/toast";
 
 /** How far the finger travels before the indicator moves at all, so taps and small drags stay taps. */
 const SLOP = 10;
@@ -85,7 +87,14 @@ export function PullToRefresh({ target }: { target: RefObject<HTMLElement | null
       if (!ready) return set(0);
       setReloading(true);
       set(PULL_THRESHOLD);
-      location.reload();
+      // Reloading while the server is out of reach would swap a working page
+      // for the "Can't reach ReadAloud" screen, so check first.
+      void serverReachable().then((ok) => {
+        if (ok) return location.reload();
+        setReloading(false);
+        set(0);
+        toast("Can't reach ReadAloud right now. Check Tailscale, then pull again.", 5000);
+      });
     };
 
     root.addEventListener("touchstart", onStart, { passive: true });
@@ -109,7 +118,7 @@ export function PullToRefresh({ target }: { target: RefObject<HTMLElement | null
       style={{ transform: `translateY(${pull - 44}px)`, transition: pull === 0 || reloading ? "transform 200ms ease" : undefined }}
     >
       <span role="status" className="sr-only">
-        {reloading ? "Reloading" : ready ? "Release to reload" : "Pull to reload"}
+        {reloading ? "Checking the server" : ready ? "Release to reload" : "Pull to reload"}
       </span>
       <span
         aria-hidden

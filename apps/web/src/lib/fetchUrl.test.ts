@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
-import { htmlToText, looksLikeUrl, markdownToText, publishedDate } from "./fetchUrl";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { fetchReadable, htmlToText, isWebAddress, looksLikeUrl, markdownToText, publishedDate, readPdfFile } from "./fetchUrl";
 import { segment } from "./segment";
 import { placeLinks } from "./linkPlaces";
 
@@ -91,9 +91,64 @@ describe("htmlToText", () => {
       <article><p>Read <a href="/guide">the guide</a>, <a href="https://other.org/x">another site</a> and <a href="#top">top</a>.</p>
       <p><a href="mailto:a@b.c">mail</a> <a href="https://other.org/x">again</a></p></article>
     </body></html>`;
-    expect(htmlToText(html, "https://example.com/blog/post").links).toEqual([
-      { url: "https://example.com/guide", text: "the guide" },
+    expect(htmlToText(html, "https://writing.dev/blog/post").links).toEqual([
+      { url: "https://writing.dev/guide", text: "the guide" },
       { url: "https://other.org/x", text: "another site" },
+    ]);
+  });
+
+  it("leaves out links drawn inside diagrams and placeholder addresses", () => {
+    const html = `<article><p>An origin like <a href="https://example.com">https://example.com</a> is the base; see <a href="https://developer.mozilla.org/cors">MDN</a>.</p>
+      <svg viewBox="0 0 10 10"><text><a href="https://api.github.com/users">https://api.github.com/users</a></text></svg>
+      <p><a href="http://”">http://”</a></p></article>`;
+    expect(htmlToText(html, "https://writing.dev/post").links).toEqual([{ url: "https://developer.mozilla.org/cors", text: "MDN" }]);
+  });
+});
+
+describe("keeping an article's structure", () => {
+  it("marks headings so the reading keeps its outline", () => {
+    const { text } = htmlToText(`<article><h2>Why databases exist</h2><p>They persist data.</p><h3>Disk <code>vs</code> RAM</h3><p>Disk is roomy.</p></article>`, "https://example.com/a");
+    expect(text).toBe("## Why databases exist\n\nThey persist data.\n\n### Disk vs RAM\n\nDisk is roomy.");
+    const { paragraphs, sentences } = segment(text);
+    expect(paragraphs.map((p) => p.heading)).toEqual([2, undefined, 3, undefined]);
+    // The marker is for the page, not the voice.
+    expect(sentences.map((s) => s.text)).toEqual(["Why databases exist", "They persist data.", "Disk vs RAM", "Disk is roomy."]);
+  });
+
+  it("keeps headings from the Markdown proxy and from pasted Markdown", () => {
+    expect(markdownToText("# Title\n\nSome **bold** text.")).toBe("# Title\n\nSome bold text.");
+    const { paragraphs, sentences } = segment("Intro line.\n## Setup ##\nInstall it first.\n#hashtag is not a heading.");
+    expect(paragraphs.map((p) => p.heading)).toEqual([undefined, 2, undefined]);
+    expect(sentences.map((s) => s.text)).toEqual(["Intro line.", "Setup", "Install it first.", "#hashtag is not a heading."]);
+  });
+
+  it("keeps callouts set beside the text and drops sidebars", () => {
+    const html = `<main><article><p>Before the note.</p>
+      <aside class="callout is-info"><p class="callout-title">Mental model</p><p>A database is a persistence layer.</p></aside>
+      <aside role="note"><p>Verified on PostgreSQL 16.</p></aside>
+      <aside class="starlight-aside starlight-aside--tip"><p>Use bigserial.</p></aside>
+      <aside class="related"><p>Related posts you might like.</p></aside>
+      <aside class="callout"><form><input></form>Subscribe to the newsletter.</aside>
+      <p>After the note.</p></article><aside class="author-info">About the author.</aside></main>`;
+    expect(htmlToText(html, "https://example.com/a").text.split("\n\n")).toEqual([
+      "Before the note.", "Mental model", "A database is a persistence layer.", "Verified on PostgreSQL 16.", "Use bigserial.", "After the note.",
+    ]);
+  });
+
+  it("reads a table row by row under its column headings", () => {
+    const two = `<table><thead><tr><th>Responsibility</th><th>What it means</th></tr></thead><tbody>
+      <tr><td><strong>Access</strong></td><td>Provide methods for CRUD.</td></tr><tr><td>Security</td><td>Protect data from <code>unauthorized</code> access</td></tr></tbody></table>`;
+    const three = `<table><tr><th>Type</th><th>Size</th><th>Use for</th></tr><tr><td>integer</td><td>4 bytes</td><td>Counts.</td></tr><tr><td>bigint</td><td></td><td>Large IDs</td></tr></table>`;
+    const bare = `<table><tr><td>GET</td><td>Read a resource</td></tr><tr><td></td><td></td></tr></table>`;
+    const { text } = htmlToText(`<article><p>Intro.</p>${two}${three}${bare}<p>Outro.</p></article>`, "https://example.com/a");
+    expect(text.split("\n\n")).toEqual([
+      "Intro.",
+      "Access: Provide methods for CRUD.",
+      "Security: Protect data from unauthorized access.",
+      "integer. Size: 4 bytes. Use for: Counts.",
+      "bigint. Use for: Large IDs.",
+      "GET. Read a resource.",
+      "Outro.",
     ]);
   });
 });
@@ -102,8 +157,8 @@ describe("a fetched page's links in the reading", () => {
   it("places each link at the words it was attached to", () => {
     const html = `<html><body><article>
       <p>Start here. Then read <a href="/guide">the guide</a> before the rest.</p>
-      <p>The code is on <a href="https://git.example/repo">our repository</a>.</p></article></body></html>`;
-    const page = htmlToText(html, "https://example.com/post");
+      <p>The code is on <a href="https://git.dev/repo">our repository</a>.</p></article></body></html>`;
+    const page = htmlToText(html, "https://writing.dev/post");
     expect(placeLinks(page.links, segment(page.text).sentences).map((l) => [l.text, l.at])).toEqual([
       ["the guide", { sentence: 1, word: 3 }],
       ["our repository", { sentence: 2, word: 5 }],
@@ -124,5 +179,47 @@ describe("telling a pasted link from pasted text", () => {
     expect(looksLikeUrl("A sentence. Another one.")).toBe(false);
     expect(looksLikeUrl("hello")).toBe(false);
     expect(looksLikeUrl("one\ntwo")).toBe(false);
+  });
+  it("knows a full address on its own from text that mentions one", () => {
+    expect(isWebAddress(" https://backend-from-first-principle.vercel.app/ ")).toBe(true);
+    expect(isWebAddress("HTTP://example.com/story")).toBe(true);
+    expect(isWebAddress("www.example.com")).toBe(true);
+    expect(isWebAddress("example.com")).toBe(false);
+    expect(isWebAddress("https://")).toBe(false);
+    expect(isWebAddress("Read https://example.com later")).toBe(false);
+    expect(isWebAddress("https://example.com\nand some notes")).toBe(false);
+  });
+});
+
+describe("PDFs", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const page = `<!doctype html><html><head><title>Tool Use</title><meta name="author" content="Diyi Yang"></head><body><article data-pdf="slides"><h1>Tool Use</h1>
+    <h2>Why LLMs need tools</h2><p>Models cannot look anything up. Tools let them act.</p></article></body></html>`;
+  const html = () => new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
+
+  it("leaves a PDF the browser can reach to the server, which answers with a page", async () => {
+    const url = "https://web.stanford.edu/class/cs329z/slides/lecture04.pdf";
+    const fetched = vi.fn(async (input: string) => input === url ? new Response("%PDF-1.7 \u0000binary", { headers: { "content-type": "application/pdf" } }) : html());
+    vi.stubGlobal("fetch", fetched);
+    const result = await fetchReadable(url);
+    expect(fetched.mock.calls.map(([input]) => input)).toEqual([url, `/api/fetch?url=${encodeURIComponent(url)}`]);
+    expect(result).toMatchObject({ title: "Tool Use", domain: "web.stanford.edu", meta: { url, author: "Diyi Yang" } });
+    expect(result.text).toBe("# Tool Use\n\n## Why LLMs need tools\n\nModels cannot look anything up. Tools let them act.");
+  });
+
+  it("never takes a PDF's bytes for text, whatever type it is served as", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(`%PDF-1.7\n${"stream ".repeat(40)}`, { headers: { "content-type": "application/octet-stream" } })));
+    await expect(fetchReadable("https://example.com/paper")).rejects.toThrow();
+  });
+
+  it("sends a chosen file to the server and names the document after the file", async () => {
+    const fetched = vi.fn(async (_input: string, _init?: RequestInit) => html());
+    vi.stubGlobal("fetch", fetched);
+    const file = new File(["%PDF-1.7"], "lecture 04.pdf", { type: "application/pdf" });
+    const result = await readPdfFile(file);
+    expect(fetched.mock.calls[0][0]).toBe("/api/fetch/pdf?name=lecture%2004.pdf");
+    expect(fetched.mock.calls[0][1]).toMatchObject({ method: "POST", body: file });
+    expect(result).toMatchObject({ title: "Tool Use", domain: "lecture 04.pdf", meta: { author: "Diyi Yang" } });
+    expect(result.meta.url).toBeUndefined();
   });
 });

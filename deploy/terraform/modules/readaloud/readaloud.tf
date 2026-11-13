@@ -1,4 +1,4 @@
-# ReadAloud: the web app and, when voicestudio_image is set, VoiceStudio. The Services
+# ReadAloud: the web app and, when their images are set, VoiceStudio and Phonon. The Services
 # are ClusterIP; the host reaches them through the Ingresses and Traefik (traefik.tf).
 #
 # Both apps run exactly one pod and update with Recreate: the shared library and the
@@ -7,7 +7,10 @@
 locals {
   voicestudio            = var.voicestudio_image != null
   in_cluster_voicestudio = local.voicestudio ? "http://voicestudio:3900" : ""
+  phonon                 = var.phonon_image != null
   config = {
+    # Empty leaves the web server without its /api/phonon route.
+    PHONON_URL                 = local.phonon ? "http://phonon:8880" : ""
     VOICESTUDIO_URL            = var.voicestudio_remote_url != "" ? var.voicestudio_remote_url : local.in_cluster_voicestudio
     VOICESTUDIO_NAME           = var.voicestudio_name
     VOICESTUDIO_SECONDARY_URL  = var.voicestudio_secondary_remote_url != "" ? var.voicestudio_secondary_remote_url : (var.voicestudio_remote_url != "" ? local.in_cluster_voicestudio : "")
@@ -23,6 +26,7 @@ locals {
     FISH_API_KEY                  = var.fish_api_key
     LLM_API_KEY                   = var.llm_api_key
     TYPESAFE_API_KEY              = var.typesafe_api_key
+    READALOUD_ACCESS_TOKEN        = var.access_token
   }
   # Pods only read configuration at start. These change with it, so the pods restart.
   web_config_hash         = nonsensitive(substr(sha256(jsonencode([local.config, local.secrets])), 0, 16))
@@ -315,6 +319,91 @@ resource "kubernetes_ingress_v1" "voicestudio" {
           }
         }
       }
+    }
+  }
+}
+
+# Phonon: Gradium's on-device speech server. It runs on the CPU, keeps no state, and only
+# the web pod calls it, so it has a Service but no Ingress.
+resource "kubernetes_deployment_v1" "phonon" {
+  count = local.phonon ? 1 : 0
+
+  metadata {
+    name      = "phonon"
+    namespace = kubernetes_namespace_v1.readaloud.metadata[0].name
+  }
+  spec {
+    replicas = 1
+    selector { match_labels = { app = "phonon" } }
+    template {
+      metadata {
+        labels = { app = "phonon" }
+      }
+      spec {
+        container {
+          name              = "phonon"
+          image             = var.phonon_image
+          image_pull_policy = "IfNotPresent"
+          port {
+            name           = "http"
+            container_port = 8880
+          }
+          env {
+            name  = "PTTS_LANG"
+            value = "en"
+          }
+          env {
+            name  = "PTTS_QUANT"
+            value = "q8"
+          }
+          # It listens once the model has loaded; the first start downloads it (about 65 MB).
+          startup_probe {
+            http_get {
+              path = "/health"
+              port = "http"
+            }
+            period_seconds    = 5
+            failure_threshold = 60
+          }
+          readiness_probe {
+            http_get {
+              path = "/health"
+              port = "http"
+            }
+            period_seconds = 10
+          }
+          volume_mount {
+            name       = "models"
+            mount_path = "/home/phonon/.cache/huggingface"
+          }
+        }
+        # Kept across container restarts; a replaced pod downloads the model again.
+        volume {
+          name = "models"
+          empty_dir {}
+        }
+      }
+    }
+  }
+  timeouts {
+    create = "10m"
+    update = "10m"
+  }
+}
+
+resource "kubernetes_service_v1" "phonon" {
+  count = local.phonon ? 1 : 0
+
+  metadata {
+    name      = "phonon"
+    namespace = kubernetes_namespace_v1.readaloud.metadata[0].name
+  }
+  spec {
+    selector = { app = "phonon" }
+    port {
+      name        = "http"
+      port        = 8880
+      target_port = "http"
     }
   }
 }

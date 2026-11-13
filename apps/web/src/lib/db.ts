@@ -20,6 +20,22 @@ export interface DocMeta {
   notes?: string;
 }
 
+/** A chapter's place in a book that was imported as one document per chapter. */
+export interface DocBook {
+  /** The same on every chapter of the book */
+  id: string;
+  /** The book's title; the document's own title is the chapter's */
+  title: string;
+  /** This chapter's number, from 1 */
+  chapter: number;
+  /** Chapters in the book, whether or not they are in the library */
+  chapters: number;
+  /** A course: its chapters are lectures, and more are posted as it runs */
+  kind?: "course";
+  /** The page that lists the chapters, when a chapter's own page does not */
+  contents?: string;
+}
+
 /** Library category: suggested by Jev (with its confidence) or chosen by you. */
 export interface DocCategory {
   name: string;
@@ -55,6 +71,7 @@ export interface DocRecord {
   /** Cached descriptions keyed by visual source, alt text, and caption. */
   visualDescriptions?: Record<string, string>;
   meta?: DocMeta;
+  book?: DocBook;
   category?: DocCategory;
   /** When you favorited it. Favorites are assessed as candidates for a premium read. */
   favoritedAt?: number;

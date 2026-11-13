@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { composeText } from "./helpers";
+import { composeText, prepareFromPlayer } from "./helpers";
 
 test("prepared audio plays through every passage offline without animation frames", async ({ page, context }) => {
   await page.addInitScript(() => {
@@ -14,6 +14,8 @@ test("prepared audio plays through every passage offline without animation frame
   await page.goto("/");
   await composeText(page, "The first prepared passage plays.\n\nThe second prepared passage follows.\n\nThe third prepared passage finishes.");
   await page.getByTestId("listen").click();
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+  await prepareFromPlayer(page);
   await expect(page.getByText("Audio prepared — playback no longer waits on the server", { exact: true })).toBeVisible();
   await page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Pause/ }).click();
   await context.route(/\/api\/(vs|preparations)(?:\/|$)/, (route) => route.abort("connectionrefused"));
@@ -33,7 +35,7 @@ test("prepared audio plays through every passage offline without animation frame
   expect(playback).toEqual({ passages: 3, elements: 1 });
 });
 
-test("composing automatically prepares all passages, continues with the page closed, and reuses audio on return", async ({ page, context }) => {
+test("preparing from the player covers all passages, continues with the page closed, and reuses audio on return", async ({ page, context }) => {
   const unique = Date.now().toString(36);
   const text = Array.from({ length: 12 }, (_, i) => `Passage ${i + 1} of reading ${unique} continues to render when the phone switches apps.`).join("\n\n");
   await page.goto("/");
@@ -41,16 +43,18 @@ test("composing automatically prepares all passages, continues with the page clo
   // Stop the first page from observing the job or downloading its results.
   // Rendering must continue independently of these browser requests.
   await page.route(/\/api\/preparations\/[a-f0-9-]+$/, (route) => route.abort("internetdisconnected"));
-  const submitted = page.waitForResponse((r) => r.url().endsWith("/api/preparations") && r.request().method() === "POST");
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   const reader = page.url();
+  const submitted = page.waitForResponse((r) => r.url().endsWith("/api/preparations") && r.request().method() === "POST");
+  await prepareFromPlayer(page);
   const response = await submitted;
   expect(response.status()).toBe(202);
   const job = await response.json() as { id: string; state: string; total: number };
   expect(job.state).toBe("running");
   expect(job.total).toBe(12);
-  await expect(page.getByRole("region", { name: "Player" })).toContainText("Preparing 0/12");
+  // The page's connection is gone, and it says so instead of counting in silence.
+  await expect(page.getByRole("region", { name: "Player" })).toContainText("Can't reach server 0/12");
   await page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Pause/ }).click();
   await page.waitForFunction(() => JSON.parse(localStorage.getItem("readaloud:preparations") || "[]").some((j: { active: boolean }) => j.active));
   await page.close();
@@ -69,15 +73,45 @@ test("composing automatically prepares all passages, continues with the page clo
   expect(regenerated).toBe(0);
 });
 
-test("automatic preparation can be stopped from the player", async ({ page }) => {
-  const job = { id: "auto-prepare", state: "running", done: 0, total: 3 };
-  await page.route("**/api/preparations", (route) => route.fulfill({ status: 202, json: job }));
+test("preparation says when the server can't be reached, and carries on once it can", async ({ page }) => {
+  const job = { id: "unreachable-prepare", state: "running", done: 1, total: 3 };
+  let reachable = false;
+  await page.route("**/api/preparations", (route) => route.request().method() !== "POST" ? route.fallback() : reachable ? route.fulfill({ status: 202, json: job }) : route.abort("connectionrefused"));
   await page.route(`**/api/preparations/${job.id}`, (route) => route.fulfill({ json: job }));
+  // Playback waits on its first passage, so nothing is cached before preparing is asked for.
+  await page.route("**/v1/audio/speech", () => {});
   await page.goto("/");
   await composeText(page, "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.");
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+  await prepareFromPlayer(page);
+  const player = page.getByRole("region", { name: "Player" });
+  await expect(player).toContainText("Can't reach server 0/3");
+  reachable = true;
+  await expect(player).toContainText("Preparing 1/3");
+});
+
+test("listening prepares nothing until asked, and preparation can be stopped from the player", async ({ page }) => {
+  const job = { id: "player-prepare", state: "running", done: 0, total: 3 };
+  let submissions = 0;
+  await page.route("**/api/preparations", (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    submissions++;
+    return route.fulfill({ status: 202, json: job });
+  });
+  await page.route(`**/api/preparations/${job.id}`, (route) => route.fulfill({ json: job }));
+  // Playback waits on its first passage, so nothing is cached before preparing is asked for.
+  await page.route("**/v1/audio/speech", () => {});
+  await page.goto("/");
+  await composeText(page, "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.");
+  await page.getByTestId("listen").click();
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+  await page.waitForTimeout(500);
+  expect(submissions).toBe(0);
+  await expect(page.getByRole("region", { name: "Player" })).not.toContainText("Preparing");
+  await prepareFromPlayer(page);
   await expect(page.getByRole("region", { name: "Player" })).toContainText("Preparing 0/3");
+  await expect.poll(() => submissions).toBe(1);
   await page.getByRole("button", { name: "More", exact: true }).click();
   const cancelled = page.waitForRequest((r) => r.url().endsWith(`/api/preparations/${job.id}`) && r.method() === "DELETE");
   await page.getByRole("menuitem", { name: "Stop preparing (0/3)", exact: true }).click();

@@ -116,16 +116,38 @@ export const FISH_PRESET_VOICES: Voice[] = [
   },
 ];
 
+export const PHONON_PREFIX = "phonon:";
+/** A Phonon voice. The id is `phonon:<name>`; the name is what the server accepts as `voice`. */
+export const phononVoice = (name: string, lang = "EN", tags: string[] = []): Voice => ({
+  id: PHONON_PREFIX + name, name, lang, tags, hue: hueFor(PHONON_PREFIX + name), engine: "phonon", kind: "preset",
+});
+const phononGroup = (lang: string, tags: string[], names: string[]) => names.map((name) => phononVoice(name, lang, tags));
+
+/**
+ * Phonon's English voices, as published in gradium/phonon-voices and listed by its
+ * server. Shown before the server answers; its unnamed `default` entry is left out.
+ */
+export const PHONON_VOICES: Voice[] = [
+  ...phononGroup("EN-US", ["female", "American"], ["Zoey", "Juniper", "Everly", "Harper", "Hadley", "Delia"]),
+  ...phononGroup("EN-US", ["male", "American"], ["Easton", "Micah", "Trevor", "Russell", "Preston", "Miles"]),
+  ...phononGroup("EN-GB", ["female", "British"], ["Maeve", "Freya", "Pippa", "Elodie-Rose", "Imogen", "Lottie", "Bryony"]),
+  ...phononGroup("EN-GB", ["male", "British"], ["Alfie", "Hugh", "Edwin", "Spencer", "Toby", "Teddy"]),
+  ...phononGroup("EN", ["character"], [
+    "Azgorath", "Captain Silas Blackwater", "Fairy Godmother", "Fennick the Young Elf", "Grub the Ogre", "Master Aldric",
+    "Morwenna of the Deep", "Old Mortlake", "Sir Bramwell", "The Snow Queen", "The Thing Under the Stairs", "Vyrmathrax the Ancient",
+  ]),
+];
+
 export const LOCAL_VOICE: Voice = { id: LOCAL_VOICE_ID, name: "Browser voice", lang: "EN-US · local", tags: ["offline", "neutral"], hue: null, engine: LOCAL_ENGINE, kind: "local" };
 
 /** The list shown before (or without) a speech server. */
 export const DEFAULT_VOICES: Voice[] = [...PRESET_VOICES, LOCAL_VOICE];
 
-/** Fallback default until the speech server lists the Librarian, or when it is missing. */
-export const DEFAULT_VOICE_ID = "expr-voice-2-f";
+/** The default voice: Phonon's Zoey. */
+export const DEFAULT_VOICE_ID = PHONON_PREFIX + "Zoey";
 
-/** The preferred default: the voice added from the Studio gallery's Librarian recipe (its profile id is assigned by VoiceStudio). */
-export const isDefaultArchetype = (archetype: string | undefined) => !!archetype && /(^|_)librarian$/.test(archetype);
+/** The default in a deployment without Phonon: KittenTTS's Bella on VoiceStudio. */
+export const FALLBACK_VOICE_ID = "expr-voice-2-f";
 
 /** BCP-47 tag for the Web Speech fallback. */
 export function voiceLang(v: Pick<Voice, "lang">): string {

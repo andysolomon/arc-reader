@@ -37,6 +37,8 @@ describe("live speech activity", () => {
   it.each([
     ["POST", "/v1/audio/speech", true],
     ["POST", "/api/vs/v1/audio/speech", true],
+    ["POST", "/api/phonon/v1/audio/speech", true],
+    ["GET", "/api/phonon/v1/audio/voices", false],
     ["POST", "/v1/audio/speech?x=1", true],
     ["GET", "/v1/audio/speech", false],
     ["POST", "/v1/audio/voices", false],

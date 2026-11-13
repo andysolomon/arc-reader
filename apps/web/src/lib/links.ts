@@ -21,11 +21,25 @@ export function absoluteUrl(href: string, base?: string): string | null {
   }
 }
 
-/** Keep the first occurrence of each URL, in document order, with tidy text. */
+/**
+ * True for an address that names no real place: the domains set aside for examples
+ * (example.com, *.test, *.invalid, localhost…) and host names with no dot, such as the
+ * "http://”" a page writes when it means the scheme and a parser reads as a host.
+ */
+export function placeholderUrl(href: string): boolean {
+  let host: string;
+  try { host = new URL(href).hostname.toLowerCase().replace(/\.$/, ""); } catch { return true; }
+  if (host.startsWith("[")) return host === "[::1]" || host === "[::]";
+  if (!host.includes(".")) return true;
+  return /(?:^|\.)example\.(?:com|net|org)$|\.(?:example|test|invalid|localhost|local)$|^(?:127\.|0\.0\.0\.0$)/.test(host);
+}
+
+/** Keep the first occurrence of each URL, in document order, with tidy text. Placeholder addresses are left out. */
 export function uniqueLinks(links: Iterable<DocLink>): DocLink[] {
   const seen = new Map<string, DocLink>();
   for (const { url, text } of links) {
     if (seen.size >= MAX_LINKS) break;
+    if (placeholderUrl(url)) continue;
     const tidy = text.replace(/\s+/g, " ").trim().slice(0, MAX_LINK_TEXT);
     const known = seen.get(url);
     if (!known) seen.set(url, { url, text: tidy || url });
@@ -34,7 +48,7 @@ export function uniqueLinks(links: Iterable<DocLink>): DocLink[] {
   return [...seen.values()];
 }
 
-const BARE = /\bhttps?:\/\/[^\s<>"'`]+/gi;
+const BARE = /\bhttps?:\/\/[^\s<>"'`“”‘’«»…]+/gi;
 const MARKDOWN = /(!?)\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 
 /** Bare URLs in plain text, minus trailing sentence punctuation and unbalanced closing brackets. */
@@ -44,7 +58,8 @@ export function linksInText(text: string): DocLink[] {
     let raw = match.replace(/[.,;:!?]+$/, "");
     while (/[)\]]$/.test(raw) && count(raw, raw.endsWith(")") ? "(" : "[") < count(raw, raw.slice(-1))) raw = raw.slice(0, -1).replace(/[.,;:!?]+$/, "");
     const url = absoluteUrl(raw);
-    if (url) found.push({ url, text: url });
+    // "http://" on its own, or followed by punctuation, names the scheme, not a place.
+    if (url && /[a-z0-9]/i.test(new URL(url).hostname)) found.push({ url, text: url });
   }
   return uniqueLinks(found);
 }

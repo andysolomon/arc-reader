@@ -11,6 +11,8 @@ RUN mkdir /app/library && chown node:node /app/library
 USER node
 
 COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# pnpm-workspace.yaml names these, so the install fails without them.
+COPY --chown=node:node patches patches/
 COPY --chown=node:node apps/web/package.json apps/web/
 COPY --chown=node:node packages/tokens/package.json packages/tokens/
 COPY --chown=node:node packages/ui/package.json packages/ui/
@@ -27,7 +29,11 @@ ARG VITE_PATOIS_MODEL=gpt-4.1-mini
 ARG VITE_VISUAL_MODEL=muse-spark-1.3-contributor
 ARG VITE_FISH_BASE=
 ARG VITE_FISH_TTS_MODEL=s2.1-pro
+ARG VITE_PHONON_BASE=
+ARG VITE_PHONON_TTS_MODEL=gradium/phonon-31m-en
 RUN pnpm --filter @readaloud/web build
+# The web server prepares Phonon audio with the model the bundle was built for.
+ENV VITE_PHONON_TTS_MODEL=$VITE_PHONON_TTS_MODEL
 
 WORKDIR /app/apps/web
 EXPOSE 4173

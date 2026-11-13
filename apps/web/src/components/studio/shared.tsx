@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Button } from "@readaloud/ui";
+import { Button, VoiceAvatar } from "@readaloud/ui";
+import { useVoices } from "../../state/voices";
 
 export const fieldClass = "w-full rounded-control border border-line bg-bg px-3 py-2.5 text-fg";
 export const panelClass = "rounded-panel border border-line bg-bg2 p-5 sm:p-6";
@@ -8,6 +9,11 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 }
 export function ErrorNotice({ error }: { error: string }) {
   return error ? <p role="alert" className="rounded-control border border-line bg-bg3 p-3 text-sm text-danger">{error}</p> : null;
+}
+/** A saved voice's portrait, as Voices shows it; nothing until the voice list has it. */
+export function SavedVoiceAvatar({ id, size = 52 }: { id: string; size?: number }) {
+  const voice = useVoices((s) => s.voices.find((v) => v.id === id));
+  return voice ? <VoiceAvatar voice={voice} size={size} /> : null;
 }
 export function useOperation() {
   const [busy, setBusy] = useState(false);

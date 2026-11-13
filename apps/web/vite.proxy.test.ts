@@ -70,3 +70,34 @@ describe("Fish proxy", () => {
     expect(result).toBe(allowed ? undefined : false);
   });
 });
+
+describe("Phonon proxy", () => {
+  const phonon = "^/api/phonon(?:/|$)";
+  it("exists only when a Phonon server is configured", () => {
+    expect(voiceStudioProxy({})[phonon]).toBeUndefined();
+    const proxy = voiceStudioProxy({ PHONON_URL: "http://phonon:8880/" })[phonon];
+    expect(proxy.target).toBe("http://phonon:8880");
+    expect(proxy.rewrite?.("/api/phonon/v1/audio/speech")).toBe("/v1/audio/speech");
+  });
+  it("strips browser credentials and sends no key of its own", () => {
+    const proxy = voiceStudioProxy({ PHONON_URL: "http://phonon:8880", VOICESTUDIO_API_KEY: "k" })[phonon];
+    const handlers: Record<string, (req: unknown) => void> = {};
+    proxy.configure!({ on: vi.fn((name, handler) => { handlers[name] = handler; }) } as unknown as Parameters<NonNullable<ProxyOptions["configure"]>>[0], proxy);
+    const req = { setHeader: vi.fn(), removeHeader: vi.fn() };
+    handlers.proxyReq(req);
+    expect(req.setHeader).not.toHaveBeenCalled();
+    expect(req.removeHeader).toHaveBeenCalledWith("cookie");
+    expect(req.removeHeader).toHaveBeenCalledWith("origin");
+  });
+  it.each([
+    ["GET", "/api/phonon/v1/audio/voices", true],
+    ["POST", "/api/phonon/v1/audio/speech", true],
+    ["GET", "/api/phonon/v1/models", false],
+    ["POST", "/api/phonon/v1/audio/voices", false],
+    ["GET", "/api/phonon/health", false],
+  ])("allows only the voice list and speech: %s %s", (method, url, allowed) => {
+    const proxy = voiceStudioProxy({ PHONON_URL: "http://phonon:8880" })[phonon];
+    const result = proxy.bypass!({ method, url } as IncomingMessage, { end: vi.fn(), statusCode: 200 } as unknown as ServerResponse, proxy);
+    expect(result).toBe(allowed ? undefined : false);
+  });
+});

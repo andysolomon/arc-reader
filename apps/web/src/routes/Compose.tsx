@@ -10,8 +10,10 @@ import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
-import { fetchReadable, hostOf, looksLikeUrl, normalizeUrl } from "../lib/fetchUrl";
+import { fetchReadable, hostOf, isWebAddress, looksLikeUrl, normalizeUrl, readPdfFile } from "../lib/fetchUrl";
+import { EXPLAIN_MS, ReadError } from "../lib/readError";
 import { openDocument } from "../lib/openDoc";
+import { importPage, isContentsPage } from "../state/books";
 import { SPEED_STEPS } from "@readaloud/ui";
 import { useClipboardImport } from "../hooks/useClipboardImport";
 import { useIsTouch } from "../hooks/useMedia";
@@ -21,7 +23,8 @@ const TEXT_PANEL_ID = "compose-text";
 
 /**
  * Compose: a link field first, since most reading starts by pasting an address found elsewhere.
- * Pasting a link starts reading at once; pasting prose opens the text box instead.
+ * Pasting a link starts reading at once; pasting prose opens the text box instead. A link is a
+ * link in the text box too: the page is fetched, the address is never read out as text.
  */
 export function Compose() {
   const clipboard = useClipboardImport();
@@ -78,10 +81,13 @@ export function Compose() {
     toast(`Fetching ${host}…`);
     try {
       const f = await fetchReadable(input);
-      const rec = await create({ text: f.text, title: f.title, source: "url", domain: f.domain, meta: f.meta, links: f.links });
-      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
-    } catch {
-      toast(`Couldn't read ${host} — try pasting the text`);
+      const rec = await importPage(f, { source: "url" });
+      // A contents page is there to be swapped for its chapters, so it opens without reading itself out.
+      const listen = !isContentsPage(f);
+      await openDocument(rec, navigate, { autoplay: listen, resume: false });
+    } catch (e) {
+      if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
+      else toast(`Couldn't read ${host} — try pasting the text`);
       linkRef.current?.focus();
       linkRef.current?.select();
     } finally {
@@ -94,10 +100,19 @@ export function Compose() {
     try {
       const rec = await create({ text: t, title, source: "paste" });
       sessionStorage.removeItem(DRAFT_KEY);
-      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
+      await openDocument(rec, navigate, { autoplay: true, resume: false });
     } finally {
       setBusy(null);
     }
+  };
+
+  /** A link that ended up in the text box moves to the link field and is fetched from there. */
+  const readLinkFromText = (link: string) => {
+    setText("");
+    setTitle(undefined);
+    setTextOpen(false);
+    setUrl(link);
+    return readLink(link);
   };
 
   /** Visible text wins; otherwise the link; a hidden draft is read only when there is no link. */
@@ -105,7 +120,7 @@ export function Compose() {
     if (busy) return;
     const t = text.trim();
     const link = url.trim();
-    if (t && (textOpen || !link)) return readText(t);
+    if (t && (textOpen || !link)) return isWebAddress(t) ? readLinkFromText(t) : readText(t);
     if (link) return readLink(link);
     toast("Paste a link or some text first");
     linkRef.current?.focus();
@@ -130,6 +145,15 @@ export function Compose() {
     openText();
   };
 
+  const onTextPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = e.clipboardData.getData("text/plain").trim();
+    const { selectionStart, selectionEnd, value } = e.currentTarget;
+    // Only when the link would be all there is in the box; one pasted into a sentence is part of the text.
+    if (busy || !isWebAddress(pasted) || (value.slice(0, selectionStart) + value.slice(selectionEnd)).trim()) return;
+    e.preventDefault();
+    void readLinkFromText(pasted);
+  };
+
   const onLinkKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -144,8 +168,25 @@ export function Compose() {
     }
   };
 
+  /** A PDF is read by the server and opens like a link; there is no text to look over first. */
+  const readPdf = async (file: File) => {
+    if (busy) return;
+    setBusy("fetch");
+    toast(`Reading ${file.name}…`);
+    try {
+      const f = await readPdfFile(file);
+      const rec = await create({ text: f.text, title: f.title || file.name.replace(/\.pdf$/i, ""), source: "file", domain: f.domain, meta: f.meta, links: f.links });
+      await openDocument(rec, navigate, { autoplay: true, resume: false });
+    } catch {
+      toast("Couldn't read that PDF. A scanned PDF has no text to read.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const onFile = (file: File | undefined) => {
     if (!file) return;
+    if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) return void readPdf(file);
     const r = new FileReader();
     r.onload = () => {
       setText(String(r.result ?? ""));
@@ -216,7 +257,7 @@ export function Compose() {
               <Upload size={16} strokeWidth={1.5} aria-hidden />
             </span>
             Upload file
-            <input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(e) => onFile(e.target.files?.[0])} className="sr-only" />
+            <input type="file" accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf" onChange={(e) => onFile(e.target.files?.[0])} className="sr-only" />
           </label>
           <Button
             leading={<AlignLeft size={16} strokeWidth={1.5} />}
@@ -260,6 +301,7 @@ export function Compose() {
                 setText(e.target.value);
                 setTitle(undefined);
               }}
+              onPaste={onTextPaste}
               onKeyDown={onTextKey}
               placeholder={PLACEHOLDERS[ph]}
               rows={8}

@@ -1,7 +1,8 @@
 import { prepareVisualDescriptions } from "../lib/visualDescriptions";
+import type { VisualDescriptions } from "../lib/visuals";
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
-import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground, usesBuiltInProxy } from "../engine/providers";
+import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground } from "../engine/providers";
 import { hasActivePreparation } from "../engine/preparation";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { FINISHED_FRACTION } from "../lib/libraryProtocol";
@@ -14,11 +15,18 @@ import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { hasPatois, preparePatois } from "../lib/patois";
 import { hasSummary } from "../lib/summary";
 import { prepareCodeSummaries } from "../lib/codeSummaries";
-import { readingBlocks } from "../lib/codeBlocks";
+import { readingBlocks, type CodeSummaries } from "../lib/codeBlocks";
+import { catalogue } from "../lib/postTitle";
+import { serverReachable, serverReturned } from "../lib/appUpdate";
 
 let opening: AbortController | null = null;
 let prerendering: AbortController | null = null;
-/** Image descriptions being written for the open reading after it started. */
+/** The deck whose slides are being described: its audio is not final until they are. */
+let describingDeck: string | null = null;
+/** The document whose audio finished preparing while its slides were still being described. */
+let heldBack: string | null = null;
+const PREPARED = "Audio prepared — playback no longer waits on the server";
+/** Code explanations and image descriptions being written for the open reading after it started. */
 let describing: AbortController | null = null;
 let retryPreparation: (() => Promise<boolean>) | null = null;
 /** The end of the current reading has already been counted; cleared once playback leaves the end. */
@@ -41,13 +49,15 @@ export interface PlayerState extends EngineSnapshot {
   preparationError: string | null;
   /** The chosen voice could not be generated; playback is stopped until the user retries or switches voice. */
   speechError: string | null;
+  /** The app's own server stopped answering; playback resumes by itself when it answers again. */
+  reconnecting: boolean;
   /** "Prepare audio" in progress: passages rendered so far */
-  prerendering: { done: number; total: number } | null;
+  prerendering: { done: number; total: number; unreachable?: boolean } | null;
 }
 
 interface Actions {
   /** `persist` saves the record (e.g. a voice change) once preparation succeeds. */
-  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean; prepare?: boolean; summary?: boolean }) => Promise<boolean>;
+  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean; summary?: boolean }) => Promise<boolean>;
   cancelPreparation: () => void;
   retryPreparation: () => Promise<boolean>;
   /** Try the speech server again for the current sentence. */
@@ -74,6 +84,22 @@ interface Actions {
   setMenuOpen: (v: boolean) => void;
   setShortcutsOpen: (v: boolean) => void;
   clearOffline: () => void;
+}
+
+let reconnects = 0;
+/**
+ * A phone's tunnel to the app can drop for minutes while the speech server is fine.
+ * When the app's own server is what stopped answering, wait for it and resume instead
+ * of leaving a Retry to tap. A speech server that is down behind a reachable app is
+ * left to the user: asking it again in a loop would not help.
+ */
+async function resumeWhenReachable() {
+  const attempt = ++reconnects;
+  const wanted = () => attempt === reconnects && !!usePlayer.getState().speechError;
+  if (await serverReachable(4000) || !wanted()) return;
+  usePlayer.setState({ speechError: "Can't reach ReadAloud.", reconnecting: true });
+  if (await serverReturned(wanted)) usePlayer.getState().retrySpeech();
+  else if (wanted()) usePlayer.setState({ reconnecting: false });
 }
 
 export const engine = new PlaybackEngine({
@@ -105,7 +131,10 @@ export const engine = new PlaybackEngine({
     void positions.put({ docId: snap.docId, variant: variant(doc.voice), narrationVersion: 2, index: snap.index, offset: snap.offset, fraction: snap.fraction, total: snap.total, updatedAt: Date.now() }, { completed });
   },
   onError: (m) => toast(m),
-  onUnavailable: (m) => usePlayer.setState({ speechError: m }),
+  onUnavailable: (m, unreachable) => {
+    usePlayer.setState({ speechError: m, reconnecting: false });
+    if (unreachable) void resumeWhenReachable();
+  },
   onSlow: (factor) => {
     const voice = getVoice(usePlayer.getState().voiceId);
     // Prepare audio is not offered for paid engines (it would bill the whole document up front).
@@ -114,6 +143,18 @@ export const engine = new PlaybackEngine({
   },
 });
 
+/** Resolves once `ready` holds, looking again each second; rejects when cancelled. */
+function until(ready: () => boolean, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (signal.aborted) { clearInterval(timer); reject(signal.reason); }
+      else if (ready()) { clearInterval(timer); resolve(); }
+    };
+    const timer = setInterval(check, 1000);
+    check();
+  });
+}
+
 export function clampSpeed(v: number) {
   return Math.round(Math.max(0.5, Math.min(3, v)) * 20) / 20;
 }
@@ -121,23 +162,66 @@ export function clampSpeed(v: number) {
 export const usePlayer = create<PlayerState & Actions>()((set, get) => {
   engine.subscribe((snap) => set(snap));
 
-  /** Save descriptions for a reading's images and swap them into it, keeping the listener's place. */
-  async function describeVisuals(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal) {
+  /** Save new wording for a reading's code or images and swap it in, keeping the listener's place. */
+  function swapIn(id: string, opened: DocRecord, readingText: string, signal: AbortSignal,
+    found: { codeSummaries?: CodeSummaries; visualDescriptions?: VisualDescriptions }) {
+    // One at a time, so code explanations and image descriptions arriving together both get saved.
+    const run = swapping.then(() => saveAndSwap(id, opened, readingText, signal, found));
+    swapping = run.catch(() => {});
+    return run;
+  }
+  let swapping: Promise<void> = Promise.resolve();
+  async function saveAndSwap(id: string, opened: DocRecord, readingText: string, signal: AbortSignal,
+    found: { codeSummaries?: CodeSummaries; visualDescriptions?: VisualDescriptions }) {
+    const latest = await docStore.get(id);
+    if (signal.aborted || !latest || latest.text !== opened.text) return;
+    const record = { ...latest,
+      codeSummaries: { ...latest.codeSummaries, ...found.codeSummaries },
+      visualDescriptions: { ...latest.visualDescriptions, ...found.visualDescriptions } };
+    await docStore.put(record);
+    const { doc } = get();
+    if (signal.aborted || doc?.id !== id) return;
+    const next: EngineDoc = { ...doc, ...segment(readingText, record.codeSummaries, record.visualDescriptions) };
+    if (!engine.replaceText(next)) return;
+    set({ doc: next, record });
+    // Prepared audio follows the new wording.
+    if (prerendering) { get().cancelPrerender(); void get().prerender(); }
+  }
+
+  /**
+   * Explain a reading's code blocks while it is already open. The model can take a minute, so
+   * the reading starts with skip notices in their place and the explanations replace them.
+   */
+  async function explainCode(id: string, opened: DocRecord, readingText: string, signal: AbortSignal) {
     try {
-      const described = await prepareVisualDescriptions(opened, readingText, signal, () => {});
-      if (signal.aborted || described.visualDescriptions === opened.visualDescriptions) return;
-      const latest = await docStore.get(id);
-      if (signal.aborted || !latest || latest.text !== opened.text) return;
-      const record = { ...latest, visualDescriptions: { ...latest.visualDescriptions, ...described.visualDescriptions } };
-      await docStore.put(record);
-      const { doc } = get();
-      if (signal.aborted || doc?.id !== id) return;
-      const next: EngineDoc = { ...doc, ...segment(readingText, record.codeSummaries, record.visualDescriptions) };
-      if (!engine.replaceText(next)) return;
-      set({ doc: next, record });
-      // Prepared audio follows the new wording.
-      if (autoPrepare || prerendering) { get().cancelPrerender(); void get().prerender(); }
+      const explained = await prepareCodeSummaries(opened, readingText, useSettings.getState().summaryModel, signal, () => {});
+      if (explained.codeSummaries !== opened.codeSummaries) await swapIn(id, opened, readingText, signal, { codeSummaries: explained.codeSummaries });
+    } catch { /* Skip notices keep serving. */ }
+  }
+
+  /**
+   * Save descriptions for a reading's images and swap them into it, keeping the listener's place.
+   * A deck's slides are described from that place onwards, a few at a time as they arrive.
+   */
+  async function describeVisuals(id: string, opened: DocRecord, readingText: string, signal: AbortSignal) {
+    try {
+      const slides = readingBlocks(readingText).some((block) => block.kind === "visual" && block.visual.kind === "slide");
+      if (slides) {
+        // Describing a deck is a call to the model for most of its slides: wait until it is being listened to.
+        await until(() => get().doc?.id === id && (get().playing || get().index > 0), signal);
+        describingDeck = id;
+      }
+      await prepareVisualDescriptions(opened, readingText, signal, () => {}, {
+        all: true,
+        heard: () => { const { doc, index } = get(); return doc?.id === id ? doc.paragraphs.filter((p) => p.visual && p.start < index).length : 0; },
+        found: (visualDescriptions) => swapIn(id, opened, readingText, signal, { visualDescriptions }),
+      });
     } catch { /* Captions and alt text keep serving. */ }
+    if (describingDeck !== id) return;
+    describingDeck = null;
+    // Audio that finished in the meantime was not announced, since its wording was still changing.
+    if (heldBack === id && !prerendering && !signal.aborted && get().doc?.id === id) toast(PREPARED);
+    heldBack = null;
   }
 
   return {
@@ -153,6 +237,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
     preparing: null,
     preparationError: null,
     speechError: null,
+    reconnecting: false,
     prerendering: null,
 
     async open(rec, opts = {}) {
@@ -181,14 +266,8 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         : rec;
       signal.throwIfAborted();
       const readingText = summary ? rec.summary!.text : patois ? prepared.patois!.text : prepared.text;
-      if (readingBlocks(readingText).some((block) => block.kind === "code")) {
-        engine.pause();
-        prepared = await prepareCodeSummaries(prepared, readingText, useSettings.getState().summaryModel, signal,
-          (preparing) => { if (!signal.aborted) set({ preparing }); });
-      }
-      signal.throwIfAborted();
       const seg = segment(readingText, prepared.codeSummaries, prepared.visualDescriptions);
-      const doc: EngineDoc = { id: rec.id, title: rec.title, voice: voice.id, lang: voiceLang(voice), ...seg };
+      const doc: EngineDoc = { id: rec.id, title: catalogue(rec).title, voice: voice.id, lang: voiceLang(voice), ...seg };
       let index = 0, offset = 0;
       if (opts.resume !== false && !summary) {
         const pos = await positions.get(rec.id).catch(() => undefined);
@@ -200,7 +279,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         }
       }
       signal.throwIfAborted();
-      if (rewrite || opts.persist || prepared.codeSummaries !== rec.codeSummaries || prepared.visualDescriptions !== rec.visualDescriptions) {
+      if (rewrite || opts.persist) {
         const latest = await docStore.get(rec.id);
         signal.throwIfAborted();
         if (!latest || latest.text !== rec.text) throw new Error("The document changed. Open it again to continue.");
@@ -209,19 +288,22 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         await docStore.put(prepared);
       }
       signal.throwIfAborted();
+      // Preparation asked for while this document was still opening belongs to the one before it.
+      get().cancelPrerender();
       engine.load(doc, index, offset);
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
       set({ doc, record: prepared, voiceId: voice.id, summary, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
       const requests = engine.passages.map((p) => ({ text: p.text, voice: voice.id, engine: voice.engine, profile: voice.kind === "profile" }));
-      const autoPrepare = opts.prepare && usesBuiltInProxy() && voice.engine !== LOCAL_ENGINE
-        && !isPaidEngine(voice.engine) && useSettings.getState().engine !== LOCAL_ENGINE && !get().offline;
-      if (autoPrepare || hasActivePreparation(preparationRequests(requests))) void get().prerender();
+      // Audio is prepared only when asked for; a reading already being prepared is followed.
+      if (hasActivePreparation(preparationRequests(requests))) void get().prerender();
       if (opts.autoplay) void engine.play();
-      // Reading starts with captions and alt text; descriptions replace them as they arrive.
-      if (readingBlocks(readingText).some((block) => block.kind === "visual")) {
-        describing = new AbortController();
-        void describeVisuals(rec.id, prepared, readingText, !!autoPrepare, describing.signal);
-      }
+      // Reading starts with skip notices, captions and alt text; explanations and descriptions replace them as they arrive.
+      const blocks = readingBlocks(readingText);
+      const code = blocks.some((block) => block.kind === "code");
+      const visuals = blocks.some((block) => block.kind === "visual");
+      if (code || visuals) describing = new AbortController();
+      if (code) void explainCode(rec.id, prepared, readingText, describing!.signal);
+      if (visuals) void describeVisuals(rec.id, prepared, readingText, describing!.signal);
       retryPreparation = null;
       return true;
       } catch (error) {
@@ -261,11 +343,14 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       set({ prerendering: { done: 0, total: engine.passages.length } });
       try {
         let completed = 0;
-        await engine.prepare((done, total) => {
+        await engine.prepare((done, total, status) => {
           completed = Math.max(completed, done);
-          if (prerendering === controller) set({ prerendering: { done: completed, total } });
+          if (prerendering === controller) set({ prerendering: { done: completed, total, ...(status?.unreachable ? { unreachable: true } : {}) } });
         }, controller.signal);
-        if (!controller.signal.aborted && get().doc === doc) toast("Audio prepared — playback no longer waits on the server");
+        if (!controller.signal.aborted && get().doc === doc) {
+          if (describingDeck === doc.id) heldBack = doc.id;
+          else toast(PREPARED);
+        }
       } catch (error) {
         if (!controller.signal.aborted) toast(`Audio preparation failed: ${error instanceof Error ? error.message : "Please retry."}`);
       } finally {

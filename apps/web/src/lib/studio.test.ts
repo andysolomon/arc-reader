@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { errorMessage, readEvents, waitForTask, subtitles, transcribe } from "./studio";
+import { errorMessage, readEvents, recordingRevision, waitForTask, subtitles, transcribe } from "./studio";
 
 function stream(parts: string[]) {
   const encoder = new TextEncoder();
@@ -7,6 +7,13 @@ function stream(parts: string[]) {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe("VoiceStudio workflow contracts", () => {
+  it("reads a clone's recording revision only from a replaced reference", () => {
+    expect(recordingRevision({ id: "ab12cd34", ref_audio_path: "ab12cd34.wav" })).toBeUndefined();
+    expect(recordingRevision({ id: "ab12cd34", ref_audio_path: "ab12cd34-9f8e7d6c.webm" })).toBe("9f8e7d6c");
+    expect(recordingRevision({ id: "ab12cd34", ref_audio_path: "/data/voices/ab12cd34-9f8e7d6c.m4a" })).toBe("9f8e7d6c");
+    expect(recordingRevision({ id: "ab12cd34", ref_audio_path: "other-9f8e7d6c.wav" })).toBeUndefined();
+    expect(recordingRevision({ id: "ab12cd34", ref_audio_path: null })).toBeUndefined();
+  });
   it("handles split SSE frames, CRLF and keepalives", async () => {
     const events: string[] = [];
     await readEvents(stream([': ping\r\n\r\nda', 'ta: {"type":"progress"}\r', '\n\r\ndata: {"type":"done"}\n\n']), (event) => { events.push(event.type!); });

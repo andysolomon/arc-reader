@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Chip, Input, VoiceCard, VoiceSourceBadge } from "@readaloud/ui";
+import { Button, Chip, Dialog, Input, VoiceCard, VoiceSourceBadge, voiceAvatarIdentity, type VoiceCardAction } from "@readaloud/ui";
 import type { VoiceSource } from "@readaloud/tokens";
-import { Search } from "lucide-react";
-import { useVoices, getVoice, voiceLang, isLocalVoice } from "../state/voices";
+import { ImagePlus, LayoutGrid, Mic, Search, Trash2, Undo2, WandSparkles } from "lucide-react";
+import { useAvatars, avatarReviewNote } from "../state/avatars";
+import { useVoices, getVoice, voiceLang, isLocalVoice, defaultVoiceId } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
@@ -12,16 +13,18 @@ import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
 import { ApiBusy, ApiRejected, ApiUnreachable } from "../engine/types";
-import { DEFAULT_VOICE_ID, JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource } from "../data/voices";
+import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource, type Voice } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
-import { ClearFilters, FilterSelect } from "../components/Filters";
+import { ClearFilters, FilterSelect, VOICE_GRID } from "../components/Filters";
 
 // Filter chips follow the same fixed order as the sections below.
 const sourceRank = (source: string) => { const i = Object.keys(SOURCE_INFO).indexOf(source); return i < 0 ? Infinity : i; };
 const TYPE_LABELS: Record<string, string> = { "built-in": "Built-in", cloned: "Cloned", designed: "Designed" };
 
 const PREVIEW_MS = 3000;
+
+const PILL_LINK = "inline-flex h-[34px] items-center gap-1.5 rounded-pill border border-line bg-bg2 px-3.5 text-[13px] text-fg hover:bg-bg3";
 
 /** How much of the document a voice has saved audio for; silent when complete. */
 function preparedNote(fraction: number | undefined) {
@@ -32,6 +35,10 @@ function preparedNote(fraction: number | undefined) {
 
 export function VoicesPage() {
   const navigate = useNavigate();
+  const avatarEntries = useAvatars((s) => s.entries);
+  const avatarsConfigured = useAvatars((s) => s.configured);
+  const pendingAvatars = Object.values(avatarEntries).filter((r) => r.status === "queued" || r.status === "generating").length;
+  const failedAvatars = Object.values(avatarEntries).filter((r) => r.status === "failed").length;
   const [params] = useSearchParams();
   const forDoc = params.get("for");
   // From the player menu: only voices with audio saved for this document.
@@ -51,6 +58,8 @@ export function VoicesPage() {
   const [docTitle, setDocTitle] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [deleting, setDeleting] = useState<Voice | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [filters, setFilters] = useState<VoiceFilters>(NO_VOICE_FILTERS);
   const setFilter = (key: keyof VoiceFilters, value: string) => setFilters((f) => ({ ...f, [key]: value }));
   const current = forDoc ? (loadedDoc?.id === forDoc ? docVoice : selected) : selected;
@@ -175,19 +184,53 @@ export function VoicesPage() {
     toast(`${v.name} selected`);
   };
 
-  // Only voices added from the Studio gallery can go back: the recipe lives on in the gallery,
-  // whereas deleting a clone would discard its reference recording.
-  const demote = async (id: string) => {
-    const v = getVoice(id);
-    if (previewing === id) stopPreview();
+  /** Remove a saved VoiceStudio voice; false when VoiceStudio refused, which the toast explains. */
+  const removeProfile = async (v: Voice, failure: string) => {
+    if (previewing === v.id) stopPreview();
     try {
-      await useVoices.getState().remove(id);
+      await useVoices.getState().remove(v.id);
     } catch (error) {
-      toast(error instanceof Error ? error.message : `Could not send ${v.name} back to Studio`);
-      return;
+      toast(error instanceof Error ? error.message : failure);
+      return false;
     }
-    if (useSettings.getState().voice === id) useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
-    toast(`${v.name} sent back to the Studio gallery`);
+    if (useSettings.getState().voice === v.id) useSettings.getState().patch({ voice: defaultVoiceId(), voiceChosen: false });
+    return true;
+  };
+  // A gallery voice goes back to Studio: its recipe lives on there. Clones and voices designed
+  // in Studio are deleted for good (the reference recording or recipe goes too), so ask first.
+  const demote = async (v: Voice) => {
+    if (await removeProfile(v, `Could not send ${v.name} back to Studio`)) toast(`${v.name} sent back to the Studio gallery`);
+  };
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    const ok = await removeProfile(deleting, `Could not delete ${deleting.name}`);
+    setDeleteBusy(false);
+    if (ok) toast(`${deleting.name} deleted`);
+    setDeleting(null);
+  };
+  const profileActionsFor = (v: Voice): VoiceCardAction[] | undefined => {
+    if (v.kind !== "profile") return undefined;
+    if (v.archetype) return [{ label: `Send ${v.name} back to Studio`, icon: <Undo2 size={16} strokeWidth={1.5} aria-hidden />, onClick: () => void demote(v) }];
+    const remove: VoiceCardAction = { label: `Delete ${v.name}`, icon: <Trash2 size={16} strokeWidth={1.5} aria-hidden />, onClick: () => setDeleting(v), danger: true };
+    if (!v.tags.includes("cloned")) return [remove];
+    return [{ label: `Re-record ${v.name}`, icon: <Mic size={16} strokeWidth={1.5} aria-hidden />, onClick: () => { stopPreview(); navigate(`/studio/clone?voice=${encodeURIComponent(v.id)}`); } }, remove];
+  };
+
+
+  const actionsFor = (v: Voice): VoiceCardAction[] => {
+    const actions = profileActionsFor(v) ?? [];
+    const entry = avatarEntries[voiceAvatarIdentity(v)];
+    if (!avatarsConfigured || v.kind === "local" || entry?.status === "ready") return actions;
+    const pending = entry?.status === "queued" || entry?.status === "generating";
+    return [{
+      label: pending ? `Creating avatar for ${v.name}` : entry?.status === "failed" ? `Retry avatar for ${v.name}: ${entry.error}` : `Create illustrated avatar for ${v.name}`,
+      icon: <ImagePlus size={16} strokeWidth={1.5} aria-hidden />,
+      onClick: () => {
+        if (pending) { toast(`The avatar for ${v.name} is being created.`); return; }
+        void useAvatars.getState().ensure(v, true).then(() => toast(`Creating an avatar for ${v.name}. It will appear automatically.`)).catch((e) => toast(e instanceof Error ? e.message : "Could not create avatar."));
+      },
+    }, ...actions];
   };
 
   // Group by the service that renders each voice. Sections keep a fixed order:
@@ -199,19 +242,27 @@ export function VoicesPage() {
   return (
     <section data-screen="voices" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[880px] flex-col gap-5">
-        <div className="flex flex-wrap items-baseline gap-4">
+        <header className="flex flex-col gap-1.5">
           <h1 className="m-0 font-serif text-[26px] font-medium">Voices</h1>
-          <span className="text-fg2">
+          <p className="m-0 text-fg2">
             {preparedOnly ? `Choosing a prepared voice for “${docTitle ?? "this document"}”. Only voices with audio saved for it are listed.` : forDoc ? `Choosing a voice for “${docTitle ?? "this document"}”.` : "Selected voice is remembered. Override per document from the player menu."}
-          </span>
-        </div>
+          </p>
+        </header>
         {fishError && (
           <div role="status" className="rounded-panel border border-line bg-bg2 p-4 text-[13px] text-fg2">
             Fish Audio voices could not refresh: {fishError}. Your other voices are still available.
             <button type="button" onClick={() => void reload()} className="ml-2 border-0 bg-transparent text-accent underline">Retry</button>
           </div>
         )}
-        <div className="flex flex-wrap gap-4 text-sm underline"><Link to="/studio/clone">Clone a voice</Link><Link to="/studio/design">Design a voice</Link><Link to="/studio/gallery">Browse designed voices</Link></div>
+        <nav aria-label="Make a voice" className="flex flex-wrap gap-2">
+          <Link to="/studio/clone" className={PILL_LINK}><Mic size={14} strokeWidth={1.5} aria-hidden />Clone a voice</Link>
+          <Link to="/studio/design" className={PILL_LINK}><WandSparkles size={14} strokeWidth={1.5} aria-hidden />Design a voice</Link>
+          <Link to="/studio/gallery" className={PILL_LINK}><LayoutGrid size={14} strokeWidth={1.5} aria-hidden />Browse designed voices</Link>
+        </nav>
+        {(pendingAvatars > 0 || failedAvatars > 0) && <p role="status" className="m-0 text-sm text-fg2">
+          {pendingAvatars > 0 && `Creating ${pendingAvatars} voice avatar${pendingAvatars === 1 ? "" : "s"}. Portraits appear automatically. `}
+          {failedAvatars > 0 && `${failedAvatars} avatar${failedAvatars === 1 ? "" : "s"} could not be created. Use the image button on a voice to retry.`}
+        </p>}
         <div className="flex flex-col gap-3" role="search" aria-label="Filter voices">
           <Input type="search" aria-label="Search voices" placeholder="Search by name, tag or language…" leading={<Search size={16} aria-hidden />} wrapperClassName="h-10" value={filters.query} onChange={(e) => setFilter("query", e.target.value)} />
           <div className="flex flex-wrap gap-2" role="group" aria-label="Voice source">
@@ -232,25 +283,36 @@ export function VoicesPage() {
         )}
         {!shown.length && pool.length > 0 && <p className="text-fg2">No voices match these filters.</p>}
         {groups.map(([source, voices]) => (
-          <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
+          <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3 rounded-panel border border-line bg-bg2 p-2 sm:p-4">
+            <div className="px-2 pt-2 sm:px-1 sm:pt-0">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                 <h2 id={`voices-${source}`} className="m-0 font-serif text-xl"><VoiceSourceBadge source={source} className="px-3 py-1 text-sm" /></h2>
-                {source === "VoiceStudio" && <span className="text-xs text-fg2">Free · on device · default service</span>}
+                <span className="text-xs text-fg2">{voices.length === 1 ? "1 voice" : `${voices.length} voices`}</span>
               </div>
-              {SOURCE_INFO[source] && <p className="mt-1 text-sm text-fg2">{SOURCE_INFO[source].description}</p>}
+              {SOURCE_INFO[source] && <p className="mt-2 text-sm text-fg2">{SOURCE_INFO[source].description}</p>}
               {voices.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="mt-1 text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
             </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
+            <div className={VOICE_GRID}>
               {voices.map((v) => (
                 <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} generating={previewing === v.id && generating} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)}
-                  note={preparedOnly ? preparedNote(prepared.find((p) => p.voiceId === v.id)?.fraction) : undefined}
-                  onRemove={v.archetype ? () => void demote(v.id) : undefined} removeLabel={`Send ${v.name} back to Studio`} />
+                  note={[preparedOnly ? preparedNote(prepared.find((p) => p.voiceId === v.id)?.fraction) : undefined, avatarReviewNote(avatarEntries[voiceAvatarIdentity(v)])].filter(Boolean).join(" · ") || undefined}
+                  actions={actionsFor(v)} />
               ))}
             </div>
           </section>
         ))}
       </div>
+      <Dialog open={!!deleting} onClose={() => { if (!deleteBusy) setDeleting(null); }} title={`Delete ${deleting?.name ?? "voice"}?`}>
+        <p className="text-sm text-fg2">
+          {deleting?.tags.includes("cloned") ? "Its reference recording is removed from VoiceStudio and can't be recovered." : "Its recipe is removed from VoiceStudio and can't be recovered."}{" "}
+          Documents set to this voice will need another one.
+          {deleting?.tags.includes("cloned") && <> To keep the voice but change how it sounds, re-record it instead.</>}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={() => setDeleting(null)} disabled={deleteBusy}>Cancel</Button>
+          <Button variant="danger" loading={deleteBusy} onClick={() => void confirmDelete()}>Delete voice</Button>
+        </div>
+      </Dialog>
     </section>
   );
 }

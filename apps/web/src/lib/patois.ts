@@ -31,7 +31,7 @@ export function hasPatois(rec: DocRecord): boolean {
   return rec.patois?.version === VERSION && rec.patois.sourceText === rec.text && !!rec.patois.text.trim();
 }
 
-export async function preparePatois(rec: DocRecord, signal: AbortSignal, progress: (message: string) => void): Promise<DocRecord> {
+export async function preparePatois(rec: DocRecord, signal: AbortSignal, progress: (message: string, step?: { done: number; total: number }) => void): Promise<DocRecord> {
   signal.throwIfAborted();
   if (hasPatois(rec)) return rec;
   if (!BASE) throw new Error("Patois rewriting needs the OpenAI connection. Choose Jamaican English to read the original text.");
@@ -47,7 +47,7 @@ export async function preparePatois(rec: DocRecord, signal: AbortSignal, progres
     const { text } = chunk;
     if (chunk.visual) { translated.push(text); continue; }
     signal.throwIfAborted();
-    progress(`Rewriting into Jamaican Patois… ${index + 1} of ${chunks.length}`);
+    progress(`Rewriting into Jamaican Patois… ${index + 1} of ${chunks.length}`, { done: index, total: chunks.length });
     const response = await fetch(`${BASE}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
