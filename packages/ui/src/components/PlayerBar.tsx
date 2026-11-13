@@ -1,5 +1,5 @@
 import { cn } from "../lib/cn";
-import { PlayerControls, PlayButton, TimeReadout, type PlayerProps } from "./PlayerControls";
+import { PlayerControls, PlayButton, PlayerVoiceButton, TimeReadout, type PlayerProps } from "./PlayerControls";
 import { Scrubber } from "./Scrubber";
 import { IconButton } from "./IconButton";
 import { SkipBack, SkipForward, MoreHorizontal } from "lucide-react";
@@ -7,7 +7,6 @@ import { SpeedChip } from "./SpeedChip";
 import { Menu } from "./Menu";
 import { buildMenuItems } from "./PlayerControls";
 import { fmtTime } from "../lib/format";
-import { VoiceAvatar } from "./VoiceAvatar";
 
 /** Full-width bar, 72px tall. `compact` renders the one-handed mobile layout (scrubber above controls). */
 export function PlayerBar({ safeBottom = true, ...p }: PlayerProps & { safeBottom?: boolean }) {
@@ -28,7 +27,7 @@ export function PlayerBar({ safeBottom = true, ...p }: PlayerProps & { safeBotto
           <TimeReadout elapsed={p.elapsed} remaining={p.remaining} status={p.status} />
         </div>
         <div className="flex items-center justify-between gap-1">
-          <VoiceAvatar voice={p.voice} size={36} interactive onClick={p.onVoice} />
+          <PlayerVoiceButton {...p} className={undefined} />
           <SpeedChip speed={p.speed} onChange={p.onSpeed} />
           <div className="flex items-center gap-1">
             <IconButton label="Previous sentence" size={44} round onClick={p.onPrev}>

@@ -1,7 +1,8 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Square, Zap } from "lucide-react";
-import { PlayerPill, PlayerBar, type PlayerProps } from "@readaloud/ui";
+import { PlayerPill, PlayerBar, Popover, Sheet, type PlayerProps } from "@readaloud/ui";
+import { VoicePicker } from "./VoicePicker";
 import { getVoice } from "../state/voices";
 import { LOCAL_VOICE } from "../data/voices";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -27,6 +28,11 @@ export function PlayerHost() {
   const p = usePlayer();
   const focus = usePlayer((s) => s.focus);
   const voice = getVoice(p.voiceId);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const closePicker = useCallback(() => setPickerOpen(false), []);
+  const docId = p.record?.id ?? p.doc?.id;
+  // A different document (or none) closes the picker: its choices belonged to the old one.
+  useEffect(() => setPickerOpen(false), [docId, pathname]);
 
   const onDownload = useCallback(async () => {
     const d = p.doc;
@@ -104,22 +110,43 @@ export function PlayerHost() {
     onNext: p.next,
     onSeek: p.seekFraction,
     onSpeed: p.setSpeed,
-    onVoice: () => navigate("/voices"),
+    onVoice: () => { p.setMenuOpen(false); setPickerOpen((o) => !o); },
     onDownload,
     onShare,
     onAddToLibrary,
-    // Mid-reading, only voices with audio already saved for this document are offered: switching
-    // to an unprepared voice would stall playback on live generation.
-    onChangeVoice: () => navigate(`/voices?for=${p.doc!.id}&prepared=1`),
+    // The same in-place picker as the avatar; voices with audio saved for this document come first.
+    onChangeVoice: () => setPickerOpen(true),
     menuOpen: p.menuOpen,
     onMenuOpenChange: p.setMenuOpen,
     // A passage still being generated: say so, so a wait mid-reading doesn't read as a stop.
     status: prerender ? `${prerender.unreachable ? "Can't reach server" : "Preparing"} ${prerender.done}/${prerender.total}` : p.loading ? "Generating…" : undefined,
     extraMenu,
+    voicePickerOpen: pickerOpen,
   };
 
+  const picker = (
+    <VoicePicker
+      docId={docId!}
+      title={p.doc.title}
+      onDone={closePicker}
+      onBrowse={() => { closePicker(); navigate(`/voices?for=${docId}`); }}
+      className={bp === "sm" ? "max-h-[60dvh]" : "max-h-[min(420px,60dvh)]"}
+    />
+  );
+
   // The tab bar owns the home-indicator inset. In focus it is hidden, so the player takes it.
-  if (bp === "sm") return <PlayerBar {...props} compact safeBottom={focus || pathname === "/auth"} />;
+  // Phones get a bottom sheet, rendered outside the player: its backdrop blur would trap a fixed overlay.
+  if (bp === "sm") return (
+    <>
+      <PlayerBar {...props} compact safeBottom={focus || pathname === "/auth"} />
+      <Sheet open={pickerOpen} onClose={closePicker} title="Voice for this document">{picker}</Sheet>
+    </>
+  );
+  props.voicePicker = (
+    <Popover open={pickerOpen} onClose={closePicker} align="start" offset={52} role="dialog" aria-label="Voice for this document" className="flex w-[300px] flex-col p-2">
+      {picker}
+    </Popover>
+  );
   if (style === "bar") return <PlayerBar {...props} />;
   return <PlayerPill {...props} />;
 }
