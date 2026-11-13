@@ -97,7 +97,7 @@ test.describe("touch phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   test("fields are at least 16px so iOS doesn't zoom on focus", async ({ page }) => {
-    for (const path of ["/library", "/voices", "/studio", "/settings", "/auth"]) {
+    for (const path of ["/library", "/voices", "/studio", "/studio/clone", "/studio/design", "/studio/transcribe", "/settings", "/auth"]) {
       await page.goto(path);
       await page.locator("input, select, textarea").first().waitFor();
       const small = await page.evaluate(() =>
@@ -108,6 +108,12 @@ test.describe("touch phone", () => {
       );
       expect(small, path).toEqual([]);
     }
+  });
+
+  test("scroll containers show no scroll indicators", async ({ page }) => {
+    await page.goto("/studio/design");
+    const scroller = page.locator('[data-screen="studio"]');
+    await expect(scroller).toHaveCSS("scrollbar-width", "none");
   });
 
   test("library rows keep their actions hidden until swiped", async ({ page }) => {

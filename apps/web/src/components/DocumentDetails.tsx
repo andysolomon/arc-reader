@@ -212,7 +212,7 @@ function Field({ id, value, onSave, multiline, rows = 2, ...rest }: {
     onChange: (e: { target: { value: string } }) => setDraft(e.target.value),
   };
   if (multiline) {
-    return <textarea {...common} rows={rows} placeholder={rest.placeholder} className="w-full min-w-0 resize-y rounded-control border border-line bg-bg px-3 py-2 text-[14px] leading-relaxed text-fg transition-colors focus:border-fg3 focus-visible:outline-offset-0" />;
+    return <textarea {...common} rows={rows} placeholder={rest.placeholder} className="w-full min-w-0 resize-y rounded-control border border-line bg-bg px-3 py-2 text-[14px] leading-relaxed [@media(pointer:coarse)]:text-[16px] text-fg transition-colors focus:border-fg3 focus-visible:outline-offset-0" />;
   }
   return (
     <Input
