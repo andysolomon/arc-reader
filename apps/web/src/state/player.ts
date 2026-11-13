@@ -15,7 +15,7 @@ import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { hasPatois, preparePatois } from "../lib/patois";
 import { hasSummary } from "../lib/summary";
 import { prepareCodeSummaries } from "../lib/codeSummaries";
-import { readingBlocks } from "../lib/codeBlocks";
+import { readingBlocks, type CodeSummaries } from "../lib/codeBlocks";
 import { catalogue } from "../lib/postTitle";
 import { serverReachable, serverReturned } from "../lib/appUpdate";
 
@@ -26,7 +26,7 @@ let describingDeck: string | null = null;
 /** The document whose audio finished preparing while its slides were still being described. */
 let heldBack: string | null = null;
 const PREPARED = "Audio prepared — playback no longer waits on the server";
-/** Image descriptions being written for the open reading after it started. */
+/** Code explanations and image descriptions being written for the open reading after it started. */
 let describing: AbortController | null = null;
 let retryPreparation: (() => Promise<boolean>) | null = null;
 /** The end of the current reading has already been counted; cleared once playback leaves the end. */
@@ -162,24 +162,48 @@ export function clampSpeed(v: number) {
 export const usePlayer = create<PlayerState & Actions>()((set, get) => {
   engine.subscribe((snap) => set(snap));
 
+  /** Save new wording for a reading's code or images and swap it in, keeping the listener's place. */
+  function swapIn(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal,
+    found: { codeSummaries?: CodeSummaries; visualDescriptions?: VisualDescriptions }) {
+    // One at a time, so code explanations and image descriptions arriving together both get saved.
+    const run = swapping.then(() => saveAndSwap(id, opened, readingText, autoPrepare, signal, found));
+    swapping = run.catch(() => {});
+    return run;
+  }
+  let swapping: Promise<void> = Promise.resolve();
+  async function saveAndSwap(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal,
+    found: { codeSummaries?: CodeSummaries; visualDescriptions?: VisualDescriptions }) {
+    const latest = await docStore.get(id);
+    if (signal.aborted || !latest || latest.text !== opened.text) return;
+    const record = { ...latest,
+      codeSummaries: { ...latest.codeSummaries, ...found.codeSummaries },
+      visualDescriptions: { ...latest.visualDescriptions, ...found.visualDescriptions } };
+    await docStore.put(record);
+    const { doc } = get();
+    if (signal.aborted || doc?.id !== id) return;
+    const next: EngineDoc = { ...doc, ...segment(readingText, record.codeSummaries, record.visualDescriptions) };
+    if (!engine.replaceText(next)) return;
+    set({ doc: next, record });
+    // Prepared audio follows the new wording.
+    if (autoPrepare || prerendering) { get().cancelPrerender(); void get().prerender(); }
+  }
+
+  /**
+   * Explain a reading's code blocks while it is already open. The model can take a minute, so
+   * the reading starts with skip notices in their place and the explanations replace them.
+   */
+  async function explainCode(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal) {
+    try {
+      const explained = await prepareCodeSummaries(opened, readingText, useSettings.getState().summaryModel, signal, () => {});
+      if (explained.codeSummaries !== opened.codeSummaries) await swapIn(id, opened, readingText, autoPrepare, signal, { codeSummaries: explained.codeSummaries });
+    } catch { /* Skip notices keep serving. */ }
+  }
+
   /**
    * Save descriptions for a reading's images and swap them into it, keeping the listener's place.
    * A deck's slides are described from that place onwards, a few at a time as they arrive.
    */
   async function describeVisuals(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal) {
-    const swapIn = async (found: VisualDescriptions) => {
-      const latest = await docStore.get(id);
-      if (signal.aborted || !latest || latest.text !== opened.text) return;
-      const record = { ...latest, visualDescriptions: { ...latest.visualDescriptions, ...found } };
-      await docStore.put(record);
-      const { doc } = get();
-      if (signal.aborted || doc?.id !== id) return;
-      const next: EngineDoc = { ...doc, ...segment(readingText, record.codeSummaries, record.visualDescriptions) };
-      if (!engine.replaceText(next)) return;
-      set({ doc: next, record });
-      // Prepared audio follows the new wording.
-      if (autoPrepare || prerendering) { get().cancelPrerender(); void get().prerender(); }
-    };
     try {
       const slides = readingBlocks(readingText).some((block) => block.kind === "visual" && block.visual.kind === "slide");
       if (slides) {
@@ -190,7 +214,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       await prepareVisualDescriptions(opened, readingText, signal, () => {}, {
         all: true,
         heard: () => { const { doc, index } = get(); return doc?.id === id ? doc.paragraphs.filter((p) => p.visual && p.start < index).length : 0; },
-        found: swapIn,
+        found: (visualDescriptions) => swapIn(id, opened, readingText, autoPrepare, signal, { visualDescriptions }),
       });
     } catch { /* Captions and alt text keep serving. */ }
     if (describingDeck !== id) return;
@@ -242,12 +266,6 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         : rec;
       signal.throwIfAborted();
       const readingText = summary ? rec.summary!.text : patois ? prepared.patois!.text : prepared.text;
-      if (readingBlocks(readingText).some((block) => block.kind === "code")) {
-        engine.pause();
-        prepared = await prepareCodeSummaries(prepared, readingText, useSettings.getState().summaryModel, signal,
-          (preparing) => { if (!signal.aborted) set({ preparing }); });
-      }
-      signal.throwIfAborted();
       const seg = segment(readingText, prepared.codeSummaries, prepared.visualDescriptions);
       const doc: EngineDoc = { id: rec.id, title: catalogue(rec).title, voice: voice.id, lang: voiceLang(voice), ...seg };
       let index = 0, offset = 0;
@@ -261,7 +279,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         }
       }
       signal.throwIfAborted();
-      if (rewrite || opts.persist || prepared.codeSummaries !== rec.codeSummaries || prepared.visualDescriptions !== rec.visualDescriptions) {
+      if (rewrite || opts.persist) {
         const latest = await docStore.get(rec.id);
         signal.throwIfAborted();
         if (!latest || latest.text !== rec.text) throw new Error("The document changed. Open it again to continue.");
@@ -280,11 +298,13 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
         && useSettings.getState().engine !== LOCAL_ENGINE && !get().offline;
       if (autoPrepare || hasActivePreparation(preparationRequests(requests))) void get().prerender();
       if (opts.autoplay) void engine.play();
-      // Reading starts with captions and alt text; descriptions replace them as they arrive.
-      if (readingBlocks(readingText).some((block) => block.kind === "visual")) {
-        describing = new AbortController();
-        void describeVisuals(rec.id, prepared, readingText, !!autoPrepare, describing.signal);
-      }
+      // Reading starts with skip notices, captions and alt text; explanations and descriptions replace them as they arrive.
+      const blocks = readingBlocks(readingText);
+      const code = blocks.some((block) => block.kind === "code");
+      const visuals = blocks.some((block) => block.kind === "visual");
+      if (code || visuals) describing = new AbortController();
+      if (code) void explainCode(rec.id, prepared, readingText, !!autoPrepare, describing!.signal);
+      if (visuals) void describeVisuals(rec.id, prepared, readingText, !!autoPrepare, describing!.signal);
       retryPreparation = null;
       return true;
       } catch (error) {
