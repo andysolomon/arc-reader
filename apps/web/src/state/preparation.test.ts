@@ -151,6 +151,17 @@ describe("Library preparation queue", () => {
     expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", message: undefined });
   });
 
+  it("counts passages saved on this device after the server makes them, and drops the count when the step ends", async () => {
+    const steps: unknown[] = [];
+    const stop = usePreparation.subscribe((state) => { const job = state.jobs[0]; if (job?.status === "saving") steps.push(job.step); });
+    usePreparation.getState().enqueue([record("a")], [bella]);
+    await settled();
+    stop();
+    expect(steps.at(0)).toEqual({ done: 0, total: 2 });
+    expect(steps.at(-1)).toEqual({ done: 2, total: 2 });
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "ready", done: 2, total: 2 });
+  });
+
   it("submits local readings to the machine queue and reports the actual assignment", async () => {
     const pending = holdBackgroundJobs();
     usePreparation.getState().enqueue([record("a"), record("b")], [bella, jasper]);

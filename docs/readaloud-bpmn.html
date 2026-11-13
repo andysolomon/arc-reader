@@ -646,7 +646,7 @@ const DIAGRAMS = {
       "The job belongs to the web server, not to the browser tab: it survives reloads, a sleeping phone and server restarts (jobs are files on disk), and identical readings share one job.",
     ],
     pools: [
-      { id: "P_br", n: "Browser · prerender() / Library queue", x: 0, y: 0, w: 1420, h: 240, lanes: [], d: "player.prerender() → engine.prepare() for the open reading; the Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:318", SRC + "state/preparation.ts:168"] },
+      { id: "P_br", n: "Browser · prerender() / Library queue", x: 0, y: 0, w: 1420, h: 240, lanes: [], d: "player.prerender() → engine.prepare() for the open reading; the Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:318", SRC + "state/preparation.ts:174"] },
       { id: "P_srv", n: "Vite server · PreparationService", x: 0, y: 300, w: 1420, lanes: [
         { id: "L_api", n: "Job API", h: 200, d: "/api/preparations: GET / (the shared catalogue: clips available, and clips only some device holds), POST (submit), GET /:id (status), GET /:id/audio/:i (clip), PUT /:id/audio/:i (a device publishes a clip it already has), DELETE /:id (cancel).", code: ["apps/web/vite.prepare.ts:501"] },
         { id: "L_sched", n: "Machine scheduler", h: 170, d: "One whole reading per machine at a time.", code: ["apps/web/vite.prepare.ts:158"] },
@@ -661,7 +661,7 @@ const DIAGRAMS = {
     ],
     nodes: [
       { id: "S_prep", t: "start", n: "“Prepare audio” chosen", x: 90, y: 120, pool: "P_br",
-        d: "From the player menu, or from Library → Prepare for several documents and voices. Opening or listening to a reading never prepares it.", code: [SRC + "state/player.ts:338", SRC + "state/preparation.ts:104"] },
+        d: "From the player menu, or from Library → Prepare for several documents and voices. Opening or listening to a reading never prepares it.", code: [SRC + "state/player.ts:338", SRC + "state/preparation.ts:106"] },
       { id: "T_check", t: "task", n: "Check which passages are already on this device", x: 215, y: 120, pool: "P_br",
         d: "prepareInBackground marks every passage that IndexedDB already holds as cached, so the server skips it.", code: [SRC + "engine/providers.ts:410"] },
       { id: "G_all", t: "gw", g: "x", n: "All cached?", lp: "b", x: 345, y: 120, pool: "P_br", d: "Nothing left to render, and no active job for this reading?" },
@@ -841,7 +841,7 @@ const DIAGRAMS = {
       { id: "T_ids", t: "task", n: "Compare document IDs with the server", x: 1080, y: 270, lane: "L_sync", d: "With nothing pending, the local and server document IDs must match; otherwise it reports “The library has not finished syncing”.", code: [SRC + "lib/librarySync.ts:155"] },
       { id: "T_shared", t: "task", k: "service", n: "Refresh shared preparations", x: 1300, y: 270, lane: "L_sync",
         d: "Lists the server’s prepared readings (10 s timeout) so the Library shows what is ready, and uploads up to 8 clips per pass that only this device holds (30 s each).",
-        code: [SRC + "engine/preparation.ts:62", SRC + "state/preparation.ts:79"] },
+        code: [SRC + "engine/preparation.ts:62", SRC + "state/preparation.ts:81"] },
       { id: "E_synced", t: "end", n: "Synced", x: 1440, y: 270, lane: "L_sync", d: "Status synced; the Library list refreshes." },
       { id: "S_sync", t: "start", ev: "message", n: "Changes arrive", lp: "l", x: 620, y: 555, pool: "P_lsrv", d: "POST /api/library/sync." },
       { id: "T_vlib", t: "task", n: "Check origin, size and every record", x: 740, y: 555, pool: "P_lsrv",

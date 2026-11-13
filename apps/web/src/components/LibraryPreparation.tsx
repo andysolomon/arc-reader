@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Button, Dialog, Input, ProgressRing, VoiceServiceName, cn } from "@readaloud/ui";
+import { useMemo, useRef, useState } from "react";
+import { Button, Dialog, Input, ProgressBar, ProgressRing, VoiceServiceName, cn } from "@readaloud/ui";
 import { ChevronsUp, Search, Volume2, Zap } from "lucide-react";
 import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
 import { FISH_ENGINE, FISH_MODEL, baseFor, isPaidEngine, openaiModelFor, preparesOnServer } from "../engine/providers";
@@ -256,6 +256,35 @@ export function PrepareDialog({ documents, onClose, onQueued }: { documents: Lib
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
+/** How far the step a reading is on has got, as a bar shows it: null while it can't be counted, and no bar while it only waits. */
+function stepProgress(job: PreparationJob | undefined): { key: string; done: number; total: number; text: string } | null | undefined {
+  if (!job) return undefined;
+  if (job.step && job.step.total > 0) {
+    const { done, total } = job.step;
+    return { key: `${job.id}:${job.status}:step:${total}`, done, total, text: job.status === "saving" ? `${done} of ${plural(total, "passage")} saved` : `${done} of ${total}` };
+  }
+  if (job.status === "preparing" && job.total > 0) return { key: `${job.id}:passages:${job.total}`, done: job.done, total: job.total, text: `${job.done} of ${plural(job.total, "passage")}` };
+  // Waiting its turn, or for the server to answer again, is not progress.
+  const working = job.status !== "queued" || (!!job.message && !/^(Waiting|Can.t reach)/.test(job.message));
+  return working ? null : undefined;
+}
+
+/** A rough time left for a step, from how fast it has gone since this dialog first saw it. */
+function useTimeLeft(step: { key: string; done: number; total: number } | null | undefined): string | null {
+  const seen = useRef<{ key: string; at: number; done: number } | null>(null);
+  if (!step) return null;
+  const now = Date.now();
+  if (seen.current?.key !== step.key || step.done < seen.current.done) seen.current = { key: step.key, at: now, done: step.done };
+  const moved = step.done - seen.current.done;
+  const elapsed = now - seen.current.at;
+  if (moved < 1 || elapsed < 5000 || step.done >= step.total) return null;
+  const left = (elapsed / moved) * (step.total - step.done) / 1000;
+  if (left < 60) return "less than a minute left";
+  if (left < 3600) return `about ${Math.round(left / 60)} min left`;
+  const hours = Math.floor(left / 3600), minutes = Math.round((left % 3600) / 60);
+  return `about ${hours} h${minutes ? ` ${minutes} min` : ""} left`;
+}
+
 /** What one voice has prepared for one document, and the controls to move it through the queue. */
 export function PreparationDetails({ it, reading, defaultVoice, onClose, onChooseVoices }: { it: LibraryItem; reading: Reading; defaultVoice: string; onClose: () => void; onChooseVoices: () => void }) {
   const jobs = usePreparation((s) => s.jobs);
@@ -289,6 +318,9 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
     : `${ahead === 0 ? (job?.busy ? "Next, after the reading in progress" : "Next in line") : `${plural(ahead, "reading")} ahead`}${job?.prioritized ? " · moved to the front" : ""}`;
   const counted = job ?? (last && last.total > 0 ? last : undefined);
   const queuedAt = (job ?? last)?.createdAt;
+  const step = stepProgress(job);
+  const timeLeft = useTimeLeft(step);
+  const stepPercent = step ? Math.floor((step.done / step.total) * 100) : 0;
 
   const move = async (now: boolean) => {
     if (!job) return;
@@ -313,6 +345,15 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
           <div className="truncate text-[13px] text-fg2">{title}</div>
         </div>
       </div>
+      {step !== undefined && (
+        <div className="flex flex-col gap-1.5">
+          <ProgressBar value={step ? step.done / step.total : null} label={step ? `${status}: ${stepPercent}%` : status} />
+          <div className="flex justify-between gap-3 text-[12px] tabular-nums text-fg2">
+            <span>{step ? <><span className="text-fg">{stepPercent}%</span> · {step.text}</> : "Working…"}</span>
+            {timeLeft && <span>{timeLeft}</span>}
+          </div>
+        </div>
+      )}
       <dl className="m-0 divide-y divide-line border-y border-line text-[13px]">
         <div className={row}>
           <dt className="text-fg2">Status</dt>

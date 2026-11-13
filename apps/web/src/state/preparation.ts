@@ -26,6 +26,8 @@ export interface PreparationJob {
   done: number;
   total: number;
   message?: string;
+  /** How far the step the message names has got, when it can be counted: descriptions written, passages saved */
+  step?: { done: number; total: number };
   worker?: string;
   /** Set when a queued reading can only run on one machine. */
   waitingFor?: string;
@@ -154,14 +156,18 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   partialize: ({ jobs, hiddenShared }) => ({ jobs: jobs.filter((job) => !job.remote), hiddenShared }),
   merge: (persisted, current) => {
     const { jobs = [], hiddenShared = [] } = (persisted ?? {}) as { jobs?: PreparationJob[]; hiddenShared?: string[] };
-    return { ...current, hiddenShared, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined, waitingFor: undefined, ahead: undefined, busy: undefined } : job) };
+    return { ...current, hiddenShared, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, step: undefined, worker: undefined, waitingFor: undefined, ahead: undefined, busy: undefined } : job) };
   },
   // Local storage hydrates synchronously, before usePreparation is initialized.
   // Re-enter the worker afterwards; server jobs reconnect and saved audio is reused.
   onRehydrateStorage: () => (_state, error) => { if (!error) queueMicrotask(() => { void drain(); }); },
 }));
 
-const update = (id: string, patch: Partial<PreparationJob>) => usePreparation.setState((state) => ({ jobs: state.jobs.map((job) => job.id === id ? { ...job, ...patch } : job) }));
+// A step's count belongs to its message: a new message without one drops the old count.
+const update = (id: string, patch: Partial<PreparationJob>) => {
+  const next = "message" in patch && !("step" in patch) ? { ...patch, step: undefined } : patch;
+  usePreparation.setState((state) => ({ jobs: state.jobs.map((job) => job.id === id ? { ...job, ...next } : job) }));
+};
 
 /** Submit local work to the server's machine scheduler. Cloud voices use their
  * own pools and never occupy a machine's reservation; Phonon readings queue for the Phonon server. */
@@ -193,7 +199,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     if (!rec) throw new Error("This document is no longer in the Library.");
     signal.throwIfAborted();
     if (job.voice.id === JAMAICAN_PATOIS_VOICE_ID) {
-      const prepared = await preparePatois(rec, signal, (message) => update(job.id, { message }));
+      const prepared = await preparePatois(rec, signal, (message, step) => update(job.id, { message, step }));
       signal.throwIfAborted();
       const latest = await docs.get(job.docId);
       if (!latest || latest.text !== rec.text) throw new Error("The document changed. Prepare it again.");
@@ -205,7 +211,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     let explained = await prepareCodeSummaries(rec, text, useSettings.getState().summaryModel, signal, (message) => update(job.id, { message }));
     signal.throwIfAborted();
     // Prepared audio keeps its wording, so every slide of a deck is described first.
-    explained = await prepareVisualDescriptions(explained, text, signal, (message) => update(job.id, { message }), { all: true });
+    explained = await prepareVisualDescriptions(explained, text, signal, (message, step) => update(job.id, { message, step }), { all: true });
     signal.throwIfAborted();
     if (explained !== rec) {
       const latest = await docs.get(job.docId);
@@ -237,7 +243,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
         });
       }, signal);
       signal.throwIfAborted();
-      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined, message: undefined, ahead: undefined, busy: undefined, prioritized: undefined });
+      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined, message: undefined, step: { done: 0, total: passages.length }, ahead: undefined, busy: undefined, prioritized: undefined });
     }
     for (const passage of passages) {
       signal.throwIfAborted();
@@ -253,7 +259,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
       if (!chunk.audio) throw new Error("This voice did not return audio to prepare.");
       // Older sentence clips can be joined in memory; those are already safely cached.
       if (chunk.source !== "cache" && !(await audioCache.get(cacheKey(req)))) throw new Error("Could not save prepared audio. Free some storage and retry.");
-      update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, passage.index + 1) });
+      update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, passage.index + 1), ...(onServer ? { step: { done: passage.index + 1, total: passages.length } } : {}) });
     }
     signal.throwIfAborted();
     update(job.id, { status: "ready" });

@@ -58,6 +58,7 @@ module.exports = {
         pulse: { "0%,100%": { opacity: ".4" }, "50%": { opacity: ".9" } },
         wave: { "0%,100%": { transform: "scaleY(.25)" }, "50%": { transform: "scaleY(1)" } },
         ping: { "0%": { transform: "scale(1)", opacity: ".6" }, "100%": { transform: "scale(1.8)", opacity: "0" } },
+        sweep: { from: { transform: "translateX(-100%)" }, to: { transform: "translateX(250%)" } },
       },
       animation: {
         rise: "rise .2s cubic-bezier(0.16,1,0.3,1)",
@@ -66,6 +67,7 @@ module.exports = {
         pulse: "pulse 1.1s ease-in-out infinite",
         wave: "wave .7s ease-in-out infinite",
         ping: "ping 1.6s ease-out infinite",
+        sweep: "sweep 1.6s ease-in-out infinite",
       },
     },
   },

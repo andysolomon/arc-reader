@@ -46,6 +46,14 @@ describe("image understanding", () => {
     expect(prepared.visualDescriptions?.[visualKey(other)]).toBe(description);
     expect(prepared.visualDescriptions?.[visualKey(visual)]).toBeUndefined();
   });
+  it("counts the descriptions done so a bar can show how far along they are", async () => {
+    const other = { ...visual, src: "https://example.com/other.png" };
+    const record = { ...rec, text: rec.text + '\n\n' + visualBlock(other) };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ configured: true })).mockResolvedValueOnce(new Response("unavailable", { status: 400 })).mockResolvedValueOnce(response()));
+    const progress = vi.fn();
+    await prepareVisualDescriptions(record, record.text, new AbortController().signal, progress);
+    expect(progress.mock.calls.map(([, step]) => step)).toEqual([{ done: 0, total: 2 }, { done: 1, total: 2 }, { done: 2, total: 2 }]);
+  });
   it("cancellation stops waiting and does not save partial descriptions", async () => {
     const controller = new AbortController();
     const fetch = vi.fn().mockResolvedValueOnce(Response.json({ configured: true })).mockImplementationOnce((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))));
