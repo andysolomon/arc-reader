@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks } from "./links";
+import { absoluteUrl, linksInMarkdown, linksInText, placeholderUrl, uniqueLinks } from "./links";
 
 describe("links", () => {
   it("resolves relative links and drops non-web and in-page ones", () => {
@@ -41,5 +41,14 @@ describe("links", () => {
       { url: "https://a.com/", text: "Later" },
       { url: "https://b.com/", text: "" },
     ])).toEqual([{ url: "https://a.com/", text: "Alpha site" }, { url: "https://b.com/", text: "https://b.com/" }]);
+  });
+
+  it("leaves out placeholder addresses written as examples", () => {
+    const text = "An origin is scheme + host + port: https://example.com and https://example.com:8443 and http://api.example.org differ. Try http://localhost:3000, https://shop.test/cart, http://127.0.0.1:8080 or http://intranet/. The spec is at https://www.rfc-editor.org/rfc/rfc9110.";
+    expect(linksInText(text).map((l) => l.url)).toEqual(["https://www.rfc-editor.org/rfc/rfc9110"]);
+    expect(placeholderUrl("http://xn--ivg/")).toBe(true);
+    expect(placeholderUrl("https://example.community/")).toBe(false);
+    expect(placeholderUrl("https://notexample.com/")).toBe(false);
+    expect(placeholderUrl("http://192.168.1.20/")).toBe(false);
   });
 });

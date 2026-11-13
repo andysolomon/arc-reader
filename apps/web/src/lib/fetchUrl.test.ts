@@ -91,10 +91,17 @@ describe("htmlToText", () => {
       <article><p>Read <a href="/guide">the guide</a>, <a href="https://other.org/x">another site</a> and <a href="#top">top</a>.</p>
       <p><a href="mailto:a@b.c">mail</a> <a href="https://other.org/x">again</a></p></article>
     </body></html>`;
-    expect(htmlToText(html, "https://example.com/blog/post").links).toEqual([
-      { url: "https://example.com/guide", text: "the guide" },
+    expect(htmlToText(html, "https://writing.dev/blog/post").links).toEqual([
+      { url: "https://writing.dev/guide", text: "the guide" },
       { url: "https://other.org/x", text: "another site" },
     ]);
+  });
+
+  it("leaves out links drawn inside diagrams and placeholder addresses", () => {
+    const html = `<article><p>An origin like <a href="https://example.com">https://example.com</a> is the base; see <a href="https://developer.mozilla.org/cors">MDN</a>.</p>
+      <svg viewBox="0 0 10 10"><text><a href="https://api.github.com/users">https://api.github.com/users</a></text></svg>
+      <p><a href="http://”">http://”</a></p></article>`;
+    expect(htmlToText(html, "https://writing.dev/post").links).toEqual([{ url: "https://developer.mozilla.org/cors", text: "MDN" }]);
   });
 });
 
@@ -150,8 +157,8 @@ describe("a fetched page's links in the reading", () => {
   it("places each link at the words it was attached to", () => {
     const html = `<html><body><article>
       <p>Start here. Then read <a href="/guide">the guide</a> before the rest.</p>
-      <p>The code is on <a href="https://git.example/repo">our repository</a>.</p></article></body></html>`;
-    const page = htmlToText(html, "https://example.com/post");
+      <p>The code is on <a href="https://git.dev/repo">our repository</a>.</p></article></body></html>`;
+    const page = htmlToText(html, "https://writing.dev/post");
     expect(placeLinks(page.links, segment(page.text).sentences).map((l) => [l.text, l.at])).toEqual([
       ["the guide", { sentence: 1, word: 3 }],
       ["our repository", { sentence: 2, word: 5 }],
