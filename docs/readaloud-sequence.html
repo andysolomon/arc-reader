@@ -440,7 +440,7 @@ const SEQS = {
                 { g: "VoiceStudio voice, and a saved job lists this passage", rows: [
                   { f: "PR", to: "SV", t: "call", n: "GET /api/preparations/:id/audio/:i", say: "A background job already rendered this passage, so the stored clip is fetched — no second render.",
                     d: "preparedAudio looks the cache key up in the jobs saved in localStorage. 404 or 410 (expired, or the device already had it) falls back to normal generation.",
-                    code: [SRC + "engine/preparation.ts:305", "apps/web/vite.prepare.ts:304"] },
+                    code: [SRC + "engine/preparation.ts:305", "apps/web/vite.prepare.ts:355"] },
                   { f: "SV", to: "PR", t: "ret", n: "stored clip" },
                   { f: "PR", to: "PR", t: "self", n: "check for noise (garbled → ask for a fresh take)", code: [SRC + "engine/providers.ts:476"] },
                 ] },
@@ -605,7 +605,7 @@ const SEQS = {
         { g: "the browser watches", rows: [
           { op: "loop", id: "poll", g: "every 1.5 s while the job runs", rows: [
             { f: "PR", to: "SV", t: "call", n: "GET /api/preparations/:id", say: "Meanwhile the browser polls every 1.5 s.",
-              d: "Network errors and status checks that get no answer within 10 s (a suspended phone, a stalled tunnel) are retried, not fatal — the job keeps running on the server. Cancel sends DELETE only when no other reader still needs the job.", code: [SRC + "engine/preparation.ts:274", "apps/web/vite.prepare.ts:230"] },
+              d: "Network errors and status checks that get no answer within 10 s (a suspended phone, a stalled tunnel) are retried, not fatal — the job keeps running on the server. Cancel sends DELETE only when no other reader still needs the job.", code: [SRC + "engine/preparation.ts:274", "apps/web/vite.prepare.ts:266"] },
             { f: "SV", to: "PR", t: "ret", n: "state · done/total · machine" },
             { f: "PR", to: "PL", t: "async", n: "onProgress(done, total)", say: "Progress — and which machine is working — shows in the player menu and the Library." },
           ] },
@@ -683,13 +683,13 @@ const SEQS = {
       { f: "LS", to: "LS", t: "self", n: "compare document IDs with the server", say: "With nothing pending, both sides must have the same documents.", code: [SRC + "lib/librarySync.ts:118"] },
       { f: "LS", to: "UI", t: "async", n: "status: synced · refresh the Library", say: "Synced. Other devices pick the change up within 5 s." },
       { f: "LS", to: "PR", t: "call", n: "refresh shared preparations", say: "The shared catalogue of prepared readings is refreshed too.", code: [SRC + "App.tsx:42", SRC + "engine/preparation.ts:48"] },
-      { f: "PR", to: "SV", t: "call", n: "GET /api/preparations", d: "10 s timeout.", code: ["apps/web/vite.prepare.ts:231"] },
+      { f: "PR", to: "SV", t: "call", n: "GET /api/preparations", d: "10 s timeout.", code: ["apps/web/vite.prepare.ts:267"] },
       { f: "SV", to: "PR", t: "ret", n: "available · device-only keys" },
       { op: "opt", id: "upload", g: "this device holds clips the server lacks", rows: [
         { op: "loop", id: "clips", g: "≤ 8 per pass", rows: [
           { f: "PR", to: "DB", t: "call", n: "audio.get(key)", say: "Clips only this device has are shared, so other devices needn’t render them." },
           { f: "DB", to: "PR", t: "ret", n: "clip" },
-          { f: "PR", to: "SV", t: "call", n: "PUT /api/preparations/:id/audio/:i", d: "30 s timeout; up to 32 MB.", code: [SRC + "engine/preparation.ts:54", "apps/web/vite.prepare.ts:325"] },
+          { f: "PR", to: "SV", t: "call", n: "PUT /api/preparations/:id/audio/:i", d: "30 s timeout; up to 32 MB.", code: [SRC + "engine/preparation.ts:54", "apps/web/vite.prepare.ts:376"] },
           { f: "SV", to: "DK", t: "async", n: "shared-<key>.bin + .json" },
           { f: "SV", to: "PR", t: "ret", n: "published" },
         ] },
