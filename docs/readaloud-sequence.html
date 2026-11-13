@@ -712,7 +712,7 @@ const SEQS = {
       "Listening to a summary loads it as the reading in place of the article: read as written, never saving a position. “Read the full article” switches back.",
     ],
     rows: [
-      { f: "U", to: "UI", t: "async", n: "tap Summarize", say: "In the Reader, the listener taps the sparkles button.", code: [SRC + "routes/Reader.tsx:146"] },
+      { f: "U", to: "UI", t: "async", n: "tap Summarize", say: "In the Reader, the listener taps the sparkles button.", code: [SRC + "routes/Reader.tsx:148"] },
       { f: "UI", to: "SM", t: "call", n: "request(record)", code: [SRC + "state/summaries.ts:20"] },
       { op: "alt", id: "fresh", ops: [
         { g: "a summary of this exact text is saved", rows: [
@@ -747,7 +747,7 @@ const SEQS = {
       { f: "PL", to: "EN", t: "async", n: "engine.play()" },
       { ref: "play", id: "refPlay", over: ["EN", "EX"], n: "Play passage by passage (Open and play)", say: "It plays like any reading." },
       { op: "opt", id: "full", g: "the listener taps “Read the full article”", rows: [
-        { f: "U", to: "UI", t: "async", n: "Read the full article", code: [SRC + "routes/Reader.tsx:228"] },
+        { f: "U", to: "UI", t: "async", n: "Read the full article", code: [SRC + "routes/Reader.tsx:230"] },
         { f: "UI", to: "PL", t: "call", n: "open(record)", say: "The article itself is opened again, at its saved place." },
       ] },
       ] },

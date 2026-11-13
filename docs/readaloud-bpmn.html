@@ -950,14 +950,14 @@ const DIAGRAMS = {
     pools: [
       { id: "P_sum", n: "Browser · Reader, useSummaries, player", x: 0, y: 0, w: 1560, lanes: [
         { id: "L_su", n: "Listener", h: 140, d: "The person reading or listening." },
-        { id: "L_sr", n: "Reader · summaries · player", h: 200, d: "The Reader screen, the ArticleSummary card, the useSummaries store and the player.", code: [SRC + "routes/Reader.tsx:92", SRC + "state/summaries.ts:20"] },
+        { id: "L_sr", n: "Reader · summaries · player", h: 200, d: "The Reader screen, the ArticleSummary card, the useSummaries store and the player.", code: [SRC + "routes/Reader.tsx:94", SRC + "state/summaries.ts:20"] },
       ], d: "Summaries are stored on the document, so they sync to other devices." },
       { id: "X_llmS", bb: true, n: "App server — /api/llm proxy (adds the key) → OpenCode Go", x: 0, y: 420, w: 1560, h: 70, d: "Adds the Bearer key and an x-opencode-session header; 300 s timeout.", code: ["apps/web/vite.llm.ts:98"] },
     ],
     esps: [],
     nodes: [
       { id: "S_sum", t: "start", n: "Wants the gist", x: 100, y: 70, lane: "L_su", d: "A long article, and the listener wants to know what it says first." },
-      { id: "T_tap", t: "task", k: "user", n: "Tap Summarize", x: 230, y: 70, lane: "L_su", d: "The sparkles button in the Reader’s toolbar.", code: [SRC + "routes/Reader.tsx:146"] },
+      { id: "T_tap", t: "task", k: "user", n: "Tap Summarize", x: 230, y: 70, lane: "L_su", d: "The sparkles button in the Reader’s toolbar.", code: [SRC + "routes/Reader.tsx:148"] },
       { id: "G_fresh", t: "gw", g: "x", n: "Summary of this text saved?", lp: "t", x: 380, y: 240, lane: "L_sr", d: "A summary is kept with a fingerprint of the text (hash and length); an edited article needs a new one.", code: [SRC + "lib/summary.ts:24"] },
       { id: "T_summarize", t: "task", k: "service", n: "Summarize with the LLM", x: 510, y: 240, lane: "L_sr",
         d: "POST /api/llm/v1/chat/completions with the summary model (muse-spark-1.3-contributor by default, or glm-5.3). Images are sent as their spoken narration. The answer must have finished normally (finish_reason stop).",
@@ -973,7 +973,7 @@ const DIAGRAMS = {
         d: "player.open(record, {summary: true, autoplay: true}): the summary is read as written — no Patois rewrite, no code step, no restored position — and its position is never saved.",
         code: [SRC + "state/player.ts:233", SRC + "state/player.ts:128"] },
       { id: "CA_readS", t: "call", ref: "synth", m: "loop", n: "Read it aloud, passage by passage", x: 1320, y: 240, lane: "L_sr", d: "Planned into passages and played like any reading; each passage gets its audio from Synthesize passage." },
-      { id: "E_sumread", t: "end", n: "Summary read", x: 1460, y: 240, lane: "L_sr", d: "“Read the full article” reopens the article itself.", code: [SRC + "routes/Reader.tsx:228"] },
+      { id: "E_sumread", t: "end", n: "Summary read", x: 1460, y: 240, lane: "L_sr", d: "“Read the full article” reopens the article itself.", code: [SRC + "routes/Reader.tsx:230"] },
       { id: "DS_docsS", t: "store", pool: "P_sum", n: "IndexedDB · docs", x: 650, y: -75, d: "summary {source, text, model, version, createdAt} on the DocRecord.", code: [SRC + "lib/db.ts:61"] },
     ],
     flows: [
