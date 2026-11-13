@@ -31,8 +31,9 @@ test("files a new document with Jev, keeps edited details, and finds it by them 
   await expect(details.getByLabel("Notes")).toHaveValue("Every letter of the alphabet.");
 
   await page.goto("/library");
-  const filters = page.getByRole("group", { name: "Filter by category" });
-  await expect(filters.getByRole("button", { name: /Typography/ })).toBeVisible();
+  await page.getByRole("button", { name: "Filter by category" }).click();
+  await expect(page.getByRole("menu", { name: "Filter by category" }).getByRole("menuitemradio", { name: /Typography/ })).toBeVisible();
+  await page.keyboard.press("Escape");
   const search = page.getByLabel("Search library");
   await search.fill("lovelace");
   await expect(page.getByRole("button", { name: /quick brown fox/ })).toBeVisible();
