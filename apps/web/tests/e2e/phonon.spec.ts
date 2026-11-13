@@ -33,6 +33,11 @@ test.describe("Phonon voices (stub server)", () => {
     await composeText(page, `${TEXT}\n\nA third paragraph makes a third passage of reading ${unique}.`);
     let voicestudio = 0;
     page.on("request", (q) => { if (q.url().includes("/api/vs/v1/audio/speech")) voicestudio++; });
+    // Live passages wait until preparing is asked for, so playback can't cache the whole reading first.
+    let asked!: () => void;
+    const preparing = new Promise<void>((resolve) => { asked = resolve; });
+    page.on("request", (q) => { if (q.url().endsWith("/api/preparations") && q.method() === "POST") asked(); });
+    await page.route("**/api/phonon/v1/audio/speech", async (route) => { await preparing; await route.fallback(); });
     await page.getByTestId("listen").click();
     await page.waitForURL(/\/read\/[a-z0-9-]+$/);
     const submitted = page.waitForResponse((r) => r.url().endsWith("/api/preparations") && r.request().method() === "POST");
