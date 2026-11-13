@@ -11,6 +11,7 @@ import { getVoice } from "../state/voices";
 import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
 import { useBreakpoint } from "../hooks/useMedia";
+import { useBack } from "../hooks/useBack";
 import { useCycleTheme } from "../components/Rail";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { hasSummary, summaryModelLabel } from "../lib/summary";
@@ -27,6 +28,7 @@ import { useLibrary } from "../state/library";
 export function Reader() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const back = useBack("/library");
   const bp = useBreakpoint();
   const doc = usePlayer((s) => s.doc);
   const index = usePlayer((s) => s.index);
@@ -126,7 +128,7 @@ export function Reader() {
     <section data-screen="reader" data-playing={playing && !loading} className="reader-surface relative flex min-h-0 flex-1 flex-col animate-fadein">
       {!focus && (
         <header className="flex h-header shrink-0 items-center gap-1.5 px-3">
-          <IconButton label="Back" onClick={() => navigate("/")}>
+          <IconButton label="Back" onClick={back}>
             <ChevronLeft size={20} strokeWidth={1.5} />
           </IconButton>
           <h1 className="min-w-0 flex-1 truncate px-1.5 text-[13px] font-normal text-fg2" title={title}>

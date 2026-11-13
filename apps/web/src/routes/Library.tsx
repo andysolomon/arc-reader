@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { Link, useNavigate, useNavigationType } from "react-router-dom";
 import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
@@ -34,6 +34,12 @@ const UNCATEGORIZED = "\u0000uncategorized";
 /** Books left open stay open while you go and read a chapter. */
 const openBooks = new Set<string>();
 
+/** How the Library was left, so stepping back from a document lands on the same row. */
+const left = { q: "", vf: null as string | null, cf: null as string | null, favoritesOnly: false, top: 0 };
+
+/** A click on a row is for the row (open its document, or pick it while selecting) unless it landed on one of the row's own controls or finished a text selection. */
+const opensDocument = (e: MouseEvent<HTMLElement>) => !(e.target as Element).closest("button, a, input, label") && !window.getSelection()?.toString();
+
 export function LibraryPage() {
   const navigate = useNavigate();
   const bp = useBreakpoint();
@@ -47,10 +53,12 @@ export function LibraryPage() {
   const voices = useVoices((s) => s.voices);
   const hasDoc = usePlayer((s) => !!s.doc);
   const sync = useLibrarySync();
-  const [q, setQ] = useState("");
-  const [vf, setVf] = useState<string | null>(null);
-  const [cf, setCf] = useState<string | null>(null);
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  // Back and forward return to the Library as it was; arriving any other way starts it afresh.
+  const returning = useNavigationType() === "POP";
+  const [q, setQ] = useState(returning ? left.q : "");
+  const [vf, setVf] = useState<string | null>(returning ? left.vf : null);
+  const [cf, setCf] = useState<string | null>(returning ? left.cf : null);
+  const [favoritesOnly, setFavoritesOnly] = useState(returning && left.favoritesOnly);
   const [filing, setFiling] = useState(false);
   const jevReady = useJev((s) => !!s.config?.configured);
   // Selecting is a mode: rows show no checkboxes until you ask to pick several, and it ends once they are queued.
@@ -63,7 +71,14 @@ export function LibraryPage() {
   const closeDetails = useCallback(() => setDetails(null), []);
   const detailsItem = details ? items.find((it) => it.rec.id === details.docId) : undefined;
   const searchRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLElement>(null);
 
+  useLayoutEffect(() => {
+    if (returning && scrollRef.current) scrollRef.current.scrollTop = left.top;
+    else left.top = 0;
+    // Only how the Library was entered matters.
+  }, []);
+  useEffect(() => { Object.assign(left, { q, vf, cf, favoritesOnly }); }, [q, vf, cf, favoritesOnly]);
   useEffect(() => {
     void refresh();
   }, [refresh, voices, openaiModel]);
@@ -182,7 +197,7 @@ export function LibraryPage() {
   };
 
   return (
-    <section data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
+    <section ref={scrollRef} onScroll={(e) => { left.top = e.currentTarget.scrollTop; }} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[880px] flex-col gap-5">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="m-0 flex-1 font-serif text-[26px] font-medium">Library</h1>
@@ -333,9 +348,6 @@ interface ItemProps {
   del: (it: LibraryItem) => void;
 }
 
-/** A whole row is one target, except where it holds a control that answers for itself. */
-const onControl = (e: MouseEvent<HTMLElement>) => !!(e.target as HTMLElement).closest("button, a, input");
-
 /** Open a document, or pick it while selecting. Ctrl or ⌘ starts a selection from an ordinary click. */
 function activate(e: MouseEvent<HTMLElement>, { it, selecting, toggleSelected, open }: ItemProps) {
   if (selecting || e.metaKey || e.ctrlKey) toggleSelected(it.rec.id);
@@ -452,7 +464,7 @@ function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, 
   return (
     <li data-book={shelf.title} className={cn(grid ? "col-span-full overflow-hidden rounded-card border border-line bg-bg2" : "border-b border-line")}>
       <div
-        onClick={(e) => { if (!onControl(e)) onToggle(); }}
+        onClick={(e) => { if (opensDocument(e)) onToggle(); }}
         className={cn("grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 transition-colors duration-fast", grid ? "p-4" : "px-5 py-3.5 active:bg-bg2 sm:px-4 [@media(hover:hover)]:hover:bg-bg2")}
       >
         <BookMark />
@@ -593,8 +605,11 @@ function Row(props: ItemProps & { touch: boolean }) {
   const [dx, setDx] = useState(0);
   const [open, setOpen] = useState(false);
   const start = useRef<{ x: number; y: number; id: number } | null>(null);
+  /** The press now ending was a swipe, so it must not also open the document */
+  const swiped = useRef(false);
 
   const onDown = (e: PointerEvent<HTMLLIElement>) => {
+    swiped.current = false;
     if (!touch || e.pointerType === "mouse") return;
     start.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
   };
@@ -603,6 +618,7 @@ function Row(props: ItemProps & { touch: boolean }) {
     const ddx = e.clientX - start.current.x;
     const ddy = e.clientY - start.current.y;
     if (Math.abs(ddy) > Math.abs(ddx)) return;
+    if (Math.abs(ddx) > 8) swiped.current = true;
     setDx(Math.max(-SWIPE_W, Math.min(0, (open ? -SWIPE_W : 0) + ddx)));
   };
   const onUp = () => {
@@ -614,6 +630,8 @@ function Row(props: ItemProps & { touch: boolean }) {
   };
   const offset = touch ? dx : 0;
   const press = (e: MouseEvent<HTMLElement>) => {
+    // The click that ends a swipe only reveals the actions.
+    if (swiped.current) { swiped.current = false; return; }
     // With its actions swiped into view, a press on the row puts them away.
     if (touch && open) { setOpen(false); setDx(0); return; }
     activate(e, props);
@@ -634,7 +652,7 @@ function Row(props: ItemProps & { touch: boolean }) {
         </div>
       )}
       <div
-        onClick={(e) => { if (!onControl(e)) press(e); }}
+        onClick={(e) => { if (opensDocument(e)) press(e); }}
         className={cn(
           "relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 bg-bg px-5 py-3.5 transition-[background-color,transform] duration-fast active:bg-bg2 sm:px-4 [@media(hover:hover)]:group-hover:bg-bg2",
           selected && PICKED,
@@ -667,7 +685,7 @@ function CardItem(props: ItemProps) {
   const { it, selecting, selected } = props;
   return (
     <li
-      onClick={(e) => { if (!onControl(e)) activate(e, props); }}
+      onClick={(e) => { if (opensDocument(e)) activate(e, props); }}
       className={cn("group flex min-h-[170px] cursor-pointer flex-col gap-3 rounded-card border border-line bg-bg2 p-4 transition-colors duration-fast hover:border-fg3", selected && "!border-accent")}
     >
       <div className="flex h-9 items-center justify-between gap-2">
