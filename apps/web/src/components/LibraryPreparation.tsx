@@ -1,20 +1,26 @@
 import { useMemo, useState } from "react";
 import { Button, Dialog, Input, ProgressRing, VoiceServiceName, cn } from "@readaloud/ui";
-import { Search, Volume2, Zap } from "lucide-react";
+import { ChevronsUp, Search, Volume2, Zap } from "lucide-react";
 import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
-import { FISH_ENGINE, FISH_MODEL, baseFor, isPaidEngine, openaiModelFor } from "../engine/providers";
+import { FISH_ENGINE, FISH_MODEL, baseFor, isPaidEngine, openaiModelFor, preparesOnServer } from "../engine/providers";
 import { readingCost } from "../lib/premiumEstimate";
 import { formatUsd } from "../lib/usage";
 import { usePremiumContext } from "../state/premium";
 import { LOCAL_ENGINE } from "../engine/types";
-import { isPreparing, PREPARATION_CONCURRENCY, usePreparation } from "../state/preparation";
+import { isPreparing, PREPARATION_CONCURRENCY, providerFor, usePreparation, type PreparationJob } from "../state/preparation";
 import { getVoice, isLocalVoice, useVoices } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 import type { LibraryItem } from "../state/library";
 import { catalogue } from "../lib/postTitle";
+import { dateLabel } from "../lib/dates";
 
-export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryItem; defaultVoice: string; onPrepare: () => void }) {
+/** One document read in one voice. */
+export interface Reading { docId: string; voiceId: string; engine: string }
+const sameReading = (job: PreparationJob, reading: Reading, openaiModel: string) => job.docId === reading.docId && job.voice.id === reading.voiceId
+  && job.voice.engine === reading.engine && (reading.engine !== "openai" || job.remote || job.openaiModel === openaiModel);
+
+export function PreparedStatus({ it, defaultVoice, onDetails }: { it: LibraryItem; defaultVoice: string; onDetails: (reading: Reading) => void }) {
   const jobs = usePreparation((s) => s.jobs);
   const openaiModel = useSettings((s) => s.openaiModel);
   useVoices((s) => s.voices);
@@ -58,7 +64,8 @@ export function PreparedStatus({ it, defaultVoice, onPrepare }: { it: LibraryIte
           <button
             key={voice.voiceId}
             type="button"
-            onClick={onPrepare}
+            onClick={() => onDetails({ docId: it.rec.id, voiceId: voice.voiceId, engine: voice.engine })}
+            aria-haspopup="dialog"
             title={`${isReading ? "Reading voice · " : ""}${empty ? `${voice.name}: not prepared` : label}`}
             data-reading-voice={isReading || undefined}
             className={cn("inline-flex h-7 max-w-full items-center gap-1.5 rounded-pill border bg-bg pl-1.5 pr-2.5 text-left text-[12px] text-fg2 transition-colors duration-fast hover:border-fg3 hover:text-fg", job ? "border-[color-mix(in_oklch,var(--accent)_45%,var(--line))]" : "border-line", empty && "border-dashed bg-transparent")}
@@ -144,7 +151,104 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
   );
 }
 
-export function PreparationQueue() {
+const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+/** What one voice has prepared for one document, and the controls to move it through the queue. */
+export function PreparationDetails({ it, reading, defaultVoice, onClose, onChooseVoices }: { it: LibraryItem; reading: Reading; defaultVoice: string; onClose: () => void; onChooseVoices: () => void }) {
+  const jobs = usePreparation((s) => s.jobs);
+  const openaiModel = useSettings((s) => s.openaiModel);
+  const voices = useVoices((s) => s.voices);
+  const [moving, setMoving] = useState<"next" | "now" | null>(null);
+  const mine = jobs.filter((job) => sameReading(job, reading, openaiModel));
+  const job = mine.find(isPreparing);
+  const last = job ? undefined : mine[mine.length - 1];
+  const saved = it.prepared.find((v) => v.voiceId === reading.voiceId && v.engine === reading.engine);
+  const known = voices.find((v) => v.id === reading.voiceId && v.engine === reading.engine);
+  const voice = job?.voice ?? known ?? saved ?? last?.voice ?? getVoice(reading.voiceId);
+  const savedPercent = Math.floor((saved?.fraction ?? 0) * 100);
+  const title = catalogue(it.rec).title;
+  const server = !!job && (!!job.serverId || preparesOnServer(job.voice.engine));
+  // Readings this device has not handed over yet wait in its own queue, in order.
+  const localAhead = job && !job.serverId ? jobs.slice(0, jobs.indexOf(job)).filter((other) => other.status === "queued" && !other.serverId && providerFor(other) === providerFor(job)).length : 0;
+  const ahead = job?.status !== "queued" ? undefined : job.serverId ? job.ahead : localAhead;
+  const machine = job?.worker ?? job?.waitingFor;
+  const fraction = job ? (job.total > 0 ? job.done / job.total : 0) : saved?.fraction ?? (last?.status === "ready" ? 1 : 0);
+
+  const status = job
+    ? job.message ?? (job.status === "queued" ? `Queued · waiting for ${job.waitingFor ?? (server ? "a free machine" : "its turn")}`
+      : job.status === "saving" ? "Saving audio on this device" : `Preparing${job.worker ? ` on ${job.worker}` : ""}`)
+    : last?.status === "error" ? last.message || "Preparation failed"
+    : savedPercent >= 100 ? "Prepared"
+    : last?.status === "cancelled" ? "Cancelled · saved audio kept"
+    : last?.status === "ready" ? last.message ?? (last.remote ? "Prepared on the server" : "Prepared")
+    : savedPercent > 0 ? "Partly prepared" : "Not prepared";
+  const queue = ahead === undefined ? null
+    : `${ahead === 0 ? (job?.busy ? "Next, after the reading in progress" : "Next in line") : `${plural(ahead, "reading")} ahead`}${job?.prioritized ? " · moved to the front" : ""}`;
+  const counted = job ?? (last && last.total > 0 ? last : undefined);
+  const queuedAt = (job ?? last)?.createdAt;
+
+  const move = async (now: boolean) => {
+    if (!job) return;
+    setMoving(now ? "now" : "next");
+    try { await usePreparation.getState().prioritize(job.id, now); }
+    catch (error) { toast(`Could not move this reading up. ${(error as Error).message}`); }
+    finally { setMoving(null); }
+  };
+  const canPrepare = !job && savedPercent < 100 && !!known && known.engine !== LOCAL_ENGINE && !!baseFor(known.engine);
+  const prepare = () => {
+    // Paid voices show their cost before anything is made.
+    if (isPaidEngine(known!.engine)) return onChooseVoices();
+    usePreparation.getState().enqueue([it.rec], [known!]);
+  };
+  const row = "grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3 py-2";
+  return (
+    <Dialog open onClose={onClose} title="Audio preparation" initialFocus="dialog" className="max-h-[calc(100dvh-48px)] overflow-y-auto">
+      <div className="flex items-center gap-3">
+        <ProgressRing value={fraction} size={36} label={`${voice.name}: ${Math.floor(fraction * 100)}%`} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] text-fg"><VoiceServiceName source={voiceSource(voice)}>{voice.name}</VoiceServiceName></div>
+          <div className="truncate text-[13px] text-fg2">{title}</div>
+        </div>
+      </div>
+      <dl className="m-0 divide-y divide-line border-y border-line text-[13px]">
+        <div className={row}>
+          <dt className="text-fg2">Status</dt>
+          <dd className={cn("m-0", last?.status === "error" && !job ? "text-danger" : job ? "text-accent" : "text-fg")}>{status}</dd>
+        </div>
+        {queue && <div className={row}><dt className="text-fg2">Queue</dt><dd className="m-0 text-fg">{queue}</dd></div>}
+        {machine && <div className={row}><dt className="text-fg2">Machine</dt><dd className="m-0 text-fg">{machine}</dd></div>}
+        {counted && counted.total > 0 && <div className={row}><dt className="text-fg2">Generated</dt><dd className="m-0 tabular-nums text-fg">{counted.done} of {plural(counted.total, "passage")}</dd></div>}
+        <div className={row}><dt className="text-fg2">On this device</dt><dd className="m-0 tabular-nums text-fg">{savedPercent}% saved</dd></div>
+        <div className={row}><dt className="text-fg2">Role</dt><dd className="m-0 text-fg">{(it.rec.voice ?? defaultVoice) === reading.voiceId ? "Reading voice" : "Extra prepared voice"}</dd></div>
+        {queuedAt ? <div className={row}><dt className="text-fg2">Queued</dt><dd className="m-0 text-fg">{dateLabel(queuedAt)} at {new Date(queuedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</dd></div> : null}
+      </dl>
+      {(job || canPrepare) && (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
+            {job?.status === "queued" && <Button leading={<ChevronsUp size={15} />} disabled={ahead === 0 || !!moving} loading={moving === "next"} onClick={() => void move(false)}>Prepare next</Button>}
+            {job?.status === "queued" && job.serverId && <Button leading={<Zap size={15} />} disabled={!job.busy || !!moving} loading={moving === "now"} onClick={() => void move(true)}>Start now</Button>}
+            {job && <Button variant="danger" onClick={() => usePreparation.getState().cancel(job.id)}>Cancel preparation</Button>}
+            {canPrepare && <Button variant="primary" leading={<Zap size={15} />} onClick={prepare}>{last?.status === "error" ? "Try again" : savedPercent > 0 ? "Finish preparing" : "Prepare audio"}</Button>}
+          </div>
+          {job?.status === "queued" && (
+            <p className="m-0 text-[12px] text-fg2">
+              {job.serverId
+                ? job.busy ? `Prepare next moves this ahead of the other waiting readings. Start now also pauses the reading ${machine ?? "its machine"} is preparing after its current passage; that one resumes afterwards.`
+                  : "Nothing is being prepared on its machine, so this starts as soon as the machine answers."
+                : "Prepare next moves this ahead of the other readings waiting on this device."}
+            </p>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap justify-between gap-2">
+        <Button variant="ghost" className="-ml-3" onClick={onChooseVoices}>More voices…</Button>
+        <Button onClick={onClose}>Close</Button>
+      </div>
+    </Dialog>
+  );
+}
+
+export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading) => void }) {
   const { jobs, cancel, cancelAll, dismissFinished, sharedError, sharing } = usePreparation();
   if (!jobs.length && !sharedError && !sharing) return null;
   const pending = jobs.filter(isPreparing);
@@ -167,7 +271,7 @@ export function PreparationQueue() {
           {jobs.map((job) => (
             <li key={job.id} className="flex min-h-12 items-center gap-3 px-4 py-2 text-[12px]">
               <span aria-hidden className="shrink-0"><ProgressRing value={job.status === "ready" ? 1 : job.total > 0 ? job.done / job.total : 0} size={18} stroke={2} /></span>
-              <div className="min-w-0 flex-1">
+              <button type="button" disabled={!onDetails} title="Preparation details" aria-haspopup="dialog" onClick={() => onDetails?.({ docId: job.docId, voiceId: job.voice.id, engine: job.voice.engine })} className="block min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-left text-[12px] disabled:cursor-default">
                 <div className="truncate text-[13px] text-fg">{job.title}</div>
                 <div className="flex min-w-0 items-center gap-1.5 text-fg2">
                   <VoiceServiceName source={voiceSource(job.voice)} className="shrink-0">{job.voice.name}</VoiceServiceName>
@@ -176,7 +280,7 @@ export function PreparationQueue() {
                     {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? `Queued · waiting for ${job.waitingFor ?? "a free machine"}`}
                   </span>
                 </div>
-              </div>
+              </button>
               {isPreparing(job) && <Button variant="ghost" size="sm" aria-label={`Cancel ${job.title} in ${job.voice.name}`} onClick={() => cancel(job.id)}>Cancel</Button>}
             </li>
           ))}

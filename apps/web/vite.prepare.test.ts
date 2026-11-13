@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PreparationService } from "./vite.prepare";
@@ -204,6 +204,49 @@ describe("server-owned audio preparation", () => {
     expect(order).toEqual(["a1", "a2", "a3", "b1", "b2"]);
     expect(order.filter((text) => String(text).startsWith("a"))).toEqual(["a1", "a2", "a3"]);
     expect(order.filter((text) => String(text).startsWith("b"))).toEqual(["b1", "b2"]);
+    expect(peakSpeech).toBe(1);
+  });
+
+  it("prepares a reading a reader moved up before the ones that arrived earlier", async () => {
+    const service = new PreparationService(env, directory);
+    gate = deferred();
+    const first = await service.submit({ requests: [item("a1"), item("a2")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const second = await service.submit({ requests: [item("b1")].map((r) => ({ ...r, voice: "other" })), start: 0 });
+    const third = await service.submit({ requests: [item("c1")].map((r) => ({ ...r, voice: "third" })), start: 0 });
+    expect(await service.get(second.id)).toMatchObject({ queued: true, ahead: 0, busy: true });
+    expect(await service.get(third.id)).toMatchObject({ queued: true, ahead: 1, busy: true });
+    expect(await service.prioritize(third.id)).toMatchObject({ queued: true, ahead: 0, prioritized: true });
+    expect(await service.get(second.id)).toMatchObject({ queued: true, ahead: 1 });
+    expect((await service.get(second.id)).prioritized).toBeUndefined();
+    // The reading in progress is unaffected, and so is a reading that is already running.
+    expect(await service.prioritize(first.id)).toMatchObject({ queued: false });
+    gate.resolve();
+    await expect.poll(async () => (await service.get(second.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["a1", "a2", "c1", "b1"]);
+    // The move is stored with the reading, so it survives a web-server restart.
+    gate = deferred();
+    await service.submit({ requests: [item("d1")], start: 0 });
+    await expect.poll(() => calls.length).toBe(5);
+    const late = await service.submit({ requests: [item("f1")], start: 0 });
+    await service.prioritize(late.id);
+    expect(JSON.parse(await readFile(join(directory, `job-${late.id}.json`), "utf8")).priority).toBeGreaterThan(0);
+  });
+
+  it("starts a reading now by pausing the one in progress after its passage, then resumes it", async () => {
+    const service = new PreparationService(env, directory);
+    gate = deferred();
+    const first = await service.submit({ requests: [item("a1"), item("a2"), item("a3")], start: 0 });
+    await expect.poll(() => calls.length).toBe(1);
+    const second = await service.submit({ requests: [item("b1"), item("b2")].map((r) => ({ ...r, voice: "other" })), start: 0 });
+    const third = await service.submit({ requests: [item("c1")].map((r) => ({ ...r, voice: "third" })), start: 0 });
+    await service.prioritize(third.id, true);
+    gate.resolve();
+    await expect.poll(async () => (await service.get(third.id)).state).toBe("done");
+    // The paused reading keeps its audio and goes back to its place in the queue.
+    await expect.poll(async () => (await service.get(first.id)).state).toBe("done");
+    await expect.poll(async () => (await service.get(second.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.input)).toEqual(["a1", "c1", "a2", "a3", "b1", "b2"]);
     expect(peakSpeech).toBe(1);
   });
 

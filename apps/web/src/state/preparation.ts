@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 import type { Voice } from "../data/voices";
 import { JAMAICAN_PATOIS_VOICE_ID } from "../data/voices";
 import { unavailableMessage } from "../engine/engine";
-import { isTransientPreparationError, refreshPreparationCatalog, sharedAudioRemaining } from "../engine/preparation";
+import { isTransientPreparationError, prioritizePreparation, refreshPreparationCatalog, sharedAudioRemaining } from "../engine/preparation";
 import { baseFor, cacheKey, hasOwnServer, hasPreparationServer, prepareInBackground, preparesOnServer, synthesize } from "../engine/providers";
 import { ApiBusy, ApiUnreachable, LOCAL_ENGINE } from "../engine/types";
 import { audioCache, docs } from "../lib/db";
@@ -31,6 +31,14 @@ export interface PreparationJob {
   waitingFor?: string;
   serverId?: string;
   remote?: boolean;
+  /** When it joined the queue. */
+  createdAt?: number;
+  /** Waiting readings the server will prepare before this one. */
+  ahead?: number;
+  /** Moved to the front of the queue. */
+  prioritized?: boolean;
+  /** Its machine is preparing another reading. */
+  busy?: boolean;
 }
 
 export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "saving"].includes(job.status);
@@ -39,12 +47,16 @@ export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "sav
 export const PREPARATION_CONCURRENCY = 3;
 export const PREPARATION_QUEUE_LIMIT = 20;
 const active = new Map<string, { controller: AbortController; provider: string }>();
+/** Local readings moved up before the server knew of them; it is told once they are submitted. */
+const raised = new Map<string, { now: boolean; sent?: boolean }>();
 const SENDING = "Sending to the server…";
-const providerFor = (job: PreparationJob) => hasOwnServer(job.voice.engine) ? job.voice.engine : "voicestudio";
+export const providerFor = (job: PreparationJob) => hasOwnServer(job.voice.engine) ? job.voice.engine : "voicestudio";
 
 interface PreparationState {
   jobs: PreparationJob[];
   enqueue: (documents: { id: string; title: string }[], voices: Voice[]) => number;
+  /** Prepare a waiting reading before the others. `now` also pauses the reading its machine is on. */
+  prioritize: (id: string, now?: boolean) => Promise<void>;
   cancel: (id: string) => void;
   cancelDocument: (docId: string) => void;
   cancelAll: () => void;
@@ -95,11 +107,25 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
     for (const doc of documents) for (const voice of voices) {
       if (voice.engine === LOCAL_ENGINE || !baseFor(voice.engine)) continue;
       if ([...get().jobs, ...jobs].some((job) => isPreparing(job) && job.docId === doc.id && job.voice.id === voice.id && job.voice.engine === voice.engine && job.openaiModel === settings.openaiModel)) continue;
-      jobs.push({ id: crypto.randomUUID(), docId: doc.id, title: doc.title, voice: { ...voice }, openaiModel: settings.openaiModel, wordTimings: settings.wordTimings, status: "queued", done: 0, total: 0 });
+      jobs.push({ id: crypto.randomUUID(), docId: doc.id, title: doc.title, voice: { ...voice }, openaiModel: settings.openaiModel, wordTimings: settings.wordTimings, status: "queued", done: 0, total: 0, createdAt: Date.now() });
     }
     set({ jobs: [...get().jobs.filter((job) => isPreparing(job) || !jobs.some((next) => next.docId === job.docId && next.voice.id === job.voice.id)), ...jobs] });
     drain();
     return jobs.length;
+  },
+  async prioritize(id, now = false) {
+    const job = get().jobs.find((job) => job.id === id);
+    if (!job || job.status !== "queued") return;
+    if (job.serverId) {
+      const status = await prioritizePreparation(job.serverId, now);
+      update(id, { ahead: status.ahead, prioritized: status.prioritized, busy: status.busy });
+      if (job.remote) void get().refreshShared();
+      return;
+    }
+    // Not on the server yet: this queue's order decides what is started or submitted next.
+    raised.set(id, { now });
+    set({ jobs: [{ ...job, prioritized: true }, ...get().jobs.filter((other) => other.id !== id)] });
+    drain();
   },
   cancel(id) {
     const job = get().jobs.find((job) => job.id === id);
@@ -128,7 +154,7 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   partialize: ({ jobs, hiddenShared }) => ({ jobs: jobs.filter((job) => !job.remote), hiddenShared }),
   merge: (persisted, current) => {
     const { jobs = [], hiddenShared = [] } = (persisted ?? {}) as { jobs?: PreparationJob[]; hiddenShared?: string[] };
-    return { ...current, hiddenShared, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined, waitingFor: undefined } : job) };
+    return { ...current, hiddenShared, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, worker: undefined, waitingFor: undefined, ahead: undefined, busy: undefined } : job) };
   },
   // Local storage hydrates synchronously, before usePreparation is initialized.
   // Re-enter the worker afterwards; server jobs reconnect and saved audio is reused.
@@ -155,6 +181,7 @@ function drain() {
     update(job.id, { status: background ? "queued" : "preparing", worker: undefined, waitingFor: undefined, message: background ? SENDING : undefined });
     void run(job, controller.signal).finally(() => {
       active.delete(job.id);
+      raised.delete(job.id);
       drain();
     });
   }
@@ -196,10 +223,21 @@ async function run(job: PreparationJob, signal: AbortSignal) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {
-        if (!signal.aborted) update(job.id, { done, total, status: status?.queued || status?.submitting ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor, ...(status?.id ? { serverId: status.id } : {}), message: status?.unreachable ? "Can't reach the server. Retrying…" : status?.submitting ? SENDING : undefined });
+        if (signal.aborted) return;
+        const move = raised.get(job.id);
+        if (move && !move.sent && status?.id) {
+          move.sent = true;
+          void prioritizePreparation(status.id, move.now).catch(() => {}).finally(() => raised.delete(job.id));
+        }
+        update(job.id, {
+          done, total, status: status?.queued || status?.submitting ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor,
+          ...(status?.id ? { serverId: status.id } : {}), message: status?.unreachable ? "Can't reach the server. Retrying…" : status?.submitting ? SENDING : undefined,
+          // A lost connection says nothing about the queue; keep the last answer.
+          ...(status?.unreachable ? {} : { ahead: status?.ahead, busy: status?.busy, prioritized: status?.prioritized || (status?.queued && raised.has(job.id)) || undefined }),
+        });
       }, signal);
       signal.throwIfAborted();
-      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined, message: undefined });
+      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined, message: undefined, ahead: undefined, busy: undefined, prioritized: undefined });
     }
     for (const passage of passages) {
       signal.throwIfAborted();

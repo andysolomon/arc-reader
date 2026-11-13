@@ -23,6 +23,12 @@ export interface PreparationStatus {
   waitingFor?: string;
   /** The app's own server is not answering; the request is being retried. */
   unreachable?: boolean;
+  /** Waiting readings that will be prepared before this one. */
+  ahead?: number;
+  /** A reader moved it to the front of the queue. */
+  prioritized?: boolean;
+  /** Its machine is preparing another reading. */
+  busy?: boolean;
   /** The reading is on its way to the server, which has not accepted it yet. */
   submitting?: boolean;
 }
@@ -69,6 +75,12 @@ export async function refreshPreparationCatalog(): Promise<SharedPreparation[]> 
     sharing = Math.max(0, sharing - sent);
   }
   return shared;
+}
+/** Move a waiting server reading to the front of its queue; `now` also pauses the reading its machine is on. */
+export function prioritizePreparation(id: string, now = false): Promise<PreparationStatus> {
+  return json<PreparationStatus>(`/${id}/priority`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ now }), signal: AbortSignal.timeout(10_000),
+  });
 }
 export function serverPreparedKeys(): string[] {
   return [...new Set(shared.flatMap((job) => job.available.map((index) => job.keys[index])))];
