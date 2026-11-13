@@ -56,7 +56,7 @@ export function StudioPage() {
   // Voices links "Re-record" here with the clone's id.
   const [params] = useSearchParams();
   const rerecording = selected === "clone" ? params.get("voice") : null;
-  return <section data-screen="studio" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 pb-40 sm:px-10 sm:pt-10 animate-fadein"><div className="mx-auto flex max-w-[960px] flex-col gap-5">
+  return <section data-screen="studio" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 pb-40 sm:px-10 sm:pt-10 animate-fadein"><div className="mx-auto flex max-w-[960px] flex-col gap-5">
     <header className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-3"><h1 className="m-0 font-serif text-[26px] font-medium">Studio</h1><VoiceSourceBadge source="VoiceStudio" /></div>
       <p className="m-0 text-fg2">Create a voice. Turn speech into text. Give your video a new voice.</p>
