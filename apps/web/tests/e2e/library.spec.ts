@@ -177,6 +177,50 @@ test("shows live server progress before audio is downloaded, then distinguishes 
   } finally { release(); }
 });
 
+test("the sidebar shows the audio made for each document and what is being made now, on every screen", async ({ page }) => {
+  await seedLibrary(page);
+  const status = { id: "", state: "running", done: 0, total: 2, queued: true, worker: undefined as string | undefined };
+  await page.route("**/api/preparations", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const response = await route.fetch();
+    status.id = (await response.json()).id;
+    await route.fulfill({ response, json: status });
+  });
+  await page.route("**/api/preparations/*", (route) => route.fulfill({ json: status }));
+  const made = page.getByRole("navigation", { name: "Primary" }).getByRole("group", { name: "Audio made" });
+  // A document nothing was made for carries no extra line.
+  await expect(made).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("button", { name: "First document", exact: true }).click();
+  await page.getByRole("button", { name: "Prepare selected" }).click();
+  await page.getByRole("dialog", { name: "Prepare audio", exact: true }).getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
+  const chip = made.getByRole("button", { name: /Bella/ });
+  await expect(chip).toContainText("Queued");
+
+  // The status follows you away from the Library.
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  Object.assign(status, { done: 1, queued: false, worker: "Mac" });
+  await expect(chip).toContainText("50% · 1/2");
+  await expect(chip).toContainText("Preparing on Mac");
+  expect((await new AxeBuilder({ page }).include('nav[aria-label="Primary"]').withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
+
+  // The reading's details open from here too.
+  await chip.click();
+  const details = page.getByRole("dialog", { name: "Audio preparation", exact: true });
+  await expect(details).toContainText("First document");
+  await expect(details).toContainText("Preparing on Mac");
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+
+  Object.assign(status, { done: 2, state: "done" });
+  await expect(chip).toHaveAttribute("title", "Bella: 100% prepared");
+  // Only the document that has audio says so.
+  await expect(made).toHaveCount(1);
+  await page.reload();
+  await expect(chip).toHaveAttribute("title", "Bella: 100% prepared");
+});
+
 test("shows one reading per machine, waiting readings, and restores their assignments after reload", async ({ page }) => {
   await seedLibrary(page);
   const jobs: { id: string; state: string; done: number; total: number; queued: boolean; worker?: string }[] = [];

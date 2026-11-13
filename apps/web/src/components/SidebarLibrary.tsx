@@ -10,14 +10,17 @@ import { partNames } from "../lib/book";
 import { openDocument } from "../lib/openDoc";
 import { catalogue } from "../lib/postTitle";
 import { BookMark, SourceMark } from "./SourceMark";
+import { PreparationDetails, PrepareDialog, PreparedSummary, ShelfSummary, type Reading } from "./LibraryPreparation";
+import { useSettings } from "../state/settings";
 
 /** Books opened in the sidebar stay open while you read their chapters. */
 const openBooks = new Set<string>();
 
 /**
  * Every document in the library, newest first, as the sidebar's body: the app is mostly this
- * list, and choosing a document opens it beside the list. Sorting, filters and preparing audio
- * for several documents belong to the Library screen.
+ * list, and choosing a document opens it beside the list. Each shows the audio made for it and
+ * what is being made now. Sorting, filters and preparing audio for several documents belong to
+ * the Library screen.
  */
 export function SidebarLibrary() {
   const items = useLibrary((s) => s.items);
@@ -25,8 +28,13 @@ export function SidebarLibrary() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const playingId = usePlayer((s) => (s.doc && s.playing ? s.doc.id : null));
+  const defaultVoice = useSettings((s) => s.voice);
   const [q, setQ] = useState("");
   const [, setOpened] = useState(0);
+  const [details, setDetails] = useState<Reading | null>(null);
+  const [prepareId, setPrepareId] = useState<string | null>(null);
+  const detailsItem = details ? items.find((it) => it.rec.id === details.docId) : undefined;
+  const prepareItem = prepareId ? items.find((it) => it.rec.id === prepareId) : undefined;
   const current = pathname.startsWith("/read/") ? decodeURIComponent(pathname.slice("/read/".length)) : null;
 
   const entries = useMemo(() => {
@@ -54,14 +62,14 @@ export function SidebarLibrary() {
       ? <Check size={12} strokeWidth={2} className="text-accent" role="img" aria-label="Finished" />
       : percent > 0 ? <span>{percent}%</span> : null;
     return (
-      <li key={it.rec.id}>
+      // Secondary text on the highlight takes the full foreground: the muted tone is too faint against it in some themes.
+      <li key={it.rec.id} className={cn("rounded-control transition-colors duration-fast", active ? "bg-bg3 text-fg" : "text-fg2 hover:bg-bg2")}>
         <Link
           to={`/read/${encodeURIComponent(it.rec.id)}`}
           onClick={(e) => choose(e, it)}
           aria-current={active ? "page" : undefined}
           title={title}
-          // Secondary text on the highlight takes the full foreground: the muted tone is too faint against it in some themes.
-          className={cn("flex items-start gap-2.5 rounded-control py-1.5 pr-2 no-underline transition-colors duration-fast", chapter ? "pl-[42px]" : "pl-2", active ? "bg-bg3 text-fg" : "text-fg2 hover:bg-bg2")}
+          className={cn("flex items-start gap-2.5 rounded-control py-1.5 pr-2 text-inherit no-underline", chapter ? "pl-[42px]" : "pl-2")}
         >
           {!chapter && <SourceMark rec={it.rec} className="mt-0.5 size-5 rounded-md" />}
           <span className="min-w-0 flex-1">
@@ -77,6 +85,7 @@ export function SidebarLibrary() {
               </span>
             )}
         </Link>
+        <PreparedSummary it={it} defaultVoice={defaultVoice} onDetails={setDetails} className={cn("pb-2 pr-2", chapter ? "pl-[42px]" : "pl-[38px]")} />
       </li>
     );
   };
@@ -103,6 +112,8 @@ export function SidebarLibrary() {
           </span>
           <ChevronRight size={14} strokeWidth={1.5} className={cn("mt-[3px] shrink-0 text-fg3 transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
         </button>
+        {/* Closed, the book answers for its chapters; open, each chapter shows its own. */}
+        {!open && <ShelfSummary items={shelf.items} className="pb-2 pl-[38px] pr-2" />}
         {open && (
           <ul id={panel} aria-label={`${One}s of ${shelf.title}`} className="m-0 flex list-none flex-col gap-px p-0">
             {shelf.items.map((it) => row(it, true))}
@@ -124,6 +135,8 @@ export function SidebarLibrary() {
           <li className="px-2 py-3 text-[13px] leading-5 text-fg2">{items.length ? "No document matches." : "Documents you listen to appear here."}</li>
         )}
       </ul>
+      {detailsItem && details && !prepareItem && <PreparationDetails it={detailsItem} reading={details} defaultVoice={defaultVoice} onClose={() => setDetails(null)} onChooseVoices={() => { setDetails(null); setPrepareId(details.docId); }} />}
+      {prepareItem && <PrepareDialog documents={[prepareItem]} onClose={() => setPrepareId(null)} />}
     </>
   );
 }

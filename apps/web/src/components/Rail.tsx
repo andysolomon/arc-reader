@@ -5,6 +5,7 @@ import { THEMES, getTheme } from "@readaloud/tokens";
 import { ThemeIcon, cn } from "@readaloud/ui";
 import { useSettings, useThemeId } from "../state/settings";
 import { useLibrary } from "../state/library";
+import { audioCache } from "../lib/db";
 import { SidebarLibrary } from "./SidebarLibrary";
 
 interface Screen {
@@ -56,6 +57,15 @@ export function Rail() {
 
   // What the list shows of each document (how far through, whether finished) moves while you read: catch up between screens.
   useEffect(() => { if (open) void useLibrary.getState().refresh(); }, [open, pathname]);
+  // Audio saved for a document shows on its row. Passages arrive in bursts while one is prepared, so catch up at most once a second.
+  useEffect(() => {
+    if (!open) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = audioCache.subscribe(() => {
+      if (!timer) timer = setTimeout(() => { timer = undefined; void useLibrary.getState().refresh(); }, 1000);
+    });
+    return () => { unsubscribe(); clearTimeout(timer); };
+  }, [open]);
 
   const link = (screen: Screen) => {
     const active = isCurrent(screen, pathname, false);
