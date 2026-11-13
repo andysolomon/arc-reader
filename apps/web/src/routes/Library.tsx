@@ -220,7 +220,7 @@ export function LibraryPage() {
   };
 
   return (
-    <section ref={scrollRef} onScroll={(e) => { left.top = e.currentTarget.scrollTop; }} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
+    <section ref={scrollRef} onScroll={(e) => { left.top = e.currentTarget.scrollTop; }} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[880px] flex-col gap-4">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex min-w-0 flex-1 items-baseline gap-2.5 sm:flex-none">
