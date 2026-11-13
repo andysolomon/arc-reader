@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
 import type { DocRecord, PositionRecord } from "./src/lib/db";
 import { MAX_LINK_TEXT, MAX_LINK_URL, MAX_LINKS } from "./src/lib/links";
-import { mergeReads, type LibraryChange, type LibrarySnapshot } from "./src/lib/libraryProtocol";
+import { mergeReads, type LibraryChange, type LibraryDocs, type LibraryManifest, type LibrarySnapshot } from "./src/lib/libraryProtocol";
+import { sendJson } from "./vite.json";
 
 const MAX_BODY = 16 * 1024 * 1024;
+/** Document bodies per /docs answer, as JSON characters. A larger document still goes, alone. */
+const DOCS_BUDGET = 1_000_000;
 class HttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -86,24 +89,80 @@ function changesFrom(raw: unknown): LibraryChange[] {
 /** A single server owns the library. Each request is serialized and committed atomically before acknowledgment. */
 export class LibraryService {
   private queue: Promise<unknown> = Promise.resolve();
+  /** The parsed library, kept while the file on disk is the one it was read from. */
+  private cache?: { mtimeMs: number; size: number; snapshot: LibrarySnapshot };
   constructor(private directory: string) {}
 
+  /** Routes a request body the way the HTTP endpoint does. */
+  request(path: string, raw: unknown): Promise<LibrarySnapshot | LibraryManifest | LibraryDocs> {
+    if (path === "/docs") return this.docs(raw);
+    if (path === "/sync") return object(raw) && raw.view === "manifest" ? this.manifest(raw) : this.sync(raw);
+    return Promise.reject(new HttpError(404, "Library endpoint not found."));
+  }
+
+  /** Commits the changes and answers with the whole library. Older clients use this. */
   sync(raw: unknown): Promise<LibrarySnapshot> {
-    const changes = changesFrom(raw);
-    const run = this.queue.catch(() => {}).then(async () => {
-      await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      const file = resolve(this.directory, "library.json");
-      let snapshot: LibrarySnapshot;
-      try {
-        snapshot = JSON.parse(await readFile(file, "utf8"));
-        // Fail closed on damaged storage instead of replacing it with an empty library.
-        if (!Array.isArray(snapshot.docs) || !snapshot.docs.every(validDoc)
-          || !Array.isArray(snapshot.positions) || !snapshot.positions.every(validPosition)
-          || !Array.isArray(snapshot.deleted) || !snapshot.deleted.every(id)) throw new Error("Invalid library storage.");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        snapshot = { docs: [], positions: [], deleted: [] };
+    return this.commit(changesFrom(raw));
+  }
+
+  /** Commits the changes and answers with every document's version instead of its body. */
+  async manifest(raw: unknown): Promise<LibraryManifest> {
+    const snapshot = await this.commit(changesFrom(raw));
+    return { docs: snapshot.docs.map((doc) => ({ id: doc.id, updatedAt: doc.updatedAt })), positions: snapshot.positions, deleted: snapshot.deleted };
+  }
+
+  /** The requested documents, as many as fit one answer; ask again for the rest. */
+  async docs(raw: unknown): Promise<LibraryDocs> {
+    if (!object(raw) || !Array.isArray(raw.ids) || raw.ids.length > 1000 || !raw.ids.every(id)) throw new HttpError(400, "Invalid document request.");
+    const ids = [...new Set(raw.ids as string[])];
+    return this.serialized(async () => {
+      const stored = new Map((await this.load()).docs.map((doc) => [doc.id, doc]));
+      const docs: DocRecord[] = [];
+      const missing: string[] = [];
+      let size = 0;
+      for (const wanted of ids) {
+        const record = stored.get(wanted);
+        if (!record) { missing.push(wanted); continue; }
+        const length = JSON.stringify(record).length;
+        if (docs.length && size + length > DOCS_BUDGET) continue;
+        docs.push(record);
+        size += length;
       }
+      return { docs, missing };
+    });
+  }
+
+  private serialized<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.catch(() => {}).then(task);
+    this.queue = run;
+    return run;
+  }
+
+  private get file() { return resolve(this.directory, "library.json"); }
+
+  private async load(): Promise<LibrarySnapshot> {
+    let info: Awaited<ReturnType<typeof stat>>;
+    try { info = await stat(this.file); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return { docs: [], positions: [], deleted: [] };
+    }
+    // Phones poll every few seconds; parse and check the file only when it changes.
+    if (this.cache && this.cache.mtimeMs === info.mtimeMs && this.cache.size === info.size) return this.cache.snapshot;
+    const snapshot = JSON.parse(await readFile(this.file, "utf8")) as LibrarySnapshot;
+    // Fail closed on damaged storage instead of replacing it with an empty library.
+    if (!Array.isArray(snapshot.docs) || !snapshot.docs.every(validDoc)
+      || !Array.isArray(snapshot.positions) || !snapshot.positions.every(validPosition)
+      || !Array.isArray(snapshot.deleted) || !snapshot.deleted.every(id)) throw new Error("Invalid library storage.");
+    this.cache = { mtimeMs: info.mtimeMs, size: info.size, snapshot };
+    return snapshot;
+  }
+
+  private commit(changes: LibraryChange[]): Promise<LibrarySnapshot> {
+    return this.serialized(async () => {
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      const snapshot = await this.load();
+      if (!changes.length) return snapshot;
       const docs = new Map(snapshot.docs.map((doc) => [doc.id, doc]));
       const positions = new Map(snapshot.positions.map((pos) => [pos.docId, pos]));
       const deleted = new Set(snapshot.deleted);
@@ -127,26 +186,22 @@ export class LibraryService {
         positions.set(rec.docId, !current || rec.updatedAt >= current.updatedAt ? mergeReads(rec, current) : mergeReads(current, rec));
       }
       const next = { docs: [...docs.values()], positions: [...positions.values()], deleted: [...deleted] };
-      if (changes.length) {
-        const temporary = `${file}.${randomUUID()}.tmp`;
-        await writeFile(temporary, JSON.stringify(next), { mode: 0o600 });
-        await rename(temporary, file);
-      }
+      const temporary = `${this.file}.${randomUUID()}.tmp`;
+      await writeFile(temporary, JSON.stringify(next), { mode: 0o600 });
+      await rename(temporary, this.file);
+      const info = await stat(this.file);
+      this.cache = { mtimeMs: info.mtimeMs, size: info.size, snapshot: next };
       return next;
     });
-    this.queue = run;
-    return run;
   }
 }
 
 export function libraryMiddleware(service: LibraryService): Connect.NextHandleFunction {
   return (req: IncomingMessage, res: ServerResponse) => {
-    const send = (status: number, body: unknown) => {
-      res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
-      res.end(JSON.stringify(body));
-    };
+    const send = (status: number, body: unknown) => sendJson(req, res, status, body);
+    const path = req.url?.split("?")[0] ?? "";
     void (async () => {
-      if (req.url?.split("?")[0] !== "/sync") return send(404, { error: "Library endpoint not found." });
+      if (path !== "/sync" && path !== "/docs") return send(404, { error: "Library endpoint not found." });
       if (req.method !== "POST") return send(405, { error: "Use POST to sync the library." });
       // The library is shared by clients allowed to reach this server. Reject cross-site writes.
       if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return send(403, { error: "Cross-origin library writes are not allowed." });
@@ -161,7 +216,7 @@ export function libraryMiddleware(service: LibraryService): Connect.NextHandleFu
       let raw: unknown;
       try { raw = JSON.parse(Buffer.concat(buffers).toString("utf8")); }
       catch { throw new HttpError(400, "Invalid JSON."); }
-      send(200, await service.sync(raw));
+      send(200, await service.request(path, raw));
     })().catch((error) => {
       if (!(error instanceof HttpError)) console.error("Library sync failed:", error);
       send(error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : "The server could not save the library. Your changes remain on this device." });

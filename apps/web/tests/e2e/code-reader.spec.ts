@@ -62,3 +62,25 @@ test("unavailable explanations skip code without sending it to speech", async ({
   await expect.poll(() => spoken.some((text) => text.includes("skip the code"))).toBe(true);
   expect(spoken.join(" ")).not.toMatch(/console|const active|users\.filter/);
 });
+
+test("a reading with code opens at once and explains its code when the model answers", async ({ page }) => {
+  let answer = () => {};
+  const answered = new Promise<void>((resolve) => { answer = resolve; });
+  await page.route("**/api/llm/v1/chat/completions", async (route) => {
+    const input = JSON.parse(route.request().postDataJSON().messages[1].content);
+    await answered;
+    await route.fulfill({ json: { choices: [{ finish_reason: "stop", message: { content: JSON.stringify(Object.fromEntries(input.blocks.map((b: { id: string }) => [b.id, explanation]))) } }] } }).catch(() => {});
+  });
+  await page.goto("/");
+  await composeText(page, source);
+  await page.getByTestId("listen").click();
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/, { timeout: 5_000 });
+  // Opening it again from the Library does not wait on the model either.
+  await page.goto("/library");
+  await page.getByRole("button", { name: /A useful example/ }).first().click();
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/, { timeout: 5_000 });
+  const card = page.getByRole("region", { name: "Code example" });
+  await expect(card).toContainText("Skipped in audio");
+  answer();
+  await expect(card).toContainText(explanation);
+});

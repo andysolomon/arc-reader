@@ -9,7 +9,7 @@ interface Example { id: string; language: string; code: string; context: string 
 const pending = new Map<string, { controller: AbortController; promise: Promise<CodeSummaries>; users: number }>();
 
 async function generate(id: string, title: string, examples: Example[], model: SummaryModel, signal: AbortSignal): Promise<CodeSummaries> {
-  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
+  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(180_000)]);
   const config = await fetch("/api/llm/config", { signal: requestSignal });
   if (!config.ok || !(await config.json() as { configured?: boolean }).configured) return {};
   const response = await fetch("/api/llm/v1/chat/completions", {
