@@ -394,7 +394,7 @@ test("Studio favorites persist, include other catalog pages, and can be searched
   await page.getByLabel("Search designed voices").fill("");
   await page.getByRole("button", { name: "Unfavorite The Librarian", exact: true }).click();
   await page.getByRole("button", { name: "Unfavorite The Neighbor", exact: true }).click();
-  await expect(page.getByText("No favorites yet. Star a voice in All voices to keep it here.")).toBeVisible();
+  await expect(page.getByText("No favorites yet. Star a voice to keep it here.")).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: "Favorites (0)", exact: true })).toBeVisible();
   expect(calls.some((c) => c.path.endsWith("/use") || c.path.endsWith("/preview"))).toBe(false);
@@ -424,6 +424,9 @@ test("gallery filters narrow the catalog and favorites", async ({ page }) => {
   });
   await page.goto("/studio/gallery");
   await expect(page.getByRole("article")).toHaveCount(2);
+  // The facets wait behind one button so the voices come first.
+  await expect(page.getByLabel("Gender")).toHaveCount(0);
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
   await page.getByLabel("Gender").selectOption("male");
   await page.getByLabel("Accent").selectOption("british accent");
   await expect.poll(() => queries.at(-1)?.get("accent")).toBe("british accent");
@@ -447,18 +450,22 @@ test("Voices filters by source, language, type and search", async ({ page }) => 
   const cards = page.locator("[data-voice]");
   await expect(page.locator('[data-voice="voice-1"]')).toBeVisible();
   const total = await cards.count();
-  await page.getByRole("group", { name: "Voice source" }).getByRole("button", { name: /^ChatGPT/ }).click();
+  await page.getByRole("button", { name: "Filter by source" }).click();
+  await page.getByRole("menuitemradio", { name: /^ChatGPT/ }).click();
+  await expect(page.getByRole("button", { name: "Remove filter: ChatGPT" })).toBeVisible();
   await expect(page.locator('[data-voice="alloy"]')).toBeVisible();
   await expect(page.locator('[data-voice="local"]')).toHaveCount(0);
   await page.getByLabel("Search voices").fill("podcast");
   await expect(cards).toHaveCount(2);
   await page.getByRole("button", { name: "Clear filters (2)" }).click();
   await expect(cards).toHaveCount(total);
-  await page.getByLabel("Type").selectOption("cloned");
+  await page.getByRole("button", { name: "Filter by type" }).click();
+  await page.getByRole("menuitemradio", { name: /^Cloned/ }).click();
   await expect(cards).toHaveCount(1);
   await expect(page.locator('[data-voice="voice-1"]')).toBeVisible();
-  await page.getByLabel("Type").selectOption("");
-  await page.getByLabel("Language").selectOption("MULTI");
+  await page.getByRole("button", { name: "Remove filter: Cloned" }).click();
+  await page.getByRole("button", { name: "Filter by language" }).click();
+  await page.getByRole("menuitemradio", { name: /^Multilingual/ }).click();
   await expect(page.locator('[data-voice="local"]')).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: `of ${total} voices` })).toBeVisible();
 });
