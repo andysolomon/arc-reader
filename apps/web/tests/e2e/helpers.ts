@@ -30,3 +30,9 @@ export async function composeAndListen(page: Page) {
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   await page.getByRole("region", { name: "Player" }).waitFor();
 }
+
+/** Ask the player to prepare the open reading. Opening a reading never prepares it by itself. */
+export async function prepareFromPlayer(page: Page) {
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Prepare audio", exact: true }).click();
+}

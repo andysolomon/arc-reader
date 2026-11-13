@@ -262,7 +262,7 @@ const SEQS = {
           d: "Walks <article> or <main>, dropping scripts, nav, headers, footers and forms. Headings stay as Markdown headings, callouts are kept and tables are read row by row. A numbered chapter list anywhere on the page names the book it belongs to. Code stays as fenced blocks; images and SVGs become visual blocks with their captions; links, author, published date and site are collected.", code: [SRC + "lib/fetchUrl.ts:138"] },
       ] },
       { f: "UI", to: "DB", t: "call", n: "useLibrary.create() → docs.put", say: "The text becomes a Library document in IndexedDB.",
-        d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts:76", SRC + "lib/db.ts:143"] },
+        d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts:79", SRC + "lib/db.ts:143"] },
       { f: "DB", to: "UI", t: "ret", n: "DocRecord" },
       { f: "UI", to: "PL", t: "call", n: "openDocument → open(rec, {autoplay})", say: "The document is handed to the player; the Reader opens at /read/:id.",
         d: "open() resolves the voice: the document’s own, else the default from Settings. Autoplay is only set after a user gesture (Listen, Fetch, a Library tap); shared readings follow the “Auto-play on share” setting.",
@@ -295,16 +295,16 @@ const SEQS = {
       { f: "EN", to: "EN", t: "self", n: "planPassages()", say: "Passages are planned: runs of sentences up to ~60 words, never across a paragraph.",
         d: "About 20 s each; long paragraphs are cut into equal shares. Passages are a pure function of the text, so cache keys stay stable across sessions.", code: [SRC + "lib/segment.ts:126"] },
       { f: "EN", to: "PL", t: "ret", n: "loaded" },
-      { op: "opt", id: "prep", g: "opened from Compose with a VoiceStudio voice, or an identical job is still running", rows: [
-        { ref: "prepare", id: "refPrep", over: ["PL", "VS"], n: "Prepare whole reading", say: "Background preparation starts alongside playback: the whole reading becomes one server job.",
+      { op: "opt", id: "prep", g: "an identical preparation job is still running", rows: [
+        { ref: "prepare", id: "refPrep", over: ["PL", "VS"], n: "Prepare whole reading", say: "A preparation asked for earlier is still running, so the player follows that server job alongside playback.",
           d: "Renders every passage ahead of playback, so a voice slower than real time never stalls. Also offered in the player menu and the Library. Not offered for paid cloud voices — it would bill the whole document up front.",
-          code: [SRC + "state/player.ts:299", SRC + "state/player.ts:339"] },
+          code: [SRC + "state/player.ts:298", SRC + "state/player.ts:338"] },
       ] },
       { f: "PL", to: "UI", t: "ret", n: "opened → navigate to /read/:id", say: "open() returns and the Reader opens at /read/:id.",
         d: "With autoplay, open() has already called engine.play() without awaiting it; the first passage is generated while the Reader appears.", code: [SRC + "lib/openDoc.ts:11"] },
       { op: "alt", id: "start", ops: [
         { g: "autoplay: Listen, Fetch, or a share with auto-play on", rows: [
-          { f: "PL", to: "EN", t: "async", n: "engine.play() (not awaited)", say: "Listen was a user gesture, so the browser lets audio start.", code: [SRC + "state/player.ts:300", SRC + "engine/engine.ts:262"] },
+          { f: "PL", to: "EN", t: "async", n: "engine.play() (not awaited)", say: "Listen was a user gesture, so the browser lets audio start.", code: [SRC + "state/player.ts:299", SRC + "engine/engine.ts:262"] },
         ] },
         { g: "else", rows: [
           { f: "U", to: "UI", t: "async", n: "press play, or tap a sentence", say: "The Reader opened paused. The listener presses play, or taps a sentence to read from there." },
@@ -378,7 +378,7 @@ const SEQS = {
             { f: "PL", to: "PL", t: "self", n: "app itself unreachable → probe every 3 s, then play() again", say: "When the app’s own server is what stopped answering, as when a phone’s tunnel drops, the player waits for it and resumes by itself.",
               d: "A speech server that is down behind a reachable app is left to the listener: the first probe answers, so nothing is retried.", code: [SRC + "state/player.ts:96", SRC + "lib/appUpdate.ts:73"] },
             { f: "U", to: "UI", t: "async", n: "Use browser voice", say: "The listener picks the browser voice." },
-            { f: "UI", to: "PL", t: "async", n: "useBrowserVoice()", say: "The player is marked offline…", code: [SRC + "state/player.ts:334"] },
+            { f: "UI", to: "PL", t: "async", n: "useBrowserVoice()", say: "The player is marked offline…", code: [SRC + "state/player.ts:333"] },
             { f: "PL", to: "EN", t: "async", n: "engine.play()", say: "…and the same passage is tried again. Now synthesize() takes the browser-voice path: Web Speech reads sentence by sentence." },
           ] },
         ] },
@@ -533,8 +533,8 @@ const SEQS = {
       "The job belongs to the app server, not the browser tab: it survives reloads, a sleeping phone and server restarts (jobs are files on disk), and identical readings share one job.",
     ],
     rows: [
-      { f: "PL", to: "EN", t: "call", n: "prerender() → engine.prepare()", say: "Preparation starts: from the player menu, from Compose for a slow VoiceStudio voice, or from the Library’s queue.",
-        d: "The Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:319", SRC + "engine/engine.ts:389", SRC + "state/preparation.ts:168"] },
+      { f: "PL", to: "EN", t: "call", n: "prerender() → engine.prepare()", say: "Preparation starts only when asked for: from the player menu or from the Library’s queue.",
+        d: "The Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:318", SRC + "engine/engine.ts:389", SRC + "state/preparation.ts:168"] },
       { f: "EN", to: "PR", t: "call", n: "prepareInBackground(passages, start)", say: "Every passage is listed, starting from the listener’s current one.", code: [SRC + "engine/providers.ts:410"] },
       { op: "loop", id: "check", g: "each passage", rows: [
         { f: "PR", to: "DB", t: "call", n: "fromCache()", say: "Passages already on this device are marked cached, so the server skips them." },

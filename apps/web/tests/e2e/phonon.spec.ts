@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { TEXT, composeText } from "./helpers";
+import { TEXT, composeText, prepareFromPlayer } from "./helpers";
 
 test.describe("Phonon voices (stub server)", () => {
   test("lists the server's Phonon voices under their own service", async ({ page }) => {
@@ -25,7 +25,7 @@ test.describe("Phonon voices (stub server)", () => {
     }), { timeout: 10_000 }).toBeGreaterThan(0);
   });
 
-  test("listening with a Phonon voice prepares the whole reading on the server's Phonon machine", async ({ page, context }) => {
+  test("preparing a Phonon reading prepares all of it on the server's Phonon machine", async ({ page, context }) => {
     await page.goto("/voices");
     await page.locator('[data-voice="phonon:Hugh"]').getByRole("button", { name: "Use" }).click();
     await page.goto("/");
@@ -33,8 +33,10 @@ test.describe("Phonon voices (stub server)", () => {
     await composeText(page, `${TEXT}\n\nA third paragraph makes a third passage of reading ${unique}.`);
     let voicestudio = 0;
     page.on("request", (q) => { if (q.url().includes("/api/vs/v1/audio/speech")) voicestudio++; });
-    const submitted = page.waitForResponse((r) => r.url().endsWith("/api/preparations") && r.request().method() === "POST");
     await page.getByTestId("listen").click();
+    await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+    const submitted = page.waitForResponse((r) => r.url().endsWith("/api/preparations") && r.request().method() === "POST");
+    await prepareFromPlayer(page);
     const response = await submitted;
     expect(response.status()).toBe(202);
     const requests = JSON.parse(response.request().postData() ?? "{}").requests as { engine: string; voice: string; protocol: string }[];

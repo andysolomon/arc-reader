@@ -1,6 +1,6 @@
 import type { Route } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { composeAndListen, TEXT, composeText } from "./helpers";
+import { composeAndListen, TEXT, composeText, prepareFromPlayer } from "./helpers";
 
 test.describe("VoiceStudio provider (stub server)", () => {
   test("Listen synthesizes through the proxy and plays real audio", async ({ page }) => {
@@ -28,6 +28,7 @@ test.describe("VoiceStudio provider (stub server)", () => {
 
   test("cached passages replay with the server offline", async ({ page, context }) => {
     await composeAndListen(page);
+    await prepareFromPlayer(page);
     await expect(page.getByText("Audio prepared — playback no longer waits on the server", { exact: true })).toBeVisible();
     await page.keyboard.press("Space"); // pause → position persisted
     await context.route("**/api/vs/**", (route) => route.abort("connectionrefused"));
