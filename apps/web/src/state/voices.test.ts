@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchFishVoices, fetchPhononVoices, fetchServerVoices } from "../engine/providers";
 import { getVoice, useVoices } from "./voices";
-import { DEFAULT_VOICE_ID, LOCAL_VOICE, PHONON_VOICES, voiceSource } from "../data/voices";
+import { DEFAULT_VOICE_ID, FALLBACK_VOICE_ID, LOCAL_VOICE, PHONON_VOICES, voiceSource } from "../data/voices";
 import { useSettings } from "./settings";
 
 vi.mock("../engine/providers", async (original) => ({
@@ -143,21 +143,29 @@ describe("voice providers", () => {
     expect(useVoices.getState().voices.some((v) => v.id === "lib")).toBe(false);
     expect(getVoice("mine").id).toBe("mine");
   });
-  it("makes the Librarian the default voice unless the user picked one", async () => {
-    profiles.push({ id: "e43fa21f", name: "The Librarian", kind: "design", language: "English", personality: "archetype:feat_00_the_librarian" });
-    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "e43fa21f", name: "The Librarian", type: "profile" }, { id: "mine", name: "My voice", type: "profile" }], engines: [] });
-    useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
-    await useVoices.getState().loadServer();
-    expect(useSettings.getState().voice).toBe("e43fa21f");
-    expect(getVoice(null).name).toBe("The Librarian");
-
-    useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: true });
-    await useVoices.getState().loadServer();
+  it("makes Phonon's Zoey the default voice, and Bella where Phonon is missing, unless the user picked one", async () => {
+    vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "mine", name: "My voice", type: "profile" }], engines: [] });
+    expect(DEFAULT_VOICE_ID).toBe("phonon:Zoey");
+    useSettings.getState().patch({ voice: FALLBACK_VOICE_ID, voiceChosen: false });
+    await useVoices.getState().load();
     expect(useSettings.getState().voice).toBe(DEFAULT_VOICE_ID);
+    expect(getVoice(null)).toMatchObject({ name: "Zoey", engine: "phonon" });
+
+    useSettings.getState().patch({ voice: FALLBACK_VOICE_ID, voiceChosen: true });
+    await useVoices.getState().load();
+    expect(useSettings.getState().voice).toBe(FALLBACK_VOICE_ID);
 
     useSettings.getState().patch({ voice: "mine", voiceChosen: false });
-    await useVoices.getState().loadServer();
+    await useVoices.getState().load();
     expect(useSettings.getState().voice).toBe("mine");
+
+    // Without Phonon, the default falls back to Bella on VoiceStudio.
+    useVoices.setState({ voices: useVoices.getState().voices.filter((v) => v.engine !== "phonon") });
+    vi.mocked(fetchPhononVoices).mockResolvedValue([]);
+    useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
+    await useVoices.getState().load();
+    expect(useSettings.getState().voice).toBe(FALLBACK_VOICE_ID);
+    expect(getVoice(null)).toMatchObject({ name: "Bella", engine: "kittentts" });
   });
   it("keeps a voice when VoiceStudio refuses to delete it", async () => {
     profiles.push({ id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" });
@@ -175,12 +183,13 @@ describe("voice providers", () => {
     expect(getVoice("nova")).toMatchObject({ id: "nova", name: "Nova", engine: "openai" });
     expect(getVoice("coral~georgia")).toMatchObject({ name: "Savannah", engine: "openai" });
     expect(getVoice("fish:saved-voice").engine).toBe("fish");
-    expect(getVoice(DEFAULT_VOICE_ID)).toMatchObject({ name: "Bella", engine: "kittentts" });
+    expect(getVoice(DEFAULT_VOICE_ID)).toMatchObject({ name: "Zoey", engine: "phonon" });
+    expect(getVoice(FALLBACK_VOICE_ID)).toMatchObject({ name: "Bella", engine: "kittentts" });
     expect(getVoice("saved-profile")).toMatchObject({ id: "saved-profile", kind: "profile", engine: "omnivoice" });
     expect(voiceSource(getVoice("saved-profile"))).toBe("VoiceStudio");
   });
-  it("keeps VoiceStudio as the default even when cloud voices arrive first", () => {
-    useVoices.setState({ voices: [getVoice("nova"), LOCAL_VOICE] });
-    expect(getVoice(null)).toMatchObject({ id: DEFAULT_VOICE_ID, engine: "kittentts" });
+  it("keeps Zoey as the default even when cloud voices come first", () => {
+    useVoices.setState({ voices: [getVoice("nova"), ...PHONON_VOICES, LOCAL_VOICE] });
+    expect(getVoice(null)).toMatchObject({ id: DEFAULT_VOICE_ID, engine: "phonon" });
   });
 });

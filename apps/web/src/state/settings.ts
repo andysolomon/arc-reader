@@ -18,7 +18,7 @@ export interface Settings {
   highlightStyle: HighlightMode;
   composeLayout: ComposeLayout;
   voice: string;
-  /** The user picked the default voice; until then the Librarian replaces the fallback once it loads. */
+  /** The user picked the default voice; until then it follows Zoey, or Bella without Phonon. */
   voiceChosen: boolean;
   defaultSpeed: number;
   autoplayShare: boolean;
@@ -99,7 +99,7 @@ export const useSettings = create<Settings & Actions>()(
     }),
     {
       name: "readaloud:settings",
-      version: 3,
+      version: 4,
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Partial<Settings> & { provider?: string };
         if (version < 2) {
@@ -109,6 +109,11 @@ export const useSettings = create<Settings & Actions>()(
         }
         if (version < 3) {
           // The Librarian became the default voice: let it take over once, then respect the next pick.
+          p.voice = DEFAULT_VOICE_ID;
+          p.voiceChosen = false;
+        }
+        if (version < 4) {
+          // Phonon's Zoey became the default voice: let it take over once, then respect the next pick.
           p.voice = DEFAULT_VOICE_ID;
           p.voiceChosen = false;
         }

@@ -319,7 +319,7 @@ VITE_PHONON_BASE=/api/phonon
 PHONON_URL=http://127.0.0.1:8880
 ```
 
-The Voices page lists the 37 voices the server offers under **Phonon**: 12 American, 13 British and 12 character voices. The list follows the server, so a voice added there appears after a reload, and a saved document keeps its voice if the server later drops it. The proxy at `/api/phonon` forwards only the voice list and speech generation, and the server needs no key.
+The Voices page lists the 37 voices the server offers under **Phonon**: 12 American, 13 British and 12 character voices. The list follows the server, so a voice added there appears after a reload, and a saved document keeps its voice if the server later drops it. The proxy at `/api/phonon` forwards only the voice list and speech generation, and the server needs no key. Zoey is the app's default voice until you pick another; a deployment without Phonon defaults to KittenTTS's Bella on VoiceStudio.
 
 Phonon speaks the same OpenAI-style `POST /v1/audio/speech` as VoiceStudio and returns MP3. Each device sends it one request at a time, on a queue separate from VoiceStudio's, and asks again when another device's clip is in progress. About a minute is generated ahead as for other free voices, and clips are cached with the model name. **Prepare audio** and Library preparation run on the web server as for VoiceStudio voices: the Phonon server is a preparation machine of its own (shown as **Phonon** in the queue) that takes Phonon readings and nothing else, one whole reading at a time, and pauses while someone is listening to a Phonon voice. The audio is kept on the server and shared with every device. English only: other languages are read with English pronunciation.
 
