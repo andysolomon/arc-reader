@@ -16,6 +16,10 @@ interface Job extends PreparationStatus {
   start: number;
   workerId?: string;
   createdAt?: number;
+  /** When a reader moved it to the front of the queue; the latest move goes first. */
+  priority?: number;
+  /** It also takes its machine from the reading being prepared there, which resumes afterwards. */
+  urgent?: boolean;
 }
 interface Audio { body: Buffer; type: string; duration?: string; words?: string }
 class HttpError extends Error {
@@ -28,6 +32,8 @@ const REFUSAL_RETRIES = 3;
 const ALIAS = /^(alloy|ash|ballad|cedar|coral|echo|fable|marin|nova|onyx|sage|shimmer|verse)$/;
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const signature = (requests: PreparationRequest[]) => digest(requests.map(({ cached: _, ...item }) => item));
+/** Readings a reader moved up come first, the latest move leading; the rest keep arrival order. */
+const inOrder = (a: Job, b: Job) => (b.priority || 0) - (a.priority || 0) || (a.createdAt || 0) - (b.createdAt || 0);
 
 /** Disk-backed jobs belong to the web server, never to an HTTP connection. */
 export class PreparationService {
@@ -98,8 +104,35 @@ export class PreparationService {
       ? reserved.name : this.overflow.get(job.id) === false ? this.discovery.workers[0].name : undefined;
     return { id: job.id, state: job.state, done: job.done, total: job.total, queued,
       ...(waitingFor ? { waitingFor } : {}),
+      ...(queued ? this.place(job) : {}),
       ...(worker && (job.state !== "running" || this.active.has(job.id)) ? { worker: worker.name } : {}),
       ...(job.error ? { error: job.error } : {}) };
+  }
+
+  private waiting() {
+    return [...this.jobs.values()].filter((job) => job.state === "running" && !this.active.has(job.id));
+  }
+
+  /** The machine a waiting reading goes to: the one holding its audio, Phonon's, or the
+   * primary, which takes new readings whenever it is free. */
+  private machineFor(job: Job) {
+    return job.workerId || this.discovery.only(job.requests)?.id || this.discovery.workers[0].id;
+  }
+
+  /** Where a waiting reading stands among the others that could take its machine. */
+  private place(job: Job): Pick<PreparationStatus, "ahead" | "prioritized" | "busy"> {
+    // Readings submitted in the same millisecond keep the order they were stored in, as assignment does.
+    const waiting = this.waiting().sort(inOrder);
+    const ahead = waiting.slice(0, waiting.indexOf(job)).filter((other) => forPhonon(other.requests) === forPhonon(job.requests)
+      && (!other.workerId || !job.workerId || other.workerId === job.workerId)).length;
+    const machine = this.machineFor(job);
+    return { ahead, ...(job.priority ? { prioritized: true } : {}),
+      ...([...this.active.values()].some((worker) => worker.id === machine) ? { busy: true } : {}) };
+  }
+
+  /** A reading asked to start now takes this machine once the passage in hand is finished. */
+  private outranked(job: Job, worker: PreparationWorker) {
+    return this.waiting().some((other) => other.urgent && (other.priority || 0) > (job.priority || 0) && this.machineFor(other) === worker.id);
   }
 
   private notify(job: Job) {
@@ -145,6 +178,8 @@ export class PreparationService {
     // can take while the Mac is busy. Unknown support keeps arrival order.
     const overflow = worker.id === "secondary";
     if (worker.id === "primary") pending.sort((a, b) => Number(this.overflow.get(a.id) !== false) - Number(this.overflow.get(b.id) !== false));
+    // A reading a reader moved up goes before all of that.
+    pending.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     for (const job of pending) {
       // Keep partial audio on its original machine after a web restart.
       if (job.workerId && job.workerId !== worker.id) continue;
@@ -155,7 +190,8 @@ export class PreparationService {
       if (overflow && !job.workerId && !this.primaryBusy()) return;
       const supported = await this.discovery.supports(worker, job.requests);
       if (overflow && !job.workerId) this.overflow.set(job.id, supported);
-      if (!supported) continue;
+      // A reading this machine cannot take must not keep pausing the ones it can.
+      if (!supported) { if (this.machineFor(job) === worker.id) job.urgent = undefined; continue; }
       if (job.state !== "running" || this.active.has(job.id)) continue;
       // The primary may have finished while secondary discovery was in flight.
       if (overflow && !job.workerId && !this.primaryBusy()) return;
@@ -256,10 +292,25 @@ export class PreparationService {
     return this.status(job);
   }
 
+  /** Move a waiting reading to the front of its queue. With `now`, the reading its machine
+   * is preparing stops after the passage in hand and resumes once this one is done. */
+  async prioritize(id: string, now = false) {
+    const job = await this.job(id);
+    if (job.state === "running" && !this.active.has(job.id)) {
+      job.priority = Math.max(Date.now(), ...[...this.jobs.values()].map((other) => (other.priority || 0) + 1));
+      job.urgent = now || undefined;
+      await this.persist(job);
+      this.schedule();
+    }
+    return this.status(job);
+  }
+
   private async run(job: Job, worker: PreparationWorker) {
     try {
       for (let k = 0; k < job.total; k++) {
         if (job.state !== "running") return;
+        // Still running, so it rejoins the queue with its finished passages kept.
+        if (this.outranked(job, worker)) return;
         const index = (job.start + k) % job.total;
         if (job.completed.includes(index)) continue;
         let refusals = 0;
@@ -459,8 +510,12 @@ export function audioPreparation(env: Record<string, string>, activity?: SpeechA
         // Every open app polls this list; an unchanged list answers 304 with no body.
         if (req.method === "GET" && path === "/") return sendJson(req, res, 200, await service.list(), { etag: true });
         if (req.method === "POST" && path === "/") return send(res, 202, await service.submit(await body(req)));
-        const match = /^\/([a-f0-9-]{36})(?:\/audio\/(\d+))?$/.exec(path);
+        const match = /^\/([a-f0-9-]{36})(?:\/audio\/(\d+)|\/(priority))?$/.exec(path);
         if (!match) throw new HttpError(404, "Not found.");
+        if (match[3]) {
+          if (req.method !== "POST") throw new HttpError(405, "Method not allowed.");
+          return send(res, 200, await service.prioritize(match[1], (await body(req))?.now === true));
+        }
         if (req.method === "PUT" && match[2] !== undefined) {
           const chunks: Buffer[] = [];
           let bytes = 0;
