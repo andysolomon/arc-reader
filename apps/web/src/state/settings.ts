@@ -18,7 +18,7 @@ export interface Settings {
   highlightStyle: HighlightMode;
   composeLayout: ComposeLayout;
   voice: string;
-  /** The user picked the default voice; until then it follows Zoey, or Bella without Phonon. */
+  /** The user picked the default voice; until then it follows Easton, or Bella without Phonon. */
   voiceChosen: boolean;
   defaultSpeed: number;
   autoplayShare: boolean;
@@ -68,6 +68,32 @@ function genKey() {
   return s;
 }
 
+/** Upgrades settings saved by an older version of the app. */
+export function migrateSettings(persisted: unknown, version: number): Settings {
+  const p = (persisted ?? {}) as Partial<Settings> & { provider?: string };
+  if (version < 2) {
+    p.engine = p.provider === "piper" ? LOCAL_ENGINE : DEFAULT_ENGINE;
+    delete p.provider;
+    if (p.voice && !/^(expr-voice-|[MF][1-5]$|local$)/.test(p.voice)) p.voice = DEFAULT_VOICE_ID;
+  }
+  if (version < 3) {
+    // The Librarian became the default voice: let it take over once, then respect the next pick.
+    p.voice = DEFAULT_VOICE_ID;
+    p.voiceChosen = false;
+  }
+  if (version < 4) {
+    // Phonon's Zoey became the default voice: let it take over once, then respect the next pick.
+    p.voice = DEFAULT_VOICE_ID;
+    p.voiceChosen = false;
+  }
+  if (version < 5) {
+    // Phonon's Easton, its fastest speaker, replaced Zoey as the default: let it take over once.
+    p.voice = DEFAULT_VOICE_ID;
+    p.voiceChosen = false;
+  }
+  return p as Settings;
+}
+
 export const useSettings = create<Settings & Actions>()(
   persist(
     (set) => ({
@@ -99,26 +125,8 @@ export const useSettings = create<Settings & Actions>()(
     }),
     {
       name: "readaloud:settings",
-      version: 4,
-      migrate: (persisted, version) => {
-        const p = (persisted ?? {}) as Partial<Settings> & { provider?: string };
-        if (version < 2) {
-          p.engine = p.provider === "piper" ? LOCAL_ENGINE : DEFAULT_ENGINE;
-          delete p.provider;
-          if (p.voice && !/^(expr-voice-|[MF][1-5]$|local$)/.test(p.voice)) p.voice = DEFAULT_VOICE_ID;
-        }
-        if (version < 3) {
-          // The Librarian became the default voice: let it take over once, then respect the next pick.
-          p.voice = DEFAULT_VOICE_ID;
-          p.voiceChosen = false;
-        }
-        if (version < 4) {
-          // Phonon's Zoey became the default voice: let it take over once, then respect the next pick.
-          p.voice = DEFAULT_VOICE_ID;
-          p.voiceChosen = false;
-        }
-        return p as Settings;
-      },
+      version: 5,
+      migrate: migrateSettings,
       partialize: (s) => {
         const { set: _s, patch: _p, ...rest } = s;
         return rest;

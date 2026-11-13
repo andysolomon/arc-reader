@@ -157,7 +157,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
   },
 }));
 
-/** Zoey when this deployment has Phonon, Bella when it does not. */
+/** Easton when this deployment has Phonon, Bella when it does not. */
 export const defaultVoiceId = () => (useVoices.getState().voices.some((v) => v.id === DEFAULT_VOICE_ID) ? DEFAULT_VOICE_ID : FALLBACK_VOICE_ID);
 
 /** Keep the default voice speakable here unless the user has picked one. */

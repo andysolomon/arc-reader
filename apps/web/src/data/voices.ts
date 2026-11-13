@@ -143,8 +143,8 @@ export const LOCAL_VOICE: Voice = { id: LOCAL_VOICE_ID, name: "Browser voice", l
 /** The list shown before (or without) a speech server. */
 export const DEFAULT_VOICES: Voice[] = [...PRESET_VOICES, LOCAL_VOICE];
 
-/** The default voice: Phonon's Zoey. */
-export const DEFAULT_VOICE_ID = PHONON_PREFIX + "Zoey";
+/** The default voice: Phonon's Easton, the fastest-speaking of its voices. */
+export const DEFAULT_VOICE_ID = PHONON_PREFIX + "Easton";
 
 /** The default in a deployment without Phonon: KittenTTS's Bella on VoiceStudio. */
 export const FALLBACK_VOICE_ID = "expr-voice-2-f";

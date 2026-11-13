@@ -5,7 +5,7 @@
 import { createServer } from "node:http";
 
 const PORT = Number(process.argv[2] || process.env.STUB_PORT || 3997);
-const VOICES = ["Alfie", "Captain Silas Blackwater", "Easton", "Harper", "Hugh", "Imogen", "Newcomer", "default"];
+const VOICES = ["Alfie", "Captain Silas Blackwater", "Harper", "Hugh", "Imogen", "Newcomer", "Zoey", "default"];
 
 function wav(seconds, hz) {
   const rate = 16000, n = Math.max(1, Math.round(rate * seconds));

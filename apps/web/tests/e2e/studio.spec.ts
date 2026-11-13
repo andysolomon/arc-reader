@@ -95,7 +95,7 @@ test("Voices sends a gallery voice back to Studio but never offers that for clon
   const librarian = page.locator('[data-voice="voice-3"]');
   await expect(librarian.getByText("designed", { exact: true })).toBeVisible();
   await expect(page.locator('[data-voice="voice-1"]').getByRole("button", { name: /back to Studio/ })).toHaveCount(0);
-  // The Phonon stub does not offer Zoey, so the default falls back to Bella; sending back the selected voice returns to it.
+  // The Phonon stub does not offer Easton, so the default falls back to Bella; sending back the selected voice returns to it.
   await expect(page.locator('[data-voice="expr-voice-2-f"]').getByRole("button", { name: "Selected" })).toBeVisible();
   await librarian.getByRole("button", { name: "Use" }).click();
   await expect(librarian.getByRole("button", { name: "Selected" })).toBeVisible();

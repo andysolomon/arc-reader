@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchFishVoices, fetchPhononVoices, fetchServerVoices } from "../engine/providers";
 import { getVoice, useVoices } from "./voices";
 import { DEFAULT_VOICE_ID, FALLBACK_VOICE_ID, LOCAL_VOICE, PHONON_VOICES, voiceSource } from "../data/voices";
-import { useSettings } from "./settings";
+import { migrateSettings, useSettings } from "./settings";
 
 vi.mock("../engine/providers", async (original) => ({
   ...await original<typeof import("../engine/providers")>(),
@@ -143,13 +143,13 @@ describe("voice providers", () => {
     expect(useVoices.getState().voices.some((v) => v.id === "lib")).toBe(false);
     expect(getVoice("mine").id).toBe("mine");
   });
-  it("makes Phonon's Zoey the default voice, and Bella where Phonon is missing, unless the user picked one", async () => {
+  it("makes Phonon's Easton the default voice, and Bella where Phonon is missing, unless the user picked one", async () => {
     vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "mine", name: "My voice", type: "profile" }], engines: [] });
-    expect(DEFAULT_VOICE_ID).toBe("phonon:Zoey");
+    expect(DEFAULT_VOICE_ID).toBe("phonon:Easton");
     useSettings.getState().patch({ voice: FALLBACK_VOICE_ID, voiceChosen: false });
     await useVoices.getState().load();
     expect(useSettings.getState().voice).toBe(DEFAULT_VOICE_ID);
-    expect(getVoice(null)).toMatchObject({ name: "Zoey", engine: "phonon" });
+    expect(getVoice(null)).toMatchObject({ name: "Easton", engine: "phonon" });
 
     useSettings.getState().patch({ voice: FALLBACK_VOICE_ID, voiceChosen: true });
     await useVoices.getState().load();
@@ -183,12 +183,16 @@ describe("voice providers", () => {
     expect(getVoice("nova")).toMatchObject({ id: "nova", name: "Nova", engine: "openai" });
     expect(getVoice("coral~georgia")).toMatchObject({ name: "Savannah", engine: "openai" });
     expect(getVoice("fish:saved-voice").engine).toBe("fish");
-    expect(getVoice(DEFAULT_VOICE_ID)).toMatchObject({ name: "Zoey", engine: "phonon" });
+    expect(getVoice(DEFAULT_VOICE_ID)).toMatchObject({ name: "Easton", engine: "phonon" });
     expect(getVoice(FALLBACK_VOICE_ID)).toMatchObject({ name: "Bella", engine: "kittentts" });
     expect(getVoice("saved-profile")).toMatchObject({ id: "saved-profile", kind: "profile", engine: "omnivoice" });
     expect(voiceSource(getVoice("saved-profile"))).toBe("VoiceStudio");
   });
-  it("keeps Zoey as the default even when cloud voices come first", () => {
+  it("moves voices saved under an older default to Easton once", () => {
+    expect(migrateSettings({ voice: "phonon:Zoey", voiceChosen: false }, 4)).toMatchObject({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
+    expect(migrateSettings({ voice: "phonon:Hugh", voiceChosen: true }, 5)).toMatchObject({ voice: "phonon:Hugh", voiceChosen: true });
+  });
+  it("keeps Easton as the default even when cloud voices come first", () => {
     useVoices.setState({ voices: [getVoice("nova"), ...PHONON_VOICES, LOCAL_VOICE] });
     expect(getVoice(null)).toMatchObject({ id: DEFAULT_VOICE_ID, engine: "phonon" });
   });
