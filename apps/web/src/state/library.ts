@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { audioCache, docs as docStore, positions, type DocBook, type DocMeta, type DocRecord, type DocSource } from "../lib/db";
 import { estimateTotal, titleFrom } from "../lib/segment";
 import { uid } from "../lib/hash";
-import { preparedVoices, type PreparedVoice } from "../lib/prepared";
+import { planReading, preparedVoices, sharedPassages, type PreparedVoice } from "../lib/prepared";
 import { useVoices } from "./voices";
 import { useSettings } from "./settings";
 import { usePreparation } from "./preparation";
@@ -59,11 +59,14 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
         const id = part && voiceIdOfKeyPart(part);
         if (id && !voices.some((v) => v.id === id)) voices.push({ id, name: id, engine: engine.split(":")[0], kind: "preset", lang: "", hue: null, tags: [] });
       }
+      const plans = all.map(planReading);
+      const shared = sharedPassages(plans);
+      const { openaiModel } = useSettings.getState();
       set({
         items: all
-          .map((rec) => {
+          .map((rec, index) => {
             const p = byId.get(rec.id);
-            return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, useSettings.getState().openaiModel) };
+            return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, openaiModel, shared, plans[index]) };
           })
           // Newest first by when the document was added: filing, editing or opening it doesn't move it.
           .sort((a, b) => b.rec.createdAt - a.rec.createdAt),

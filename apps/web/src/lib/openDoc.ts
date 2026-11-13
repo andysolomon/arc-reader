@@ -4,8 +4,8 @@ import { usePlayer } from "../state/player";
 import { useLibrary } from "../state/library";
 
 /** Load a document into the player and go to the Reader. Autoplay only follows a user gesture. */
-export async function openDocument(rec: DocRecord, navigate: NavigateFunction, opts: { autoplay?: boolean; resume?: boolean; replace?: boolean; prepare?: boolean } = {}) {
-  const opened = await usePlayer.getState().open(rec, { autoplay: opts.autoplay ?? true, resume: opts.resume ?? true, prepare: opts.prepare });
+export async function openDocument(rec: DocRecord, navigate: NavigateFunction, opts: { autoplay?: boolean; resume?: boolean; replace?: boolean } = {}) {
+  const opened = await usePlayer.getState().open(rec, { autoplay: opts.autoplay ?? true, resume: opts.resume ?? true });
   if (!opened) return;
   void useLibrary.getState().touch(rec.id);
   navigate(`/read/${rec.id}`, { replace: opts.replace });

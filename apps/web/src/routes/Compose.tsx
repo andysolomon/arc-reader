@@ -84,7 +84,7 @@ export function Compose() {
       const rec = await importPage(f, { source: "url" });
       // A contents page is there to be swapped for its chapters, so it opens without reading itself out.
       const listen = !isContentsPage(f);
-      await openDocument(rec, navigate, { autoplay: listen, resume: false, prepare: listen });
+      await openDocument(rec, navigate, { autoplay: listen, resume: false });
     } catch (e) {
       if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
       else toast(`Couldn't read ${host} — try pasting the text`);
@@ -100,7 +100,7 @@ export function Compose() {
     try {
       const rec = await create({ text: t, title, source: "paste" });
       sessionStorage.removeItem(DRAFT_KEY);
-      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
+      await openDocument(rec, navigate, { autoplay: true, resume: false });
     } finally {
       setBusy(null);
     }
@@ -176,7 +176,7 @@ export function Compose() {
     try {
       const f = await readPdfFile(file);
       const rec = await create({ text: f.text, title: f.title || file.name.replace(/\.pdf$/i, ""), source: "file", domain: f.domain, meta: f.meta, links: f.links });
-      await openDocument(rec, navigate, { autoplay: true, resume: false, prepare: true });
+      await openDocument(rec, navigate, { autoplay: true, resume: false });
     } catch {
       toast("Couldn't read that PDF. A scanned PDF has no text to read.");
     } finally {

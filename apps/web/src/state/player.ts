@@ -2,7 +2,7 @@ import { prepareVisualDescriptions } from "../lib/visualDescriptions";
 import type { VisualDescriptions } from "../lib/visuals";
 import { create } from "zustand";
 import { PlaybackEngine, type EngineDoc, type EngineSnapshot } from "../engine/engine";
-import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground, preparesOnServer } from "../engine/providers";
+import { hasSpeechApi, isPaidEngine, preparationRequests, prepareInBackground } from "../engine/providers";
 import { hasActivePreparation } from "../engine/preparation";
 import { positions, docs as docStore, type DocRecord } from "../lib/db";
 import { FINISHED_FRACTION } from "../lib/libraryProtocol";
@@ -57,7 +57,7 @@ export interface PlayerState extends EngineSnapshot {
 
 interface Actions {
   /** `persist` saves the record (e.g. a voice change) once preparation succeeds. */
-  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean; prepare?: boolean; summary?: boolean }) => Promise<boolean>;
+  open: (rec: DocRecord, opts?: { autoplay?: boolean; resume?: boolean; persist?: boolean; summary?: boolean }) => Promise<boolean>;
   cancelPreparation: () => void;
   retryPreparation: () => Promise<boolean>;
   /** Try the speech server again for the current sentence. */
@@ -163,15 +163,15 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
   engine.subscribe((snap) => set(snap));
 
   /** Save new wording for a reading's code or images and swap it in, keeping the listener's place. */
-  function swapIn(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal,
+  function swapIn(id: string, opened: DocRecord, readingText: string, signal: AbortSignal,
     found: { codeSummaries?: CodeSummaries; visualDescriptions?: VisualDescriptions }) {
     // One at a time, so code explanations and image descriptions arriving together both get saved.
-    const run = swapping.then(() => saveAndSwap(id, opened, readingText, autoPrepare, signal, found));
+    const run = swapping.then(() => saveAndSwap(id, opened, readingText, signal, found));
     swapping = run.catch(() => {});
     return run;
   }
   let swapping: Promise<void> = Promise.resolve();
-  async function saveAndSwap(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal,
+  async function saveAndSwap(id: string, opened: DocRecord, readingText: string, signal: AbortSignal,
     found: { codeSummaries?: CodeSummaries; visualDescriptions?: VisualDescriptions }) {
     const latest = await docStore.get(id);
     if (signal.aborted || !latest || latest.text !== opened.text) return;
@@ -185,17 +185,17 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
     if (!engine.replaceText(next)) return;
     set({ doc: next, record });
     // Prepared audio follows the new wording.
-    if (autoPrepare || prerendering) { get().cancelPrerender(); void get().prerender(); }
+    if (prerendering) { get().cancelPrerender(); void get().prerender(); }
   }
 
   /**
    * Explain a reading's code blocks while it is already open. The model can take a minute, so
    * the reading starts with skip notices in their place and the explanations replace them.
    */
-  async function explainCode(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal) {
+  async function explainCode(id: string, opened: DocRecord, readingText: string, signal: AbortSignal) {
     try {
       const explained = await prepareCodeSummaries(opened, readingText, useSettings.getState().summaryModel, signal, () => {});
-      if (explained.codeSummaries !== opened.codeSummaries) await swapIn(id, opened, readingText, autoPrepare, signal, { codeSummaries: explained.codeSummaries });
+      if (explained.codeSummaries !== opened.codeSummaries) await swapIn(id, opened, readingText, signal, { codeSummaries: explained.codeSummaries });
     } catch { /* Skip notices keep serving. */ }
   }
 
@@ -203,7 +203,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
    * Save descriptions for a reading's images and swap them into it, keeping the listener's place.
    * A deck's slides are described from that place onwards, a few at a time as they arrive.
    */
-  async function describeVisuals(id: string, opened: DocRecord, readingText: string, autoPrepare: boolean, signal: AbortSignal) {
+  async function describeVisuals(id: string, opened: DocRecord, readingText: string, signal: AbortSignal) {
     try {
       const slides = readingBlocks(readingText).some((block) => block.kind === "visual" && block.visual.kind === "slide");
       if (slides) {
@@ -214,7 +214,7 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       await prepareVisualDescriptions(opened, readingText, signal, () => {}, {
         all: true,
         heard: () => { const { doc, index } = get(); return doc?.id === id ? doc.paragraphs.filter((p) => p.visual && p.start < index).length : 0; },
-        found: (visualDescriptions) => swapIn(id, opened, readingText, autoPrepare, signal, { visualDescriptions }),
+        found: (visualDescriptions) => swapIn(id, opened, readingText, signal, { visualDescriptions }),
       });
     } catch { /* Captions and alt text keep serving. */ }
     if (describingDeck !== id) return;
@@ -294,17 +294,16 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
       engine.setSpeed(get().speed || useSettings.getState().defaultSpeed);
       set({ doc, record: prepared, voiceId: voice.id, summary, menuOpen: false, focus: false, offline: get().offline && !isLocalVoice(voice.id) });
       const requests = engine.passages.map((p) => ({ text: p.text, voice: voice.id, engine: voice.engine, profile: voice.kind === "profile" }));
-      const autoPrepare = opts.prepare && preparesOnServer(voice.engine)
-        && useSettings.getState().engine !== LOCAL_ENGINE && !get().offline;
-      if (autoPrepare || hasActivePreparation(preparationRequests(requests))) void get().prerender();
+      // Audio is prepared only when asked for; a reading already being prepared is followed.
+      if (hasActivePreparation(preparationRequests(requests))) void get().prerender();
       if (opts.autoplay) void engine.play();
       // Reading starts with skip notices, captions and alt text; explanations and descriptions replace them as they arrive.
       const blocks = readingBlocks(readingText);
       const code = blocks.some((block) => block.kind === "code");
       const visuals = blocks.some((block) => block.kind === "visual");
       if (code || visuals) describing = new AbortController();
-      if (code) void explainCode(rec.id, prepared, readingText, !!autoPrepare, describing!.signal);
-      if (visuals) void describeVisuals(rec.id, prepared, readingText, !!autoPrepare, describing!.signal);
+      if (code) void explainCode(rec.id, prepared, readingText, describing!.signal);
+      if (visuals) void describeVisuals(rec.id, prepared, readingText, describing!.signal);
       retryPreparation = null;
       return true;
       } catch (error) {
