@@ -1,7 +1,7 @@
 {
  "apps/web/ios/App/App/AppDelegate.swift:58": "@objc(DeviceSpeechPlugin)",
- "apps/web/src/App.tsx:42": "const stopSync = startLibrarySync(() => {",
- "apps/web/src/App.tsx:48": "return (",
+ "apps/web/src/App.tsx:52": "const stopSync = startLibrarySync(() => {",
+ "apps/web/src/App.tsx:58": "return (",
  "apps/web/src/components/ArticleSummary.tsx:27": "<Button leading={<Play size={14} strokeWidth={1.5} />} onClick={() => void usePlayer.getState().open(record, { summary: true, autoplay: true })}>",
  "apps/web/src/engine/audio.ts:43": "export function proportionalStarts(duration: number, partWords: number[], lead = 0, tail = 0): number[] {",
  "apps/web/src/engine/audio.ts:67": "export function analyzePcm(samples: Float32Array, sampleRate: number, partWords: number[]): ClipAnalysis {",
@@ -124,7 +124,7 @@
  "apps/web/src/routes/ReadNew.tsx:19": "useEffect(() => {",
  "apps/web/src/routes/ReadNew.tsx:22": "const autoplay = useSettings.getState().autoplayShare;",
  "apps/web/src/state/categories.ts:28": "async suggest(rec, { quiet = false } = {}) {",
- "apps/web/src/state/library.ts:73": "async create({ text, title, source, domain, voice = null, meta, links = [] }) {",
+ "apps/web/src/state/library.ts:76": "async create({ text, title, source, domain, voice = null, meta, links = [] }) {",
  "apps/web/src/state/player.ts:86": "clearOffline: () => void;",
  "apps/web/src/state/player.ts:96": "async function resumeWhenReachable() {",
  "apps/web/src/state/player.ts:105": "export const engine = new PlaybackEngine({",

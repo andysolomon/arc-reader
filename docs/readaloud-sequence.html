@@ -203,7 +203,7 @@ const SRC = "apps/web/src/";
 /* Participants, left to right. */
 const P = {
   U: { n: "Listener", kind: "actor", d: "The person using the app: pastes, shares, presses play, picks voices." },
-  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:48", SRC + "routes/Compose.tsx:119", SRC + "routes/ReadNew.tsx:15"] },
+  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:58", SRC + "routes/Compose.tsx:119", SRC + "routes/ReadNew.tsx:15"] },
   PL: { n: "usePlayer", s: "state/player.ts", d: "The Zustand player store. It owns the single PlaybackEngine, resolves the voice, rewrites Patois, restores the saved place, and turns engine callbacks into UI state (speechError, offline, toasts).", code: [SRC + "state/player.ts:105", SRC + "state/player.ts:162"] },
   EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:102"] },
   PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:454", SRC + "engine/preparation.ts:235"] },
@@ -262,7 +262,7 @@ const SEQS = {
           d: "Walks <article> or <main>, dropping scripts, nav, headers, footers and forms. Headings stay as Markdown headings, callouts are kept and tables are read row by row. A numbered chapter list anywhere on the page names the book it belongs to. Code stays as fenced blocks; images and SVGs become visual blocks with their captions; links, author, published date and site are collected.", code: [SRC + "lib/fetchUrl.ts:138"] },
       ] },
       { f: "UI", to: "DB", t: "call", n: "useLibrary.create() → docs.put", say: "The text becomes a Library document in IndexedDB.",
-        d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts:73", SRC + "lib/db.ts:143"] },
+        d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts:76", SRC + "lib/db.ts:143"] },
       { f: "DB", to: "UI", t: "ret", n: "DocRecord" },
       { f: "UI", to: "PL", t: "call", n: "openDocument → open(rec, {autoplay})", say: "The document is handed to the player; the Reader opens at /read/:id.",
         d: "open() resolves the voice: the document’s own, else the default from Settings. Autoplay is only set after a user gesture (Listen, Fetch, a Library tap); shared readings follow the “Auto-play on share” setting.",
@@ -682,7 +682,7 @@ const SEQS = {
       ] },
       { f: "LS", to: "LS", t: "self", n: "compare document IDs with the server", say: "With nothing pending, both sides must have the same documents.", code: [SRC + "lib/librarySync.ts:118"] },
       { f: "LS", to: "UI", t: "async", n: "status: synced · refresh the Library", say: "Synced. Other devices pick the change up within 5 s." },
-      { f: "LS", to: "PR", t: "call", n: "refresh shared preparations", say: "The shared catalogue of prepared readings is refreshed too.", code: [SRC + "App.tsx:42", SRC + "engine/preparation.ts:48"] },
+      { f: "LS", to: "PR", t: "call", n: "refresh shared preparations", say: "The shared catalogue of prepared readings is refreshed too.", code: [SRC + "App.tsx:52", SRC + "engine/preparation.ts:48"] },
       { f: "PR", to: "SV", t: "call", n: "GET /api/preparations", d: "10 s timeout.", code: ["apps/web/vite.prepare.ts:267"] },
       { f: "SV", to: "PR", t: "ret", n: "available · device-only keys" },
       { op: "opt", id: "upload", g: "this device holds clips the server lacks", rows: [
