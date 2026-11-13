@@ -110,9 +110,8 @@ test.describe("touch phone", () => {
     }
   });
 
-  test("the page never zooms and shows no scroll indicators", async ({ page }) => {
+  test("scroll containers show no scroll indicators", async ({ page }) => {
     await page.goto("/studio/design");
-    await expect(page.locator('meta[name="viewport"]')).toHaveAttribute("content", /maximum-scale=1\b.*user-scalable=no/);
     const scroller = page.locator('[data-screen="studio"]');
     await expect(scroller).toHaveCSS("scrollbar-width", "none");
   });

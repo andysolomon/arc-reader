@@ -15,9 +15,8 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
-/* No double-tap zoom on repeated taps (play, skip). The viewport tag (index.html) turns off
-   pinch and focus zoom too: the iOS app's web view obeys it, so the page always stays at 100%.
-   iOS Safari still allows pinch zoom for accessibility. */
+/* No double-tap zoom on repeated taps (play, skip). The iOS app also turns off pinch and
+   focus zoom (lockZoom in apps/web/src/lib/native.ts); browsers keep pinch zoom. */
 * {
   touch-action: manipulation;
 }
