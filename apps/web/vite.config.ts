@@ -55,7 +55,7 @@ export default defineConfig(({ mode }) => {
           params: { title: "title", text: "text", url: "url" },
         },
         shortcuts: [
-          { name: "Compose", url: "/", description: "Paste something to listen to" },
+          { name: "Compose", url: "/compose", description: "Paste something to listen to" },
           { name: "Library", url: "/library" },
         ],
       },

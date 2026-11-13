@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { MotionConfig } from "framer-motion";
 import { applyTheme, getTheme } from "@readaloud/tokens";
@@ -30,6 +30,16 @@ function ThemeSync() {
   return null;
 }
 
+/**
+ * The front door. A phone opens on its documents; a wider screen already lists them in the
+ * sidebar, so it opens ready to add one. Decided once per visit, so turning or resizing the
+ * screen never swaps the page under you.
+ */
+function Home() {
+  const [phone] = useState(() => window.matchMedia("(max-width: 639.98px)").matches);
+  return phone ? <LibraryPage /> : <Compose />;
+}
+
 export default function App() {
   useEffect(() => {
     void useLibrary.getState().refresh();
@@ -51,7 +61,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<Shell />}>
-            <Route index element={<Compose />} />
+            <Route index element={<Home />} />
+            <Route path="/compose" element={<Compose />} />
             <Route path="/read/new" element={<ReadNew />} />
             <Route path="/read/:id" element={<Reader />} />
             <Route path="/library" element={<LibraryPage />} />

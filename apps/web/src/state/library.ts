@@ -25,6 +25,9 @@ export interface LibraryItem {
   prepared: PreparedVoice[];
 }
 
+/** Everything a researcher might remember a document by, lower-cased for matching. */
+export const searchable = ({ rec }: LibraryItem) => [rec.title, rec.domain, rec.book?.title, rec.category?.name, ...Object.values(rec.meta ?? {})].join("\n").toLowerCase();
+
 interface LibraryState {
   items: LibraryItem[];
   loaded: boolean;

@@ -25,7 +25,14 @@ async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null
     database.close();
   }, voiceIds);
   await page.reload();
-  await expect(page.getByRole("checkbox", { name: /Select .* document/ })).toHaveCount(voiceIds.length);
+  await expect(page.locator('[data-screen="library"] li').getByRole("button", { name: / document$/ })).toHaveCount(voiceIds.length);
+}
+
+/** Rows carry no checkboxes: Select starts picking, and the bar that appears picks every document shown. */
+async function selectAll(page: Page, name = "Select all") {
+  const selection = page.getByRole("toolbar", { name: "Selection" });
+  if (!(await selection.isVisible())) await page.getByRole("button", { name: "Select", exact: true }).click();
+  await selection.getByRole("button", { name, exact: true }).click();
 }
 
 test("Library identifies voice services in both views even outside the available catalogue", async ({ page }) => {
@@ -44,7 +51,7 @@ test("Library identifies voice services in both views even outside the available
   }
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  // On a phone the text starts beside the checkbox instead of behind a wide gutter.
+  // On a phone the text starts beside the source mark instead of behind a wide gutter.
   await page.getByRole("button", { name: "List", exact: true }).click();
   const title = page.getByRole("button", { name: "First document", exact: true });
   const row = library.getByRole("listitem").filter({ has: title });
@@ -62,7 +69,7 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   });
   let requests = 0;
   page.on("request", (request) => { if (/\/api\/preparations\/[^/]+\/audio\//.test(request.url())) requests++; });
-  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
   await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).toBeChecked();
@@ -70,6 +77,8 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   expect(accessibility.violations).toEqual([]);
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
+  // Queueing ends the selection, so a press opens a document again.
+  await expect(page.getByRole("toolbar", { name: "Selection" })).toHaveCount(0);
   try {
     await expect.poll(() => submissions).toBe(4);
     await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("0 active · 4 queued");
@@ -83,8 +92,14 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   expect(requests).toBe(8);
   await expect(page.getByRole("region", { name: "Player", exact: true })).toBeHidden();
 
+  // Selecting ends with the page; while it is on, a press picks a document instead of opening it.
   await page.reload();
-  await page.getByRole("checkbox", { name: "Select First document", exact: true }).check();
+  await expect(page.locator('[data-screen="library"]').getByRole("checkbox")).toHaveCount(0);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const first = page.getByRole("button", { name: "First document", exact: true });
+  await first.click();
+  await expect(first).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("toolbar", { name: "Selection" })).toContainText("1 selected");
   await page.getByRole("button", { name: "Prepare selected" }).click();
   // Voices with complete audio are not preselected.
   await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).not.toBeChecked();
@@ -93,7 +108,7 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   await expect(dialog.getByRole("button", { name: "Prepare 0 readings" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 
-  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
   await expect(dialog.getByRole("checkbox", { name: "Bella VoiceStudio" })).not.toBeChecked();
   await dialog.getByRole("checkbox", { name: "Bella VoiceStudio" }).check();
@@ -132,7 +147,7 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     await route.continue();
   });
   try {
-    await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+    await selectAll(page);
     await page.getByRole("button", { name: "Prepare selected" }).click();
     await page.getByRole("dialog", { name: "Prepare audio", exact: true }).getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
     await expect(page.getByRole("img", { name: "Bella: 0% generated · 0/2 passages · Queued", exact: true })).toBeVisible();
@@ -179,7 +194,7 @@ test("shows one reading per machine, waiting readings, and restores their assign
     if (route.request().method() === "DELETE") job.state = "cancelled";
     await route.fulfill({ json: job });
   });
-  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
   await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
@@ -201,7 +216,7 @@ test("selects filtered documents and offers explicit paid voice preparation", as
   await seedLibrary(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("textbox", { name: "Search library" }).fill("First");
-  await page.getByRole("checkbox", { name: "Select visible" }).check();
+  await selectAll(page, "Select visible");
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
   await expect(dialog).toContainText("First document");
@@ -220,7 +235,7 @@ test("selects filtered documents and offers explicit paid voice preparation", as
 
 test("the player only offers voices with prepared audio for the open document", async ({ page }) => {
   await seedLibrary(page, [null]);
-  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
   const dialog = page.getByRole("dialog", { name: "Prepare audio", exact: true });
   await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();

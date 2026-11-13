@@ -201,6 +201,25 @@ export function shelves(items: LibraryItem[]): Map<string, Shelf> {
   return out;
 }
 
+/** One line of a document list: a document, or a book standing in for its chapters. */
+export type LibraryEntry = { kind: "doc"; it: LibraryItem } | { kind: "book"; shelf: Shelf; duration: number };
+
+/** Two or more chapters of a book share one entry, placed where its newest chapter would be. */
+export function entriesOf(items: LibraryItem[]): LibraryEntry[] {
+  const books = shelves(items);
+  const placed = new Set<string>();
+  const list: LibraryEntry[] = [];
+  for (const it of items) {
+    const shelf = it.rec.book ? books.get(it.rec.book.id) : undefined;
+    if (!shelf || shelf.items.length < 2) list.push({ kind: "doc", it });
+    else if (!placed.has(shelf.id)) {
+      placed.add(shelf.id);
+      list.push({ kind: "book", shelf, duration: shelf.items.reduce((sum, chapter) => sum + chapter.duration, 0) });
+    }
+  }
+  return list;
+}
+
 /** The chapters before and after this one that are in the library. */
 export function neighbours(items: LibraryItem[], rec: DocRecord): { previous?: LibraryItem; next?: LibraryItem } {
   if (!rec.book) return {};

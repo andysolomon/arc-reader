@@ -26,14 +26,71 @@ test("tablet: collapsed rail and floating listening dock", async ({ page }) => {
   await expect(player).toContainText("The quick brown fox");
 });
 
-test("desktop: 216px rail and a 760px capsule", async ({ page }) => {
+test("desktop: 300px sidebar and a 760px capsule", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await composeAndListen(page);
   const nav = page.getByRole("navigation", { name: "Primary" });
   const box = await nav.boundingBox();
-  expect(box!.width).toBe(216);
+  expect(box!.width).toBe(300);
   const pb = await page.getByRole("region", { name: "Player" }).boundingBox();
   expect(pb!.width).toBe(760);
+});
+
+test("phone: opens on the Library, with the other screens as icons and Compose on its own", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await composeAndListen(page);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
+  const nav = page.getByRole("navigation", { name: "Primary" });
+  await expect(nav.getByRole("link")).toHaveCount(6);
+  for (const name of ["Library", "Voices", "Studio", "Settings", "Linux client", "Compose"]) await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
+  // Icons only: the names are for assistive technology.
+  await expect(nav).toHaveText("");
+  await expect(nav.getByRole("link", { name: "Library", exact: true })).toHaveAttribute("aria-current", "page");
+
+  // Back from a document returns to the documents, not to Compose.
+  await page.getByRole("button", { name: /quick brown fox/ }).click();
+  await page.waitForURL(/\/read\//);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
+
+  await nav.getByRole("link", { name: "Compose", exact: true }).click();
+  await expect(page).toHaveURL(/\/compose$/);
+  await expect(page.getByTestId("listen")).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Compose", exact: true })).toHaveAttribute("aria-current", "page");
+});
+
+test("desktop: the sidebar is the library, and a document opens beside it", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await composeAndListen(page);
+  await page.keyboard.press("Space"); // pause
+  const nav = page.getByRole("navigation", { name: "Primary" });
+  const documents = nav.getByRole("list", { name: "Documents" });
+  const entry = documents.getByRole("link", { name: /quick brown fox/ });
+  await expect(entry).toHaveAttribute("aria-current", "page");
+  // Every other screen is an icon on the sidebar's foot.
+  for (const name of ["Voices", "Studio", "Settings", "Linux client"]) await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
+
+  // The front door is Compose here: the documents are already alongside it.
+  await nav.getByRole("link", { name: "Compose", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("listen")).toBeVisible();
+  await expect(entry).not.toHaveAttribute("aria-current", "page");
+  await entry.click();
+  await page.waitForURL(/\/read\//);
+  await expect(page.getByRole("heading", { level: 1 }).first()).toContainText("quick brown fox");
+  await expect(entry).toHaveAttribute("aria-current", "page");
+
+  await nav.getByRole("textbox", { name: "Find a document" }).fill("no such document");
+  await expect(documents).toContainText("No document matches.");
+  await nav.getByRole("textbox", { name: "Find a document" }).fill("QUICK brown");
+  await expect(entry).toBeVisible();
+
+  // Collapsed, the sidebar is a column of icons with the Library among them.
+  await nav.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(documents).toHaveCount(0);
+  await nav.getByRole("link", { name: "Library", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
 });
 
 test.describe("touch phone", () => {

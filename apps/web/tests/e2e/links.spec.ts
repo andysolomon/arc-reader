@@ -11,7 +11,8 @@ const LINKED =
   "Start with the guide at https://example.com/guide before anything else. A second sentence gives the reader a moment. A third one keeps the voice busy for a while longer. The last sentence cites https://example.org/paper for the curious.";
 
 async function listen(page: import("@playwright/test").Page) {
-  await page.goto("/");
+  // A phone opens on the Library, so Compose is asked for by name.
+  await page.goto("/compose");
   await composeText(page, LINKED);
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);

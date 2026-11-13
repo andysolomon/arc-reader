@@ -20,7 +20,8 @@ for (const width of [390, 1440]) {
       if (request.url().endsWith("/v1/audio/speech")) spoken.push(request.postDataJSON().input);
       if (request.url().endsWith("/api/preparations")) spoken.push(...request.postDataJSON().requests.map((r: { text: string }) => r.text));
     });
-    await page.goto("/");
+    // A phone opens on the Library, so Compose is asked for by name.
+    await page.goto("/compose");
     await composeText(page, source);
     await page.getByTestId("listen").click();
     await page.waitForURL(/\/read\/[a-z0-9-]+$/);

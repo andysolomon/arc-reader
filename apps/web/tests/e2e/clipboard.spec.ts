@@ -96,5 +96,5 @@ test("repeated paste while fetching imports only one document", async ({ page })
   finishFetch();
   await expectReading(page);
   await page.getByRole("link", { name: "Library", exact: true }).click();
-  await expect(page.locator("li")).toHaveCount(1);
+  await expect(page.locator('[data-screen="library"] li')).toHaveCount(1);
 });

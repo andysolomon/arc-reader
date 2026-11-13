@@ -5,7 +5,8 @@ test("favorites a document, estimates a premium read, and has Jev judge it", asy
   await composeAndListen(page);
   await page.keyboard.press("Space"); // pause
   await page.goto("/library");
-  const row = page.getByRole("listitem").filter({ hasText: "quick brown fox" });
+  // The sidebar lists the document too; the Library's row is the one with the actions.
+  const row = page.locator('[data-screen="library"]').getByRole("listitem").filter({ hasText: "quick brown fox" });
   await row.hover();
   await row.getByRole("button", { name: "Favorite" }).click();
   await expect(row.getByRole("button", { name: "Favorite" })).toHaveAttribute("aria-pressed", "true");

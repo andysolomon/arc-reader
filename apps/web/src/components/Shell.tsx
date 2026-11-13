@@ -34,7 +34,8 @@ export function Shell() {
   const clipboard = useClipboardImportController(!isAuth);
   const showRail = !focus && !isAuth && bp !== "sm";
   const showTabs = !focus && !isAuth && bp === "sm";
-  const playerOffset = hasDoc && !isAuth ? (bp === "sm" ? 160 : 156) : 24;
+  // The toast clears whatever sits at the bottom: the player, and on a phone the bar of screens under it.
+  const playerOffset = isAuth ? 24 : bp === "sm" ? (hasDoc ? 184 : 96) : hasDoc ? 156 : 24;
 
   return (
     <ClipboardImportContext.Provider value={clipboard}>
