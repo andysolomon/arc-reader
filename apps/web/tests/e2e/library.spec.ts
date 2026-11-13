@@ -195,6 +195,88 @@ test("shows one reading per machine, waiting readings, and restores their assign
   await expect(queue.getByText("Cancelled · saved audio kept", { exact: true })).toHaveCount(4);
 });
 
+test("a voice opens its preparation details, where a waiting reading is moved up or started now", async ({ page }) => {
+  await seedLibrary(page, [null]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  interface Job { id: string; state: string; done: number; total: number; queued: boolean; worker?: string; waitingFor?: string; ahead?: number; busy?: boolean; prioritized?: boolean }
+  const jobs = new Map<string, Job>();
+  const moves: boolean[] = [];
+  await page.route("**/api/preparations", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const voice = route.request().postDataJSON().requests[0].voice as string;
+    // Bella has the Mac; Jasper waits behind a reading from another device.
+    const job: Job = voice === "expr-voice-2-f"
+      ? { id: "00000000-0000-0000-0000-000000000001", state: "running", done: 1, total: 2, queued: false, worker: "Mac" }
+      : { id: "00000000-0000-0000-0000-000000000002", state: "running", done: 0, total: 2, queued: true, waitingFor: "Mac", ahead: 1, busy: true };
+    jobs.set(voice, job);
+    await route.fulfill({ status: 202, json: job });
+  });
+  await page.route("**/api/preparations/*", async (route) => {
+    const job = [...jobs.values()].find((job) => route.request().url().endsWith(job.id));
+    if (!job) return route.continue();
+    if (route.request().method() === "DELETE") {
+      job.state = "cancelled";
+      // The machine it held is free for whoever is waiting.
+      for (const other of jobs.values()) other.busy = undefined;
+    }
+    await route.fulfill({ json: job });
+  });
+  await page.route("**/api/preparations/*/priority", async (route) => {
+    const { now } = route.request().postDataJSON() as { now: boolean };
+    moves.push(now);
+    const [bella, jasper] = [jobs.get("expr-voice-2-f")!, jobs.get("expr-voice-2-m")!];
+    if (now) {
+      Object.assign(bella, { queued: true, worker: undefined, waitingFor: "Mac", ahead: 0, busy: true });
+      Object.assign(jasper, { queued: false, worker: "Mac", waitingFor: undefined, ahead: undefined, busy: undefined, prioritized: undefined });
+    } else Object.assign(jasper, { ahead: 0, prioritized: true });
+    await route.fulfill({ json: jasper });
+  });
+  await page.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await page.getByRole("button", { name: "Prepare selected" }).click();
+  const prepare = page.getByRole("dialog", { name: "Prepare audio", exact: true });
+  await prepare.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
+  await prepare.getByRole("button", { name: "Prepare 2 readings" }).click();
+  const queue = page.getByRole("region", { name: "Audio preparation queue" });
+  await expect(queue).toContainText("1 active · 1 queued");
+
+  const voices = page.getByRole("group", { name: "Prepared audio" });
+  await voices.getByRole("button", { name: /Jasper/ }).click();
+  const details = page.getByRole("dialog", { name: "Audio preparation", exact: true });
+  await expect(details).toContainText("First document");
+  await expect(details).toContainText("Queued · waiting for Mac");
+  await expect(details).toContainText("1 reading ahead");
+  await expect(details).toContainText("0 of 2 passages");
+  await expect(details).toContainText("0% saved");
+  await expect(details).toContainText("Extra prepared voice");
+  const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  expect(accessibility.violations).toEqual([]);
+  expect(await details.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  await details.getByRole("button", { name: "Prepare next" }).click();
+  await expect(details).toContainText("Next, after the reading in progress · moved to the front");
+  await expect(details.getByRole("button", { name: "Prepare next" })).toBeDisabled();
+  await details.getByRole("button", { name: "Start now" }).click();
+  await expect(details).toContainText("Preparing on Mac");
+  await expect(details.getByRole("button", { name: "Prepare next" })).toHaveCount(0);
+  expect(moves).toEqual([false, true]);
+  // The reading that gave way is waiting again, and says so wherever it is shown.
+  await expect(queue).toContainText("Queued · waiting for Mac");
+
+  await details.getByRole("button", { name: "Cancel preparation" }).click();
+  await expect(details).toContainText("Cancelled · saved audio kept");
+  await expect(details.getByRole("button", { name: "Prepare audio" })).toBeVisible();
+  await details.getByRole("button", { name: "Close" }).click();
+  await expect(details).toHaveCount(0);
+
+  // The queue opens the same details, and they lead on to the other voices.
+  await queue.getByRole("button", { name: "First document Bella" }).click();
+  await expect(details.getByText("Reading voice", { exact: true })).toBeVisible();
+  await expect(details).toContainText("Next in line");
+  await details.getByRole("button", { name: "More voices…" }).click();
+  await expect(details).toHaveCount(0);
+  await expect(prepare).toContainText("First document");
+});
+
 test("selects filtered documents and offers explicit paid voice preparation", async ({ page }) => {
   await seedLibrary(page);
   await page.setViewportSize({ width: 390, height: 844 });
