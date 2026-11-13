@@ -25,7 +25,10 @@ async function mockStudio(page: Page, extraProfiles: MockProfile[] = []) {
     else if (/^\/profiles\/[^/]+\/audio$/.test(path) && req.method() === "PUT") { const profile = profiles.find((p) => p.id === path.split("/")[2]); if (!profile) return route.fulfill({ status: 404, json: { detail: "That voice profile doesn't exist." } }); profile.ref_audio_path = `${profile.id}-9f8e7d6c.webm`; if (req.postData()?.includes('name="name"')) profile.name = "Renamed narrator"; body = profile; }
     else if (/^\/profiles\/[^/]+$/.test(path) && req.method() === "GET") { const profile = profiles.find((p) => p.id === path.split("/")[2]); if (!profile) return route.fulfill({ status: 404, json: { detail: "That voice profile doesn't exist." } }); body = profile; }
     else if (path.startsWith("/profiles/") && req.method() === "DELETE") { const id = path.slice("/profiles/".length); const at = profiles.findIndex((p) => p.id === id); if (at < 0) return route.fulfill({ status: 404, json: { detail: "Profile not found" } }); profiles.splice(at, 1); body = { deleted: id }; }
-    else if (path === "/design/describe") body = { attrs: { Gender: "female", Pitch: "low pitch" }, instruct: "female, low pitch", unmatched: ["raspy"] };
+    // Like VoiceStudio: the full description matches two settings and leaves the clause list empty because every clause had a match; a lone leftover word matches nothing.
+    else if (path === "/design/describe") body = JSON.parse(req.postData() || "{}").description?.includes("low-pitched")
+      ? { attrs: { Gender: "female", Age: "Auto", Pitch: "low pitch", Style: "Auto", EnglishAccent: "Auto", ChineseDialect: "Auto" }, instruct: "female, low pitch", matched: [{ category: "Gender", token: "female", phrase: "woman" }, { category: "Pitch", token: "low pitch", phrase: "low-pitched" }], unmatched: [] }
+      : { attrs: { Gender: "Auto", Age: "Auto", Pitch: "Auto", Style: "Auto", EnglishAccent: "Auto", ChineseDialect: "Auto" }, instruct: "", matched: [], unmatched: ["raspy"] };
     else if (path === "/archetypes") body = { total: 1, items: [{ id: "librarian", name: "The Librarian", language: "English", use_case: "narration", instruct: "female, low pitch, british accent" }] };
     else if (path.endsWith("/preview/state")) body = { source: "rendering", message: "Rendering" };
     else if (path === "/archetypes/librarian/use") { if (!profiles.some((p) => p.id === LIBRARIAN_PROFILE.id)) profiles.push({ ...LIBRARIAN_PROFILE }); body = { profile_id: LIBRARIAN_PROFILE.id, name: LIBRARIAN_PROFILE.name }; }
@@ -58,14 +61,19 @@ test("clones an uploaded reference and reloads saved voices", async ({ page }) =
   expect(call?.body).toContain("clone");
 });
 
-test("designs only recognized traits and shows unsupported words", async ({ page }) => {
+test("designs only recognized traits, shows every setting, and lists ignored words", async ({ page }) => {
   const calls = await mockStudio(page);
   await page.goto("/studio/design");
   await page.getByLabel("Voice name", { exact: true }).fill("New voice");
   await page.getByLabel("Describe your voice").fill("A low-pitched raspy woman");
   await expect(page.getByRole("button", { name: "Save voice" })).toBeDisabled();
   await page.getByRole("button", { name: "Interpret description" }).click();
-  await expect(page.getByText("Not supported by this model: raspy")).toBeVisible();
+  const summary = page.getByRole("region", { name: "How VoiceStudio read your description" });
+  await expect(summary.getByText("Ignored: “raspy”")).toBeVisible();
+  await expect(summary.getByText("Female · from “woman”")).toBeVisible();
+  await expect(summary.getByText("Low pitch · from “low-pitched”")).toBeVisible();
+  await expect(summary.getByText("Not set, so the model picks.")).toHaveCount(2); // age and accent
+  await expect(summary.getByRole("link", { name: "clone a recording" })).toHaveAttribute("href", "/studio/clone");
   await page.getByRole("button", { name: "Save voice" }).click();
   await expect(page.getByRole("link", { name: "Choose New voice in Voices" })).toBeVisible();
   expect(calls.find((c) => c.path === "/profiles" && c.body)?.body).toContain('name="vd_states"');

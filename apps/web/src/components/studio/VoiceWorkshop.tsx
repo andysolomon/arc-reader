@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@readaloud/ui";
 import { useVoices } from "../../state/voices";
 import { studioJson, jsonBody, type Design, type Profile } from "../../lib/studio";
+import { DESIGN_SETTINGS, explainDesign, type DesignExplanation } from "../../lib/voiceDesign";
 import { Field, ErrorNotice, Recorder, LocalAudio, SavedVoiceAvatar, fieldClass, panelClass, useOperation } from "./shared";
 
 export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
@@ -10,7 +11,7 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
   const [file, setFile] = useState<File | null>(null);
   const [reference, setReference] = useState("");
   const [description, setDescription] = useState("");
-  const [design, setDesign] = useState<Design | null>(null);
+  const [design, setDesign] = useState<{ result: Design; explanation: DesignExplanation } | null>(null);
   const [saved, setSaved] = useState<Profile | null>(null);
   const op = useOperation();
   const save = () => op.run(async (signal) => {
@@ -21,7 +22,7 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
     body.set("name", name.trim()); body.set("kind", mode); body.set("language", "Auto");
     body.set("ref_text", reference.trim());
     if (mode === "clone" && file) body.set("ref_audio", file);
-    if (mode === "design" && design) { body.set("vd_states", JSON.stringify(design.attrs)); body.set("instruct", design.instruct); body.set("seed", "42"); }
+    if (mode === "design" && design) { body.set("vd_states", JSON.stringify(design.result.attrs)); body.set("instruct", design.result.instruct); body.set("seed", "42"); }
     const result = await studioJson<Profile>("/profiles", { method: "POST", body, signal });
     setSaved(result); await useVoices.getState().load();
     op.setStatus(`${result.name} saved to Voices.`);
@@ -37,12 +38,45 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
       <LocalAudio file={file} />
       <Field label="Words spoken in the sample (optional)"><textarea className={fieldClass} rows={3} value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Leave blank to transcribe automatically." /></Field>
     </> : <>
-      <Field label="Describe your voice"><textarea className={fieldClass} rows={4} maxLength={2000} value={description} onChange={(e) => { setDescription(e.target.value); setDesign(null); setSaved(null); }} placeholder="A middle-aged British woman with a low pitch, speaking softly." /></Field>
-      <Button className="self-start" disabled={!description.trim()} loading={op.busy} onClick={() => void op.run(async (signal) => { setDesign(await studioJson<Design>("/design/describe", { ...jsonBody({ description }), signal })); setSaved(null); })}>Interpret description</Button>
-      {design && <div className="rounded-control bg-bg3 p-4 text-sm"><p>{design.instruct || "Neutral voice (automatic attributes)"}</p>{design.unmatched.length > 0 && <p className="mt-2 text-fg2">Not supported by this model: {design.unmatched.join(", ")}</p>}</div>}
+      <Field label="Describe your voice"><textarea className={fieldClass} rows={4} maxLength={2000} value={description} onChange={(e) => { setDescription(e.target.value); setDesign(null); setSaved(null); }} placeholder="A middle-aged British woman with a low pitch." /></Field>
+      <Button className="self-start" disabled={!description.trim()} loading={op.busy} onClick={() => void op.run(async (signal) => {
+        const describe = (text: string) => studioJson<Design>("/design/describe", { ...jsonBody({ description: text }), signal });
+        const result = await describe(description);
+        setDesign({ result, explanation: await explainDesign(description, result, describe) }); setSaved(null);
+      })}>Interpret description</Button>
+      {design && <DesignSummary design={design.result} explanation={design.explanation} />}
     </>}
     {/* Saving is final until something changes: a second press would create a duplicate voice on the server. */}
     <div className="flex flex-wrap items-center gap-3"><Button variant="primary" disabled={!!saved || !name.trim() || (mode === "clone" ? !file : !design)} loading={op.busy} onClick={() => void save()}>{saved ? "Saved" : "Save voice"}</Button>{saved && <span className="inline-flex items-center gap-2.5"><SavedVoiceAvatar id={saved.id} size={36} /><Link className="text-sm underline" to="/voices">Choose {saved.name} in Voices</Link></span>}</div>
     <p role="status" className="text-sm text-fg2">{op.status}</p><ErrorNotice error={op.error} />
   </div>;
+}
+
+const sentenceCase = (token: string) => token.charAt(0).toUpperCase() + token.slice(1);
+const quoted = (phrases: string[]) => phrases.map((p) => `“${p}”`).join(", ");
+
+/** All six settings the model accepts, flagging the ones left to chance, then everything it can't express. */
+function DesignSummary({ design, explanation }: { design: Design; explanation: DesignExplanation }) {
+  return <section aria-label="How VoiceStudio read your description" className="rounded-control bg-bg3 p-4 text-sm">
+    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+      {DESIGN_SETTINGS.map((setting) => {
+        const value = design.attrs[setting.key];
+        const set = !!value && value !== "Auto";
+        const heard = explanation.heard[setting.key] ?? [];
+        return <div key={setting.key} className="contents">
+          <dt className="text-fg2">{setting.label}</dt>
+          <dd>{set
+            ? <>{sentenceCase(value)}{heard.length > 0 && <span className="text-fg2"> · from {quoted(heard)}</span>}</>
+            : setting.hint
+              ? <><span className="text-accent">Not set, so the model picks.</span> <span className="text-fg2">{setting.hint}</span></>
+              : <span className="text-fg2">{"unset" in setting ? setting.unset : "Auto"}</span>}
+          </dd>
+        </div>;
+      })}
+    </dl>
+    {explanation.ignored.length > 0 && <div className="mt-4 border-t border-line pt-3">
+      <p>Ignored: {quoted(explanation.ignored)}</p>
+      <p className="mt-1 text-fg2">Designed voices can only use the settings above. To capture a delivery or personality, <Link className="underline" to="/studio/clone">clone a recording</Link> of it instead.</p>
+    </div>}
+  </section>;
 }
