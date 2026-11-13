@@ -47,7 +47,7 @@ export function BookOffer({ record }: { record: DocRecord }) {
       // The contents page has done its job: read the book from chapter one instead.
       async onFirst(first) {
         const reading = usePlayer.getState().doc?.id === record.id;
-        if (reading && window.location.pathname.endsWith(`/read/${record.id}`)) await openDocument(first, navigate, { autoplay: true, resume: false, prepare: true, replace: true });
+        if (reading && window.location.pathname.endsWith(`/read/${record.id}`)) await openDocument(first, navigate, { autoplay: true, resume: false, replace: true });
         else if (reading) usePlayer.getState().close();
         await useLibrary.getState().remove(record.id);
       },
@@ -102,7 +102,7 @@ export const chapterLabel = (rec: DocRecord) => rec.book ? `${partNames(rec.book
 /** Open a chapter where it was left, or from the top once it has been finished. */
 export function useOpenChapter() {
   const navigate = useNavigate();
-  return (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: true, resume: !finished(it), prepare: true });
+  return (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: true, resume: !finished(it) });
 }
 
 /** The chapters either side of this one, at the foot of the text. */
