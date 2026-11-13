@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Chip, Dialog, Input, VoiceCard, VoiceSourceBadge, voiceAvatarIdentity, type VoiceCardAction } from "@readaloud/ui";
 import type { VoiceSource } from "@readaloud/tokens";
-import { Mic, Search, Trash2, Undo2, ImagePlus } from "lucide-react";
+import { ImagePlus, LayoutGrid, Mic, Search, Trash2, Undo2, WandSparkles } from "lucide-react";
 import { useAvatars } from "../state/avatars";
 import { useVoices, getVoice, voiceLang, isLocalVoice, defaultVoiceId } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -16,13 +16,15 @@ import { ApiBusy, ApiRejected, ApiUnreachable } from "../engine/types";
 import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource, type Voice } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
-import { ClearFilters, FilterSelect } from "../components/Filters";
+import { ClearFilters, FilterSelect, VOICE_GRID } from "../components/Filters";
 
 // Filter chips follow the same fixed order as the sections below.
 const sourceRank = (source: string) => { const i = Object.keys(SOURCE_INFO).indexOf(source); return i < 0 ? Infinity : i; };
 const TYPE_LABELS: Record<string, string> = { "built-in": "Built-in", cloned: "Cloned", designed: "Designed" };
 
 const PREVIEW_MS = 3000;
+
+const PILL_LINK = "inline-flex h-[34px] items-center gap-1.5 rounded-pill border border-line bg-bg2 px-3.5 text-[13px] text-fg hover:bg-bg3";
 
 /** How much of the document a voice has saved audio for; silent when complete. */
 function preparedNote(fraction: number | undefined) {
@@ -240,19 +242,23 @@ export function VoicesPage() {
   return (
     <section data-screen="voices" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[880px] flex-col gap-5">
-        <div className="flex flex-wrap items-baseline gap-4">
+        <header className="flex flex-col gap-1.5">
           <h1 className="m-0 font-serif text-[26px] font-medium">Voices</h1>
-          <span className="text-fg2">
+          <p className="m-0 text-fg2">
             {preparedOnly ? `Choosing a prepared voice for “${docTitle ?? "this document"}”. Only voices with audio saved for it are listed.` : forDoc ? `Choosing a voice for “${docTitle ?? "this document"}”.` : "Selected voice is remembered. Override per document from the player menu."}
-          </span>
-        </div>
+          </p>
+        </header>
         {fishError && (
           <div role="status" className="rounded-panel border border-line bg-bg2 p-4 text-[13px] text-fg2">
             Fish Audio voices could not refresh: {fishError}. Your other voices are still available.
             <button type="button" onClick={() => void reload()} className="ml-2 border-0 bg-transparent text-accent underline">Retry</button>
           </div>
         )}
-        <div className="flex flex-wrap gap-4 text-sm underline"><Link to="/studio/clone">Clone a voice</Link><Link to="/studio/design">Design a voice</Link><Link to="/studio/gallery">Browse designed voices</Link></div>
+        <nav aria-label="Make a voice" className="flex flex-wrap gap-2">
+          <Link to="/studio/clone" className={PILL_LINK}><Mic size={14} strokeWidth={1.5} aria-hidden />Clone a voice</Link>
+          <Link to="/studio/design" className={PILL_LINK}><WandSparkles size={14} strokeWidth={1.5} aria-hidden />Design a voice</Link>
+          <Link to="/studio/gallery" className={PILL_LINK}><LayoutGrid size={14} strokeWidth={1.5} aria-hidden />Browse designed voices</Link>
+        </nav>
         {(pendingAvatars > 0 || failedAvatars > 0) && <p role="status" className="m-0 text-sm text-fg2">
           {pendingAvatars > 0 && `Creating ${pendingAvatars} voice avatar${pendingAvatars === 1 ? "" : "s"}. Portraits appear automatically. `}
           {failedAvatars > 0 && `${failedAvatars} avatar${failedAvatars === 1 ? "" : "s"} could not be created. Use the image button on a voice to retry.`}
@@ -277,16 +283,16 @@ export function VoicesPage() {
         )}
         {!shown.length && pool.length > 0 && <p className="text-fg2">No voices match these filters.</p>}
         {groups.map(([source, voices]) => (
-          <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
+          <section key={source} aria-labelledby={`voices-${source}`} className="flex flex-col gap-3 rounded-panel border border-line bg-bg2 p-2 sm:p-4">
+            <div className="px-2 pt-2 sm:px-1 sm:pt-0">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                 <h2 id={`voices-${source}`} className="m-0 font-serif text-xl"><VoiceSourceBadge source={source} className="px-3 py-1 text-sm" /></h2>
-                {source === "VoiceStudio" && <span className="text-xs text-fg2">Free · on device · default service</span>}
+                <span className="text-xs text-fg2">{voices.length === 1 ? "1 voice" : `${voices.length} voices`}</span>
               </div>
-              {SOURCE_INFO[source] && <p className="mt-1 text-sm text-fg2">{SOURCE_INFO[source].description}</p>}
+              {SOURCE_INFO[source] && <p className="mt-2 text-sm text-fg2">{SOURCE_INFO[source].description}</p>}
               {voices.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="mt-1 text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
             </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
+            <div className={VOICE_GRID}>
               {voices.map((v) => (
                 <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} generating={previewing === v.id && generating} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)}
                   note={preparedOnly ? preparedNote(prepared.find((p) => p.voiceId === v.id)?.fraction) : undefined}

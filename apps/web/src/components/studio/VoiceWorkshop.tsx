@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@readaloud/ui";
 import { useVoices } from "../../state/voices";
 import { studioJson, jsonBody, type Design, type Profile } from "../../lib/studio";
-import { Field, ErrorNotice, Recorder, LocalAudio, fieldClass, panelClass, useOperation } from "./shared";
+import { Field, ErrorNotice, Recorder, LocalAudio, SavedVoiceAvatar, fieldClass, panelClass, useOperation } from "./shared";
 
 export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
   const [name, setName] = useState("");
@@ -42,7 +42,7 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
       {design && <div className="rounded-control bg-bg3 p-4 text-sm"><p>{design.instruct || "Neutral voice (automatic attributes)"}</p>{design.unmatched.length > 0 && <p className="mt-2 text-fg2">Not supported by this model: {design.unmatched.join(", ")}</p>}</div>}
     </>}
     {/* Saving is final until something changes: a second press would create a duplicate voice on the server. */}
-    <div className="flex flex-wrap items-center gap-3"><Button variant="primary" disabled={!!saved || !name.trim() || (mode === "clone" ? !file : !design)} loading={op.busy} onClick={() => void save()}>{saved ? "Saved" : "Save voice"}</Button>{saved && <Link className="text-sm underline" to="/voices">Choose {saved.name} in Voices</Link>}</div>
+    <div className="flex flex-wrap items-center gap-3"><Button variant="primary" disabled={!!saved || !name.trim() || (mode === "clone" ? !file : !design)} loading={op.busy} onClick={() => void save()}>{saved ? "Saved" : "Save voice"}</Button>{saved && <span className="inline-flex items-center gap-2.5"><SavedVoiceAvatar id={saved.id} size={36} /><Link className="text-sm underline" to="/voices">Choose {saved.name} in Voices</Link></span>}</div>
     <p role="status" className="text-sm text-fg2">{op.status}</p><ErrorNotice error={op.error} />
   </div>;
 }

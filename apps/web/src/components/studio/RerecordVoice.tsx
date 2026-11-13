@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@readaloud/ui";
 import { useVoices } from "../../state/voices";
 import { idPath, studioJson, type Profile } from "../../lib/studio";
-import { Field, ErrorNotice, Recorder, LocalAudio, fieldClass, panelClass, useOperation } from "./shared";
+import { Field, ErrorNotice, Recorder, LocalAudio, SavedVoiceAvatar, fieldClass, panelClass, useOperation } from "./shared";
 
 /** Replace a saved clone's reference recording. The voice keeps its id, so documents set to it keep it. */
 export function RerecordVoice({ id }: { id: string }) {
@@ -40,8 +40,8 @@ export function RerecordVoice({ id }: { id: string }) {
       <Link className="text-sm underline" to="/voices">Back to Voices</Link></div>;
   }
   return <div className={`${panelClass} flex flex-col gap-5`}>
-    <div><h2 className="font-serif text-xl">Re-record {profile.name}</h2>
-      <p className="mt-2 text-sm text-fg2">Upload or record a new clear, single-speaker sample. It replaces the current one; documents set to {profile.name} keep the voice and use the new recording. Audio prepared with the old recording is no longer used.</p></div>
+    <div><div className="flex items-center gap-3"><SavedVoiceAvatar id={id} /><h2 className="font-serif text-xl">Re-record {profile.name}</h2></div>
+      <p className="mt-3 text-sm text-fg2">Upload or record a new clear, single-speaker sample. It replaces the current one; documents set to {profile.name} keep the voice and use the new recording. Audio prepared with the old recording is no longer used.</p></div>
     <Field label="Voice name"><input className={fieldClass} value={name} onChange={(e) => { setName(e.target.value); changed(); }} maxLength={100} /></Field>
     <Field label="New reference audio"><input className={fieldClass} type="file" accept="audio/*" disabled={op.busy} onChange={(e) => { setFile(e.target.files?.[0] ?? null); changed(); }} /></Field>
     <Recorder disabled={op.busy} onRecorded={(audio) => { setFile(audio); changed(); }} />

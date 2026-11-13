@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, Play, Star } from "lucide-react";
-import { Button, VoiceAvatar, cn } from "@readaloud/ui";
+import { CheckCircle2, Plus, Search, Star } from "lucide-react";
+import { Button, Chip, Input, VoiceTile, cn, type PortraitVoice } from "@readaloud/ui";
+import { voiceServiceTextColor } from "@readaloud/tokens";
 import { useVoices } from "../../state/voices";
 import { galleryFavoriteKey, useGallery } from "../../state/gallery";
 import { usePreviews } from "../../state/previews";
 import { hueFor } from "../../data/voices";
 import { studioJson, studioUrl, idPath, type Archetype, type PreviewSource } from "../../lib/studio";
 import { GALLERY_FACETS, NO_GALLERY_FILTERS, activeFilterCount, galleryParams, matchesGallery, type GalleryFilters } from "../../lib/filters";
-import { ClearFilters, FilterSelect } from "../Filters";
+import { ClearFilters, FilterSelect, VOICE_GRID } from "../Filters";
 import { GalleryPreview } from "./GalleryPreview";
-import { Field, ErrorNotice, fieldClass, panelClass, useOperation } from "./shared";
+import { ErrorNotice, useOperation } from "./shared";
 
 const PAGE_SIZE = 24;
+
+/** A recipe keeps one portrait here, in the preview and once saved to Voices: all are keyed by its id. */
+const portraitOf = (voice: Archetype): PortraitVoice => ({ id: voice.id, archetype: voice.id, name: voice.name, description: voice.instruct, gender: voice.facets?.gender ?? voice.attrs?.Gender, age: voice.facets?.age ?? voice.attrs?.Age, hue: hueFor(voice.id), engine: "omnivoice" });
 
 export function VoiceGallery() {
   const [query, setQuery] = useState("");
@@ -89,51 +93,53 @@ export function VoiceGallery() {
     return () => ac.abort();
   }, [visibleItems]);
 
+  const previewed = preview && [...items, ...favoriteVoices].find((voice) => voice.id === preview.id);
+
   return <div className="flex flex-col gap-5">
-    <div><h2 className="font-serif text-xl">Designed voice gallery</h2><p className="mt-2 text-sm text-fg2">VoiceStudio’s original catalog. Preview a character, favorite it, or add its recipe to your saved voices. Added voices move to <Link to="/voices" className="underline">Voices</Link>, where you can send one back here.</p></div>
-    <div className="flex flex-wrap gap-2" role="group" aria-label="Gallery view">
-      <Button variant={favoritesOnly ? "secondary" : "primary"} aria-pressed={!favoritesOnly} onClick={() => { setFavoritesOnly(false); setPage(0); }}>All voices</Button>
-      <Button variant={favoritesOnly ? "primary" : "secondary"} aria-pressed={favoritesOnly} onClick={() => { setFavoritesOnly(true); setPage(0); }}><Star size={14} aria-hidden />Favorites ({favoriteVoices.length})</Button>
+    <div><h2 className="font-serif text-xl">Designed voice gallery</h2><p className="mt-2 text-sm text-fg2">VoiceStudio’s original catalog. Tap a portrait to hear a character, star it, or add its recipe to your saved voices. Added voices move to <Link to="/voices" className="underline">Voices</Link>, where you can send one back here.</p></div>
+    <div className="flex flex-col gap-3" role="search" aria-label="Find a designed voice">
+      <Input type="search" aria-label="Search designed voices" placeholder="Narrator, British, whisper…" leading={<Search size={16} aria-hidden />} wrapperClassName="h-10" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} />
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Gallery view">
+        <Chip size="sm" selected={!favoritesOnly} onClick={() => { setFavoritesOnly(false); setPage(0); }}>All voices</Chip>
+        <Chip size="sm" selected={favoritesOnly} onClick={() => { setFavoritesOnly(true); setPage(0); }}><Star size={14} aria-hidden />Favorites ({favoriteVoices.length})</Chip>
+        {!favoritesOnly && <Chip size="sm" selected={featured} className="ml-auto" onClick={() => { setFeatured(!featured); setPage(0); }}>Featured only</Chip>}
+      </div>
+      <fieldset className="m-0 grid grid-cols-2 gap-3 border-0 p-0 sm:grid-cols-4">
+        <legend className="sr-only">Filter designed voices</legend>
+        {GALLERY_FACETS.map((facet) => <FilterSelect key={facet.key} label={facet.label} any={facet.any} value={filters[facet.key]} options={facet.options} onChange={(value) => setFilter(facet.key, value)} />)}
+        <div className="flex items-end"><ClearFilters count={filterCount} onClear={() => { setFilters(NO_GALLERY_FILTERS); setPage(0); }} /></div>
+      </fieldset>
     </div>
-    <div className="flex flex-wrap items-end gap-4"><div className="min-w-0 flex-1"><Field label="Search designed voices"><input className={fieldClass} value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} placeholder="Narrator, British, whisper…" /></Field></div>{!favoritesOnly && <label className="flex items-center gap-2 py-3 text-sm"><input type="checkbox" checked={featured} onChange={(e) => { setFeatured(e.target.checked); setPage(0); }} />Featured only</label>}</div>
-    <fieldset className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <legend className="sr-only">Filter designed voices</legend>
-      {GALLERY_FACETS.map((facet) => <FilterSelect key={facet.key} label={facet.label} any={facet.any} value={filters[facet.key]} options={facet.options} onChange={(value) => setFilter(facet.key, value)} />)}
-      <div className="flex items-end"><ClearFilters count={filterCount} onClear={() => { setFilters(NO_GALLERY_FILTERS); setPage(0); }} /></div>
-    </fieldset>
-    {preview && <GalleryPreview id={preview.id} name={preview.name} />}
+    {preview && <GalleryPreview id={preview.id} name={preview.name} voice={previewed ? portraitOf(previewed) : undefined} />}
     <p role="status" className="text-sm text-fg2">{loading ? "Loading gallery…" : `${count} ${favoritesOnly ? "favorite voices" : "voices"}`}{hidden > 0 && ` · ${hidden} on this page already in Voices`}{op.status && ` · ${op.status}`}</p>
     <ErrorNotice error={loadError || op.error} />
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+    {visibleItems.length > 0 && <div className={`${VOICE_GRID} rounded-panel border border-line bg-bg2 p-2 sm:p-4`}>
       {visibleItems.map((voice) => {
         const favorite = !!favorites[galleryFavoriteKey(voice.id)];
         const source = sources[voice.id];
         // Session completion wins over a status check that started before it finished.
         const ready = !!generated[voice.id] || source === "cached" || source === "gallery";
         const generating = !ready && !!jobs[voice.id] && !jobs[voice.id].done;
-        return <article key={voice.id} aria-label={voice.name} className={`${panelClass} flex flex-col gap-3`}>
-          <div className="flex items-center justify-between gap-3">
-            <VoiceAvatar voice={{ id: voice.id, archetype: voice.id, name: voice.name, description: voice.instruct, gender: voice.facets?.gender ?? voice.attrs?.Gender, age: voice.facets?.age ?? voice.attrs?.Age, hue: hueFor(voice.id), engine: "omnivoice" }} size={52} />
-            <Button variant="ghost" className={cn("h-10 w-10 p-0", favorite && "text-accent")} aria-label={`${favorite ? "Unfavorite" : "Favorite"} ${voice.name}`} aria-pressed={favorite} title={favorite ? "Remove from favorites" : "Add to favorites"} onClick={() => toggleFavorite(voice)}><Star size={20} fill={favorite ? "currentColor" : "none"} aria-hidden /></Button>
+        return <VoiceTile key={voice.id} as="article" nameAs="h3" aria-label={voice.name} voice={portraitOf(voice)} source="VoiceStudio" selected={preview?.id === voice.id}
+          preview={{ label: ready ? "Play preview" : "Preview", state: generating ? "generating" : undefined, onClick: () => { op.setError(""); openPreview(voice.id, voice.name); } }}
+          corner={<button type="button" className={cn("grid size-9 place-items-center rounded-control border-0 bg-transparent hover:bg-bg3", favorite ? "text-accent" : "text-fg2 hover:text-fg")} aria-label={`${favorite ? "Unfavorite" : "Favorite"} ${voice.name}`} aria-pressed={favorite} title={favorite ? "Remove from favorites" : "Add to favorites"} onClick={() => toggleFavorite(voice)}><Star size={18} strokeWidth={1.5} fill={favorite ? "currentColor" : "none"} aria-hidden /></button>}>
+          <span className="inline-flex items-center gap-1 text-xs text-fg2" style={ready ? { color: voiceServiceTextColor("VoiceStudio") } : undefined}>
+            {ready && <CheckCircle2 size={14} aria-hidden />}
+            {ready ? "Preview ready" : generating ? "Generating preview…" : source === "rendering" ? "Not generated" : source === "no_model" ? "Model required" : source ? "Preview status unavailable" : "Checking preview…"}
+          </span>
+          <div className="flex max-w-full flex-col gap-0.5 text-[12px] text-fg2">
+            <p className="m-0 font-mono text-[11px] uppercase">{voice.use_case} · {voice.language}</p>
+            <p className="m-0 [overflow-wrap:anywhere]">{voice.instruct}</p>
           </div>
-          <h3 className="font-serif text-lg">{voice.name}</h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-pill border border-line px-2 py-0.5 text-xs font-medium text-fg2" aria-label="Voice source: VoiceStudio">VoiceStudio</span>
-            <span className={cn("inline-flex items-center gap-1 text-xs", ready ? "text-accent" : "text-fg2")}>
-              {ready && <CheckCircle2 size={14} aria-hidden />}
-              {ready ? "Preview ready" : generating ? "Generating preview…" : source === "rendering" ? "Not generated" : source === "no_model" ? "Model required" : source ? "Preview status unavailable" : "Checking preview…"}
-            </span>
-          </div>
-          <p className="text-xs uppercase tracking-wide text-fg2">{voice.use_case} · {voice.language}</p><p className="flex-1 text-sm text-fg2">{voice.instruct}</p>
-          <div className="flex flex-wrap gap-2"><Button onClick={() => { op.setError(""); openPreview(voice.id, voice.name); }}>{ready && <Play size={14} aria-hidden />}{ready ? "Play preview" : "Preview"}</Button><Button disabled={op.busy} onClick={() => void op.run(async (signal) => {
+          <button type="button" disabled={op.busy} className="mt-auto inline-flex h-[34px] w-full select-none items-center justify-center gap-1.5 rounded-pill border border-line bg-bg2 text-[13px] font-semibold text-fg hover:bg-bg3 disabled:pointer-events-none disabled:opacity-50" onClick={() => void op.run(async (signal) => {
             const result = await studioJson<{ profile_id: string; name: string }>(`/archetypes/${idPath(voice.id)}/use`, { method: "POST", signal });
             await useVoices.getState().load(); op.setStatus(`${result.name} added to Voices.`);
-          })}>Add to Voices</Button></div>
-        </article>;
+          })}><Plus size={14} strokeWidth={2} aria-hidden />Add to Voices</button>
+        </VoiceTile>;
       })}
-    </div>
+    </div>}
     {!loading && !loadError && count > 0 && visibleItems.length === 0 && <p className="text-fg2">Every voice on this page is already in Voices.</p>}
     {!loading && count === 0 && !loadError && <p className="text-fg2">{favoritesOnly && !favoriteVoices.length ? "No favorites yet. Star a voice in All voices to keep it here." : filterCount ? "No voices match these filters." : "No voices match that search."}</p>}
-    <div className="flex items-center gap-3"><Button disabled={currentPage === 0 || loading} onClick={() => setPage(currentPage - 1)}>Previous</Button><span className="text-sm text-fg2">Page {currentPage + 1}</span><Button disabled={(currentPage + 1) * PAGE_SIZE >= count || loading} onClick={() => setPage(currentPage + 1)}>Next</Button></div>
+    <div className="flex items-center justify-center gap-3"><Button pill disabled={currentPage === 0 || loading} onClick={() => setPage(currentPage - 1)}>Previous</Button><span className="text-sm text-fg2">Page {currentPage + 1}{count > PAGE_SIZE && ` of ${Math.ceil(count / PAGE_SIZE)}`}</span><Button pill disabled={(currentPage + 1) * PAGE_SIZE >= count || loading} onClick={() => setPage(currentPage + 1)}>Next</Button></div>
   </div>;
 }

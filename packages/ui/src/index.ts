@@ -28,6 +28,7 @@ export * from "./components/SentenceText";
 export * from "./components/Dialog";
 export * from "./components/Sheet";
 export * from "./components/Toast";
+export * from "./components/VoiceTile";
 export * from "./components/VoiceCard";
 export * from "./components/UsageMeter";
 export * from "./components/EmptyState";
