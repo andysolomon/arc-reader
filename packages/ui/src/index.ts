@@ -36,3 +36,5 @@ export * from "./components/Switch";
 export * from "./components/Segmented";
 export * from "./components/Input";
 export * from "./components/icons";
+
+export { voiceAvatarIdentity, hasCuratedPortrait, type PortraitVoice } from "./lib/voicePortraits";

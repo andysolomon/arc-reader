@@ -113,7 +113,7 @@ export function VoiceGallery() {
         const generating = !ready && !!jobs[voice.id] && !jobs[voice.id].done;
         return <article key={voice.id} aria-label={voice.name} className={`${panelClass} flex flex-col gap-3`}>
           <div className="flex items-center justify-between gap-3">
-            <VoiceAvatar voice={{ id: voice.id, archetype: voice.id, name: voice.name, description: voice.instruct, hue: hueFor(voice.id), engine: "omnivoice" }} size={52} />
+            <VoiceAvatar voice={{ id: voice.id, archetype: voice.id, name: voice.name, description: voice.instruct, gender: voice.facets?.gender ?? voice.attrs?.Gender, age: voice.facets?.age ?? voice.attrs?.Age, hue: hueFor(voice.id), engine: "omnivoice" }} size={52} />
             <Button variant="ghost" className={cn("h-10 w-10 p-0", favorite && "text-accent")} aria-label={`${favorite ? "Unfavorite" : "Favorite"} ${voice.name}`} aria-pressed={favorite} title={favorite ? "Remove from favorites" : "Add to favorites"} onClick={() => toggleFavorite(voice)}><Star size={20} fill={favorite ? "currentColor" : "none"} aria-hidden /></Button>
           </div>
           <h3 className="font-serif text-lg">{voice.name}</h3>
