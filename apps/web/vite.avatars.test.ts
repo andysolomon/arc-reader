@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { AvatarDirector } from "./vite.avatar-direction";
+import { LlmKeyStore } from "./vite.llm";
 import { AvatarStore, avatarMiddleware, avatarPrompt, parseAvatarVoice } from "./vite.avatars";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBPkAAAAASUVORK5CYII=", "base64");
@@ -105,6 +107,33 @@ describe("persistent voice avatar generation", () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
     expect(await store.image("../anything")).toBeNull();
     expect(JSON.stringify(await (await fetch(`${url}/`)).json())).not.toContain("secret");
+  });
+
+  it("persists Jev direction before drawing and reuses the completed portrait without reviewing again", async () => {
+    const jev = vi.fn(async () => Response.json({ model: "jev-test", answers: {
+      personality: { choice: "calm", confidence: 0.95 },
+      gender_metadata: { choice: "consistent", confidence: 0.95 },
+      age_metadata: { choice: "consistent", confidence: 0.95 },
+      design: { choice: "design_0", confidence: 0.95 },
+      ...Object.fromEntries([0, 1, 2, 3].map((i) => [`similar_${i}`, { noul: 0.1 }])),
+    } }));
+    const director = new AvatarDirector(new LlmKeyStore(directory, "jev-secret", "typesafe.json"), undefined, jev);
+    const upstream = vi.fn(async (_url: string, init?: RequestInit) => {
+      const records = await store.list();
+      expect(records.records[0].review?.status).toBe("reviewed");
+      expect(JSON.parse(init!.body as string).prompt).toContain('"expression":"calm"');
+      return imageResponse();
+    });
+    const store = new AvatarStore(directory, { OPENAI_API_KEY: "secret" }, upstream, director);
+    await store.ensure(voice);
+    const [record] = await terminal(store);
+    expect(record.status).toBe("ready");
+    expect(record.review?.model).toBe("jev-test");
+    const restored = new AvatarStore(directory, { OPENAI_API_KEY: "secret" }, upstream, director);
+    await restored.ensure(voice);
+    expect((await restored.list()).records[0].direction).toEqual(record.direction);
+    expect(jev).toHaveBeenCalledTimes(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
   });
 
   it("reports missing configuration without attempting a paid request", async () => {

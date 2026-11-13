@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { startAvatarSync, useAvatars } from "./avatars";
+import { startAvatarSync, useAvatars, avatarReviewNote } from "./avatars";
 import { useVoices } from "./voices";
 import { PRESET_VOICES, type Voice } from "../data/voices";
 
@@ -49,4 +49,11 @@ it("deduplicates manual and automatic requests in the same client", async () => 
   vi.stubGlobal("fetch", upstream);
   await Promise.all([useAvatars.getState().ensure(voice), useAvatars.getState().ensure(voice)]);
   expect(upstream).toHaveBeenCalledTimes(1);
+});
+
+it("shows metadata review notes without exposing internal service details", () => {
+  const entry = { identity: "profile:fresh", status: "ready" as const, review: { status: "reviewed" as const, warnings: ["gender-conflicting"] } };
+  expect(avatarReviewNote(entry)).toContain("conflicting");
+  expect(avatarReviewNote({ ...entry, review: { ...entry.review, warnings: ["gender-missing", "age-missing"] } })).toContain("age and gender");
+  expect(avatarReviewNote({ ...entry, review: { ...entry.review, warnings: [] } })).toBeUndefined();
 });

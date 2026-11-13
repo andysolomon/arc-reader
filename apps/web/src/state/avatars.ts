@@ -8,6 +8,7 @@ interface AvatarEntry {
   status: "queued" | "generating" | "ready" | "failed";
   url?: string;
   error?: string;
+  review?: { status: "reviewed" | "unavailable" | "not-configured"; warnings: string[] };
 }
 interface AvatarState {
   configured: boolean;
@@ -75,4 +76,14 @@ export function startAvatarSync() {
   document.addEventListener("visibilitychange", visible);
   void sync();
   return () => { stopped = true; unsubscribe(); clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
+}
+
+export function avatarReviewNote(entry: AvatarEntry | undefined): string | undefined {
+  const warnings = entry?.review?.warnings ?? [];
+  if (warnings.some((w) => w === "gender-conflicting" || w === "age-conflicting")) return "Voice description has conflicting age or gender details; explicit settings were kept.";
+  if (warnings.includes("similarity-review")) return "Avatar design may resemble another voice.";
+  if (warnings.includes("gender-missing") && warnings.includes("age-missing")) return "Voice description may be missing age and gender details.";
+  if (warnings.includes("gender-missing")) return "Voice description may be missing gender details.";
+  if (warnings.includes("age-missing")) return "Voice description may be missing age details.";
+  return undefined;
 }

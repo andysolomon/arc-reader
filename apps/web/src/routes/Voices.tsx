@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Chip, Dialog, Input, VoiceCard, VoiceSourceBadge, voiceAvatarIdentity, type VoiceCardAction } from "@readaloud/ui";
 import type { VoiceSource } from "@readaloud/tokens";
 import { ImagePlus, LayoutGrid, Mic, Search, Trash2, Undo2, WandSparkles } from "lucide-react";
-import { useAvatars } from "../state/avatars";
+import { useAvatars, avatarReviewNote } from "../state/avatars";
 import { useVoices, getVoice, voiceLang, isLocalVoice, defaultVoiceId } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
@@ -295,7 +295,7 @@ export function VoicesPage() {
             <div className={VOICE_GRID}>
               {voices.map((v) => (
                 <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} generating={previewing === v.id && generating} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)}
-                  note={preparedOnly ? preparedNote(prepared.find((p) => p.voiceId === v.id)?.fraction) : undefined}
+                  note={[preparedOnly ? preparedNote(prepared.find((p) => p.voiceId === v.id)?.fraction) : undefined, avatarReviewNote(avatarEntries[voiceAvatarIdentity(v)])].filter(Boolean).join(" · ") || undefined}
                   actions={actionsFor(v)} />
               ))}
             </div>
