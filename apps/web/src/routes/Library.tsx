@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate, useNavigationType } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X } from "lucide-react";
-import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
+import { Search, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, Speech, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X, CloudCheck, CloudOff, CloudUpload, RefreshCw, LoaderCircle } from "lucide-react";
+import { Button, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
 import { searchable, useLibrary, type LibraryItem } from "../state/library";
@@ -15,6 +15,7 @@ import { FOCUS_SEARCH_EVENT } from "../hooks/useShortcuts";
 import { useBreakpoint, useIsTouch } from "../hooks/useMedia";
 import { audioCache } from "../lib/db";
 import { syncLibrary, useLibrarySync } from "../lib/librarySync";
+import { ICON_ON, IconMenu, MenuAction, MenuDivider, MenuGroup, MenuOption } from "../components/IconMenu";
 import { PreparationDetails, PreparationQueue, PrepareDialog, PreparedStatus, type Reading } from "../components/LibraryPreparation";
 import { useCategories } from "../state/categories";
 import { useJev } from "../state/llm";
@@ -30,6 +31,8 @@ import { partNames } from "../lib/book";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
+
+const SORTS = [["created", "Newest first"], ["shortest", "Shortest first"], ["longest", "Longest first"]] as const;
 
 /** Books left open stay open while you go and read a chapter. */
 const openBooks = new Set<string>();
@@ -104,7 +107,14 @@ export function LibraryPage() {
   }, [selecting, prepareIds, stopSelecting]);
 
   const usedVoices = useMemo(() => Array.from(new Set(items.flatMap((i) => [i.rec.voice ?? defaultVoice, ...i.prepared.map((v) => v.voiceId)]))), [items, defaultVoice]);
-  const voiceName = (id: string) => voices.find((v) => v.id === id)?.name ?? items.flatMap((i) => i.prepared).find((v) => v.voiceId === id)?.name ?? id;
+  const voiceName = (id: string) => voices.find((v) => v.id === id)?.name ?? items.flatMap((i) => i.prepared).find((v) => v.voiceId === id)?.name ?? getVoice(id).name;
+  const sourceOf = (id: string) => voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id));
+  /** How many documents each voice reads or has prepared: what choosing it would show. */
+  const voiceCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const it of items) for (const id of new Set([it.rec.voice ?? defaultVoice, ...it.prepared.map((v) => v.voiceId)])) counts.set(id, (counts.get(id) ?? 0) + 1);
+    return counts;
+  }, [items, defaultVoice]);
   const categories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const it of items) if (it.rec.category) counts.set(it.rec.category.name, (counts.get(it.rec.category.name) ?? 0) + 1);
@@ -150,6 +160,19 @@ export function LibraryPage() {
   };
 
   const grid = bp === "md" || libView === "grid";
+  // Fingers get the full 44px; a pointer can do with less.
+  const size = touch ? 44 : 36;
+  const glyph = touch ? 20 : 18;
+  const SortIcon = libSort === "created" ? CalendarArrowDown : libSort === "longest" ? ArrowDownWideNarrow : ArrowDownNarrowWide;
+  const syncLabel = sync.status === "synced" ? "Shared library · Synced" : sync.status === "syncing" ? "Shared library · Syncing…" : sync.pending ? "Saved on this device · Waiting to sync" : "Server unavailable · Showing saved library";
+  const documentCount = sync.status === "synced" ? sync.documents : items.length;
+  /** The filters in force, each removable where the list starts. */
+  const narrowed = [
+    favoritesOnly && { name: "Favorites", label: <span className="inline-flex items-center gap-1.5"><Star size={12} strokeWidth={1.5} fill="currentColor" className="text-accent" aria-hidden />Favorites</span>, clear: () => setFavoritesOnly(false) },
+    vf !== null && { name: voiceName(vf), label: <VoiceServiceName source={sourceOf(vf)}>{voiceName(vf)}</VoiceServiceName>, clear: () => setVf(null) },
+    cf !== null && { name: cf === UNCATEGORIZED ? "Uncategorized" : cf, label: cf === UNCATEGORIZED ? "Uncategorized" : cf, clear: () => setCf(null) },
+  ].filter((filter) => !!filter);
+  const narrowing = narrowed.length > 0 || q.trim() !== "";
   const selectedItems = items.filter((it) => selected.has(it.rec.id));
   const allVisibleSelected = filtered.length > 0 && filtered.every((it) => selected.has(it.rec.id));
   const toggleSelected = (id: string) => {
@@ -198,74 +221,123 @@ export function LibraryPage() {
 
   return (
     <section ref={scrollRef} onScroll={(e) => { left.top = e.currentTarget.scrollTop; }} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
-      <div className="mx-auto flex max-w-[880px] flex-col gap-5">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="m-0 flex-1 font-serif text-[26px] font-medium">Library</h1>
-          <Input ref={searchRef} leading={<Search size={16} strokeWidth={1.5} aria-hidden />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search  /" aria-label="Search library" wrapperClassName="w-full sm:w-[240px]" />
-          <div className="flex overflow-hidden rounded-control border border-line bg-bg2" role="group" aria-label="Sort">
-            <IconButton label="Newest first" active={libSort === "created"} onClick={() => set("libSort", "created")} className="rounded-none">
-              <CalendarArrowDown size={16} strokeWidth={1.5} />
-            </IconButton>
-            {/* Duration flips between shortest and longest first on each press. */}
-            <IconButton label={libSort === "longest" ? "Longest first" : "Shortest first"} active={libSort !== "created"} onClick={() => set("libSort", libSort === "shortest" ? "longest" : "shortest")} className="rounded-none">
-              {libSort === "longest" ? <ArrowDownWideNarrow size={16} strokeWidth={1.5} /> : <ArrowDownNarrowWide size={16} strokeWidth={1.5} />}
-            </IconButton>
+      <div className="mx-auto flex max-w-[880px] flex-col gap-4">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex min-w-0 flex-1 items-baseline gap-2.5 sm:flex-none">
+            <h1 className="m-0 font-serif text-[26px] font-medium">Library</h1>
+            {loaded && items.length > 0 && (
+              <span className="truncate text-[13px] tabular-nums text-fg2" aria-label={sync.status === "synced" ? "Synced document count" : undefined}>
+                {narrowing ? `${filtered.length} of ${items.length}` : documentCount} {documentCount === 1 ? "document" : "documents"}
+              </span>
+            )}
           </div>
-          {bp !== "md" && (
-            <div className="flex overflow-hidden rounded-control border border-line bg-bg2" role="group" aria-label="View">
-              <IconButton label="List" active={!grid} onClick={() => set("libView", "list")} className="rounded-none">
-                <LayoutList size={16} strokeWidth={1.5} />
-              </IconButton>
-              <IconButton label="Cards" active={grid} onClick={() => set("libView", "grid")} className="rounded-none">
-                <LayoutGrid size={16} strokeWidth={1.5} />
-              </IconButton>
-            </div>
-          )}
-          {items.length > 0 && (
-            <Button aria-pressed={selecting} leading={<ListChecks size={16} strokeWidth={1.5} />} className={cn("h-[38px]", selecting && "!bg-bg3")} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
-              Select
-            </Button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-[13px] text-fg2" role="status" aria-label="Library sync">
-          <span>{sync.status === "synced" ? "Shared library · Synced" : sync.status === "syncing" ? "Shared library · Syncing…" : sync.pending ? "Saved on this device · Waiting to sync" : "Server unavailable · Showing saved library"}</span>
-          {sync.status === "synced" && <span aria-label="Synced document count">· {sync.documents} {sync.documents === 1 ? "document" : "documents"}</span>}
-          <button type="button" disabled={sync.status === "syncing"} className="ml-1.5 text-accent hover:text-fg disabled:opacity-50" onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}>{sync.status === "offline" ? "Retry sync" : "Sync now"}</button>
-          {sync.status === "offline" && sync.error && <span className="basis-full">{sync.error}</span>}
-        </div>
-        {favorites.length > 0 && (
-          <FavoritesBar count={favorites.length} selected={favoritesOnly} onSelect={setFavoritesOnly} estimates={[...estimates.values()]} />
-        )}
-        {items.length > 0 && (
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by voice">
-            <Chip size="sm" selected={vf === null} onClick={() => setVf(null)}>
-              All voices
-            </Chip>
-            {usedVoices.map((id) => (
-              <Chip key={id} size="sm" selected={vf === id} onClick={() => setVf(id)}>
-                <VoiceServiceName source={voiceSource(items.flatMap((it) => it.prepared).find((v) => v.voiceId === id) ?? getVoice(id))} inherit={vf === id}>{voiceName(id)}</VoiceServiceName>
-              </Chip>
-            ))}
-          </div>
-        )}
-        {(categories.length > 0 || (jevReady && uncategorized.length > 0)) && (
-          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by category">
-            {categories.length > 0 && (
-              <>
-                <Chip size="sm" selected={cf === null} onClick={() => setCf(null)}>All categories</Chip>
-                {categories.map(([name, count]) => (
-                  <Chip key={name} size="sm" selected={cf === name} onClick={() => setCf(name)}>{name} <span className="tabular-nums opacity-70">{count}</span></Chip>
-                ))}
-                {uncategorized.length > 0 && (
-                  <Chip size="sm" selected={cf === UNCATEGORIZED} onClick={() => setCf(UNCATEGORIZED)}>Uncategorized <span className="tabular-nums opacity-70">{uncategorized.length}</span></Chip>
+          {/* On a phone the search and its filters take the second line; from a tablet up everything shares one, and the search gives way first. */}
+          <div className="order-last -mr-2 flex min-w-0 basis-full items-center gap-1 sm:order-none sm:mr-0 sm:flex-1 sm:basis-0 sm:justify-end">
+            <Input ref={searchRef} leading={<Search size={16} strokeWidth={1.5} aria-hidden />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search  /" aria-label="Search library" wrapperClassName={cn("min-w-0 flex-1 sm:max-w-[240px]", touch && "h-10")} />
+            {items.length > 0 && (
+              <div className="flex gap-0.5" role="group" aria-label="Filters">
+                {(favorites.length > 0 || favoritesOnly) && (
+                  <IconButton label="Favorites" size={size} active={favoritesOnly} onClick={() => setFavoritesOnly(!favoritesOnly)} className={cn(favoritesOnly && ICON_ON)}>
+                    <Star size={glyph} strokeWidth={1.5} fill={favoritesOnly ? "currentColor" : "none"} />
+                  </IconButton>
                 )}
-              </>
+                <IconMenu label="Filter by voice" icon={<Speech size={glyph} strokeWidth={1.5} />} on={vf !== null} size={size} width={264}>
+                  {(close) => (
+                    <>
+                      <MenuOption checked={vf === null} onSelect={() => { setVf(null); close(); }}>All voices</MenuOption>
+                      {usedVoices.map((id) => (
+                        <MenuOption key={id} checked={vf === id} count={voiceCounts.get(id)} onSelect={() => { setVf(id); close(); }}>
+                          <VoiceServiceName source={sourceOf(id)}>{voiceName(id)}</VoiceServiceName>
+                        </MenuOption>
+                      ))}
+                    </>
+                  )}
+                </IconMenu>
+                {(categories.length > 0 || (jevReady && uncategorized.length > 0)) && (
+                  <IconMenu label="Filter by category" icon={filing ? <LoaderCircle size={glyph} strokeWidth={1.5} className="animate-spin motion-reduce:animate-none" /> : <Tag size={glyph} strokeWidth={1.5} />} on={cf !== null} size={size} width={288}>
+                    {(close) => (
+                      <>
+                        {categories.length > 0 && (
+                          <>
+                            <MenuOption checked={cf === null} onSelect={() => { setCf(null); close(); }}>All categories</MenuOption>
+                            {categories.map(([name, count]) => (
+                              <MenuOption key={name} checked={cf === name} count={count} onSelect={() => { setCf(name); close(); }}>{name}</MenuOption>
+                            ))}
+                            {uncategorized.length > 0 && (
+                              <MenuOption checked={cf === UNCATEGORIZED} count={uncategorized.length} onSelect={() => { setCf(UNCATEGORIZED); close(); }}>Uncategorized</MenuOption>
+                            )}
+                          </>
+                        )}
+                        {jevReady && uncategorized.length > 0 && (
+                          <>
+                            {categories.length > 0 && <MenuDivider />}
+                            <MenuAction icon={<Sparkles size={15} strokeWidth={1.5} />} disabled={filing} onSelect={() => { close(); void fileUncategorized(); }}>
+                              {filing ? "Jev is filing…" : `File ${uncategorized.length} uncategorized with Jev`}
+                            </MenuAction>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </IconMenu>
+                )}
+              </div>
             )}
-            {jevReady && uncategorized.length > 0 && (
-              <Button variant="ghost" leading={<Sparkles size={14} strokeWidth={1.5} />} loading={filing} onClick={() => void fileUncategorized()}>
-                File {uncategorized.length} uncategorized with Jev
-              </Button>
+          </div>
+          <div className="-mr-2 flex sm:mr-0" role="group" aria-label="Library tools">
+            <IconButton
+              label={sync.status === "offline" ? "Retry sync" : "Sync now"}
+              title={`${syncLabel} · ${sync.status === "offline" ? "Retry sync" : "Sync now"}`}
+              size={size}
+              disabled={sync.status === "syncing"}
+              className={cn(sync.status === "offline" && "text-danger")}
+              onClick={() => { void syncLibrary().then(() => usePreparation.getState().refreshShared()).then(() => refresh()); }}
+            >
+              {sync.status === "syncing" ? <RefreshCw size={glyph} strokeWidth={1.5} className="animate-spin motion-reduce:animate-none" />
+                : sync.status === "synced" ? <CloudCheck size={glyph} strokeWidth={1.5} />
+                : sync.pending ? <CloudUpload size={glyph} strokeWidth={1.5} /> : <CloudOff size={glyph} strokeWidth={1.5} />}
+            </IconButton>
+            <IconMenu label="Sort and view" icon={<SortIcon size={glyph} strokeWidth={1.5} />} size={size} width={216}>
+              {(close) => (
+                <>
+                  <MenuGroup label="Sort">
+                    {SORTS.map(([id, name]) => (
+                      <MenuOption key={id} checked={libSort === id} onSelect={() => { set("libSort", id); close(); }}>{name}</MenuOption>
+                    ))}
+                  </MenuGroup>
+                  {/* A tablet always shows cards. */}
+                  {bp !== "md" && (
+                    <>
+                      <MenuDivider />
+                      <MenuGroup label="View">
+                        <MenuOption checked={!grid} onSelect={() => { set("libView", "list"); close(); }}>List</MenuOption>
+                        <MenuOption checked={grid} onSelect={() => { set("libView", "grid"); close(); }}>Cards</MenuOption>
+                      </MenuGroup>
+                    </>
+                  )}
+                </>
+              )}
+            </IconMenu>
+            {items.length > 0 && (
+              <IconButton label="Select" size={size} active={selecting} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+                <ListChecks size={glyph} strokeWidth={1.5} />
+              </IconButton>
             )}
+          </div>
+        </header>
+        {/* Syncing well is the cloud icon's to say; trouble is spelled out. */}
+        <p role="status" aria-label="Library sync" className={cn("m-0 text-[13px] text-fg2", sync.status !== "offline" && "sr-only")}>
+          <span>{syncLabel}</span>
+          {sync.status === "offline" && sync.error && <span className="block">{sync.error}</span>}
+        </p>
+        {narrowed.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Active filters">
+            {narrowed.map((filter) => (
+              <button key={filter.name} type="button" aria-label={`Remove filter: ${filter.name}`} title="Remove filter" onClick={filter.clear} className="inline-flex h-8 max-w-full items-center gap-1 rounded-pill border border-line bg-bg2 pl-3 pr-2 text-[13px] text-fg transition-colors duration-fast hover:bg-bg3">
+                <span className="truncate">{filter.label}</span>
+                <X size={14} strokeWidth={1.5} className="shrink-0 text-fg2" aria-hidden />
+              </button>
+            ))}
+            {favoritesOnly && <FavoritesEstimate count={favorites.length} estimates={[...estimates.values()]} />}
           </div>
         )}
         {selecting && (
@@ -527,8 +599,8 @@ function PremiumBadge({ it, estimate }: { it: LibraryItem; estimate?: PremiumEst
   );
 }
 
-/** Favorites filter, with what a premium read of every favorite would cost per paid voice. */
-function FavoritesBar({ count, selected, onSelect, estimates }: { count: number; selected: boolean; onSelect: (on: boolean) => void; estimates: PremiumEstimate[] }) {
+/** What a premium read of every favorite would cost per paid voice, shown while the favorites are what is listed. */
+function FavoritesEstimate({ count, estimates }: { count: number; estimates: PremiumEstimate[] }) {
   const totals = new Map<string, { label: string; cost: number }>();
   for (const estimate of estimates) {
     for (const option of estimate.options) {
@@ -537,20 +609,11 @@ function FavoritesBar({ count, selected, onSelect, estimates }: { count: number;
       totals.set(option.id, total);
     }
   }
+  if (!totals.size) return null;
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <div className="flex gap-1.5" role="group" aria-label="Filter by favorites">
-        <Chip size="sm" selected={!selected} onClick={() => onSelect(false)}>All documents</Chip>
-        <Chip size="sm" selected={selected} onClick={() => onSelect(true)}>
-          <Star size={12} strokeWidth={1.5} fill="currentColor" aria-hidden /> Favorites <span className="tabular-nums opacity-70">{count}</span>
-        </Chip>
-      </div>
-      {totals.size > 0 && (
-        <span className="text-[12px] text-fg2" aria-label="Premium read estimate for all favorites">
-          Premium read of {count === 1 ? "your favorite" : `all ${count} favorites`}: {[...totals.values()].map((t) => `${t.label} ≈${formatUsd(t.cost)}`).join(" · ")}
-        </span>
-      )}
-    </div>
+    <span className="basis-full text-[12px] text-fg2" aria-label="Premium read estimate for all favorites">
+      Premium read of {count === 1 ? "your favorite" : `all ${count} favorites`}: {[...totals.values()].map((t) => `${t.label} ≈${formatUsd(t.cost)}`).join(" · ")}
+    </span>
   );
 }
 

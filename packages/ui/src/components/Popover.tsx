@@ -6,16 +6,18 @@ export interface PopoverProps extends HTMLAttributes<HTMLDivElement> {
   onClose: () => void;
   /** Horizontal alignment relative to the anchor wrapper */
   align?: "center" | "end" | "start";
-  /** Distance above the anchor (px) */
+  /** Which side of the anchor it opens on */
+  side?: "top" | "bottom";
+  /** Distance from the anchor's far edge (px) */
   offset?: number;
   children: ReactNode;
 }
 
 /**
- * Anchored overlay rendered above its anchor. Closes on outside click or Esc.
+ * Anchored overlay rendered above its anchor, or below it with `side="bottom"`. Closes on outside click or Esc.
  * Wrap the anchor and this component in a `relative` container.
  */
-export function Popover({ open, onClose, align = "center", offset = 46, className, style, children, ...rest }: PopoverProps) {
+export function Popover({ open, onClose, align = "center", side = "top", offset = 46, className, style, children, ...rest }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -50,7 +52,7 @@ export function Popover({ open, onClose, align = "center", offset = 46, classNam
         align === "start" && "left-0",
         className,
       )}
-      style={{ bottom: offset, ...style }}
+      style={{ [side === "top" ? "bottom" : "top"]: offset, ...style }}
       {...rest}
     >
       {children}

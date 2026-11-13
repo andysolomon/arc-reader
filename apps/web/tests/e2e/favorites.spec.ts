@@ -14,9 +14,11 @@ test("favorites a document, estimates a premium read, and has Jev judge it", asy
   await expect(row).toContainText("Free voice is fine");
   await expect(row.getByLabel(/Premium read about \$/)).toBeVisible();
 
-  const favorites = page.getByRole("group", { name: "Filter by favorites" });
+  // Listing only the favorites says what a premium read of them all would cost.
+  const favorites = page.getByRole("group", { name: "Filters" }).getByRole("button", { name: "Favorites", exact: true });
+  await favorites.click();
+  await expect(favorites).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("Premium read estimate for all favorites")).toContainText(/Fish Audio ≈\$\d/);
-  await favorites.getByRole("button", { name: /Favorites/ }).click();
   await expect(page.getByRole("button", { name: /quick brown fox/ })).toBeVisible();
 
   await page.getByRole("button", { name: /quick brown fox/ }).click();
@@ -31,5 +33,6 @@ test("favorites a document, estimates a premium read, and has Jev judge it", asy
   await details.getByRole("button", { name: "Favorited" }).click();
   await expect(details).toContainText("Favorite this to estimate a premium read");
   await page.goto("/library");
-  await expect(page.getByRole("group", { name: "Filter by favorites" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Filter by voice" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Favorites", exact: true })).toHaveCount(0);
 });

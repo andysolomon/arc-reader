@@ -36,3 +36,9 @@ export async function prepareFromPlayer(page: Page) {
   await page.getByRole("button", { name: "More", exact: true }).click();
   await page.getByRole("menuitem", { name: "Prepare audio", exact: true }).click();
 }
+
+/** The Library keeps its sort order and its list or cards view behind one icon. */
+export async function libraryOption(page: Page, name: "Newest first" | "Shortest first" | "Longest first" | "List" | "Cards") {
+  await page.getByRole("button", { name: "Sort and view", exact: true }).click();
+  await page.getByRole("menuitemradio", { name, exact: true }).click();
+}

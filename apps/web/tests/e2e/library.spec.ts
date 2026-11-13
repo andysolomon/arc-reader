@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
+import { libraryOption } from "./helpers";
 
 async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null]) {
   await page.goto("/library");
@@ -35,12 +36,50 @@ async function selectAll(page: Page, name = "Select all") {
   await selection.getByRole("button", { name, exact: true }).click();
 }
 
+test("filters are icons that open their choices, so a phone shows documents first", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedLibrary(page, [null, "alloy", "alloy", "local"]);
+  const library = page.locator('[data-screen="library"]');
+  const titles = library.locator("li").getByRole("button", { name: / document$/ });
+  // The title, search and every filter fit in two lines above the first document.
+  expect((await titles.first().boundingBox())!.y).toBeLessThan(180);
+  expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  const voice = page.getByRole("button", { name: "Filter by voice" });
+  await voice.click();
+  const menu = page.getByRole("menu", { name: "Filter by voice" });
+  await expect(menu.getByRole("menuitemradio", { name: "All voices" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { name: "All voices" })).toBeFocused();
+  // Arrow keys move through the choices, and each says how many documents it holds.
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitemradio", { name: "All voices" })).toBeFocused();
+  await menu.getByRole("menuitemradio", { name: /Alloy.*2$/ }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(titles).toHaveCount(2);
+  await expect(library).toContainText("2 of 4 documents");
+  await expect(voice).toHaveAttribute("data-on", "true");
+
+  // Escape puts the menu away and hands focus back to its icon.
+  await voice.click();
+  await expect(menu.getByRole("menuitemradio", { name: /Alloy/ })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(voice).toBeFocused();
+
+  // The filter in force is named where the list starts, and goes with a press.
+  await page.getByRole("group", { name: "Active filters" }).getByRole("button", { name: /^Remove filter: Alloy/ }).click();
+  await expect(titles).toHaveCount(4);
+  await expect(page.getByRole("group", { name: "Active filters" })).toHaveCount(0);
+  await expect(voice).not.toHaveAttribute("data-on", "true");
+});
+
 test("Library identifies voice services in both views even outside the available catalogue", async ({ page }) => {
   await seedLibrary(page, [null, "alloy", "fish:saved-narrator", "local"]);
   const library = page.locator('[data-screen="library"]');
   const identities = [["First", "VoiceStudio", "Bella"], ["Second", "ChatGPT", "Alloy"], ["Third", "Fish", "Fish Audio voice"], ["Fourth", "Browser", "Browser voice"]];
-  for (const view of ["List", "Cards"]) {
-    await page.getByRole("button", { name: view, exact: true }).click();
+  for (const view of ["List", "Cards"] as const) {
+    await libraryOption(page, view);
     for (const [document, source, voice] of identities) {
       const item = library.getByRole("listitem").filter({ has: page.getByRole("button", { name: `${document} document`, exact: true }) });
       await expect(item.locator(`[data-voice-source="${source}"]`).first()).toBeVisible();
@@ -52,7 +91,7 @@ test("Library identifies voice services in both views even outside the available
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   // On a phone the text starts beside the source mark instead of behind a wide gutter.
-  await page.getByRole("button", { name: "List", exact: true }).click();
+  await libraryOption(page, "List");
   const title = page.getByRole("button", { name: "First document", exact: true });
   const row = library.getByRole("listitem").filter({ has: title });
   expect((await title.boundingBox())!.x - (await row.boundingBox())!.x).toBeLessThan(64);
@@ -119,7 +158,7 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
 
   await page.reload();
   await expect(page.getByRole("img", { name: "Jasper: 100% prepared", exact: true })).toHaveCount(2);
-  await page.getByRole("button", { name: "Cards", exact: true }).click();
+  await libraryOption(page, "Cards");
   await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toHaveCount(2);
   await expect(page.getByRole("img", { name: "0% listened", exact: true })).toHaveCount(2);
   const library = page.locator('[data-screen="library"]');
@@ -161,7 +200,7 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     const halfRing = await live.locator("circle").nth(1).getAttribute("stroke-dasharray");
     expect(Number(halfRing!.split(" ")[0]) / Number(halfRing!.split(" ")[1])).toBeCloseTo(0.5);
     expect(downloads).toBe(0);
-    await page.getByRole("button", { name: "Cards", exact: true }).click();
+    await libraryOption(page, "Cards");
     await expect(live).toBeVisible();
     await page.reload();
     await expect(live).toBeVisible();
@@ -439,14 +478,16 @@ test("keeps documents in the order they were added and sorts by duration on requ
   await page.reload();
   const titles = page.locator('[data-screen="library"] li').getByRole("button", { name: / document$/ });
   await expect(titles).toHaveText(["Newest document", "Middle document", "Oldest document"]);
-  await page.getByRole("button", { name: "Shortest first" }).click();
+  await libraryOption(page, "Shortest first");
   await expect(titles).toHaveText(["Middle document", "Oldest document", "Newest document"]);
-  await page.getByRole("button", { name: "Shortest first" }).click();
+  await libraryOption(page, "Longest first");
   await expect(titles).toHaveText(["Newest document", "Oldest document", "Middle document"]);
-  // The choice survives a reload, and the calendar button restores the default.
+  // The choice survives a reload, and the menu shows it as the one in force.
   await page.reload();
   await expect(titles).toHaveText(["Newest document", "Oldest document", "Middle document"]);
-  await page.getByRole("button", { name: "Newest first" }).click();
+  await page.getByRole("button", { name: "Sort and view", exact: true }).click();
+  await expect(page.getByRole("menuitemradio", { name: "Longest first" })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "Newest first" }).click();
   await expect(titles).toHaveText(["Newest document", "Middle document", "Oldest document"]);
 });
 
@@ -486,7 +527,7 @@ test("a row opens its document wherever it is clicked, and Back returns to the L
 
   // Cards open the same way.
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.getByRole("button", { name: "Cards", exact: true }).click();
+  await libraryOption(page, "Cards");
   await row("Second").getByText("Pasted text").click();
   await expect(page).toHaveURL(/\/read\/Second$/);
 
