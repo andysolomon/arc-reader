@@ -23,7 +23,7 @@ export function ModelTerms() {
   }, []);
   if (!models.length && !error) return null;
   const pending = models.filter((m) => !m.acceptance.accepted);
-  if (!pending.length && !error) return <p className="text-xs text-fg2">Voice model terms accepted in VoiceStudio.</p>;
+  if (!pending.length && !error) return null;
   return <div className="rounded-control border border-line bg-bg2 p-4 text-sm">
     <div className="flex flex-wrap items-center justify-between gap-3"><p>{error ? "Could not check voice model terms." : "Voice generation needs model license acceptance."}</p><Button onClick={() => setOpen(!open)}>{open ? "Hide model terms" : "Review model terms"}</Button></div>
     {open && <div className="mt-4 flex flex-col gap-4">

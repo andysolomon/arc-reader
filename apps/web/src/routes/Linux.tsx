@@ -21,7 +21,7 @@ export function LinuxPage() {
   const localVoice = p.offline || isLocalVoice(p.voiceId) || engineId === LOCAL_ENGINE;
 
   return (
-    <section data-screen="linux" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: doc ? 160 : 64 }}>
+    <section data-screen="linux" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: doc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[960px] flex-col gap-7">
         <div className="flex flex-col gap-1.5">
           <h1 className="m-0 font-serif text-[26px] font-medium">Linux client · Omarchy surfaces</h1>

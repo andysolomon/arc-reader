@@ -83,7 +83,7 @@ export function SettingsPage() {
   const masked = `${s.apiKey.slice(0, 8)}${"•".repeat(20)}${s.apiKey.slice(-4)}`;
 
   return (
-    <section data-screen="settings" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
+    <section data-screen="settings" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[720px] flex-col gap-9">
         <h1 className="m-0 font-serif text-[26px] font-medium">Settings</h1>
 

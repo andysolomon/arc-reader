@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Chip, Dialog, Input, VoiceCard, VoiceSourceBadge, voiceAvatarIdentity, type VoiceCardAction } from "@readaloud/ui";
+import { Button, Dialog, Input, VoiceCard, VoiceSourceBadge, voiceAvatarIdentity, cn, type VoiceCardAction } from "@readaloud/ui";
 import type { VoiceSource } from "@readaloud/tokens";
-import { ImagePlus, LayoutGrid, Mic, Search, Trash2, Undo2, WandSparkles } from "lucide-react";
+import { ImagePlus, Languages, Layers, LayoutGrid, Mic, Plus, Search, Shapes, Trash2, Undo2, WandSparkles } from "lucide-react";
 import { useAvatars, avatarReviewNote } from "../state/avatars";
 import { useVoices, getVoice, voiceLang, isLocalVoice, defaultVoiceId } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
@@ -16,15 +16,15 @@ import { ApiBusy, ApiRejected, ApiUnreachable } from "../engine/types";
 import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource, type Voice } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
-import { ClearFilters, FilterSelect, VOICE_GRID } from "../components/Filters";
+import { ActiveFilters, VOICE_GRID, type ActiveFilter } from "../components/Filters";
+import { IconMenu, MenuAction, MenuOption } from "../components/IconMenu";
+import { useIsTouch } from "../hooks/useMedia";
 
 // Filter chips follow the same fixed order as the sections below.
 const sourceRank = (source: string) => { const i = Object.keys(SOURCE_INFO).indexOf(source); return i < 0 ? Infinity : i; };
 const TYPE_LABELS: Record<string, string> = { "built-in": "Built-in", cloned: "Cloned", designed: "Designed" };
 
 const PREVIEW_MS = 3000;
-
-const PILL_LINK = "inline-flex h-[34px] items-center gap-1.5 rounded-pill border border-line bg-bg2 px-3.5 text-[13px] text-fg hover:bg-bg3";
 
 /** How much of the document a voice has saved audio for; silent when complete. */
 function preparedNote(fraction: number | undefined) {
@@ -35,6 +35,10 @@ function preparedNote(fraction: number | undefined) {
 
 export function VoicesPage() {
   const navigate = useNavigate();
+  // Fingers get the full 44px; a pointer can do with less.
+  const touch = useIsTouch();
+  const size = touch ? 44 : 36;
+  const glyph = touch ? 20 : 18;
   const avatarEntries = useAvatars((s) => s.entries);
   const avatarsConfigured = useAvatars((s) => s.configured);
   const pendingAvatars = Object.values(avatarEntries).filter((r) => r.status === "queued" || r.status === "generating").length;
@@ -240,42 +244,65 @@ export function VoicesPage() {
   const groups = [...bySource].filter(([, voices]) => voices.length);
 
   return (
-    <section data-screen="voices" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
-      <div className="mx-auto flex max-w-[880px] flex-col gap-5">
-        <header className="flex flex-col gap-1.5">
-          <h1 className="m-0 font-serif text-[26px] font-medium">Voices</h1>
-          <p className="m-0 text-fg2">
-            {preparedOnly ? `Choosing a prepared voice for “${docTitle ?? "this document"}”. Only voices with audio saved for it are listed.` : forDoc ? `Choosing a voice for “${docTitle ?? "this document"}”.` : "Selected voice is remembered. Override per document from the player menu."}
-          </p>
+    <section data-screen="voices" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
+      <div className="mx-auto flex max-w-[880px] flex-col gap-4">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex min-w-0 flex-1 items-baseline gap-2.5 sm:flex-none">
+            <h1 className="m-0 font-serif text-[26px] font-medium">Voices</h1>
+            <span role="status" className="truncate text-[13px] tabular-nums text-fg2">{filterCount ? `${shown.length} of ${pool.length}` : pool.length} {pool.length === 1 ? "voice" : "voices"}</span>
+          </div>
+          {/* On a phone the search and its filters take the second line; from a tablet up everything shares one. */}
+          <div className="order-last -mr-2 flex min-w-0 basis-full items-center gap-1 sm:order-none sm:mr-0 sm:flex-1 sm:basis-0 sm:justify-end" role="search" aria-label="Filter voices">
+            <Input type="search" aria-label="Search voices" placeholder="Search voices" leading={<Search size={16} strokeWidth={1.5} aria-hidden />} wrapperClassName={cn("min-w-0 flex-1 sm:max-w-[240px]", touch && "h-10")} value={filters.query} onChange={(e) => setFilter("query", e.target.value)} />
+            <div className="flex gap-0.5" role="group" aria-label="Filters">
+              <IconMenu label="Filter by source" icon={<Layers size={glyph} strokeWidth={1.5} />} on={!!filters.source} size={size} width={240}>
+                {(close) => <>
+                  <MenuOption checked={!filters.source} onSelect={() => { setFilter("source", ""); close(); }}>All sources</MenuOption>
+                  {sources.map(([source, n]) => <MenuOption key={source} checked={filters.source === source} count={n} onSelect={() => { setFilter("source", source); close(); }}><VoiceSourceBadge source={source as VoiceSource} /></MenuOption>)}
+                </>}
+              </IconMenu>
+              {languages.length > 1 && <IconMenu label="Filter by language" icon={<Languages size={glyph} strokeWidth={1.5} />} on={!!filters.language} size={size} width={240}>
+                {(close) => <>
+                  <MenuOption checked={!filters.language} onSelect={() => { setFilter("language", ""); close(); }}>All languages</MenuOption>
+                  {languages.map(([code, n]) => <MenuOption key={code} checked={filters.language === code} count={n} onSelect={() => { setFilter("language", code); close(); }}>{languageLabel(code)}</MenuOption>)}
+                </>}
+              </IconMenu>}
+              {types.length > 1 && <IconMenu label="Filter by type" icon={<Shapes size={glyph} strokeWidth={1.5} />} on={!!filters.type} size={size} width={200}>
+                {(close) => <>
+                  <MenuOption checked={!filters.type} onSelect={() => { setFilter("type", ""); close(); }}>All types</MenuOption>
+                  {types.map(([type, n]) => <MenuOption key={type} checked={filters.type === type} count={n} onSelect={() => { setFilter("type", type); close(); }}>{TYPE_LABELS[type]}</MenuOption>)}
+                </>}
+              </IconMenu>}
+            </div>
+          </div>
+          <div className="-mr-2 flex sm:mr-0">
+            <IconMenu label="Make a voice" icon={<Plus size={glyph} strokeWidth={1.5} />} size={size} width={232}>
+              {(close) => <>
+                <MenuAction icon={<Mic size={15} strokeWidth={1.5} />} onSelect={() => { close(); navigate("/studio/clone"); }}>Clone a voice</MenuAction>
+                <MenuAction icon={<WandSparkles size={15} strokeWidth={1.5} />} onSelect={() => { close(); navigate("/studio/design"); }}>Design a voice</MenuAction>
+                <MenuAction icon={<LayoutGrid size={15} strokeWidth={1.5} />} onSelect={() => { close(); navigate("/studio/gallery"); }}>Browse designed voices</MenuAction>
+              </>}
+            </IconMenu>
+          </div>
         </header>
+        {forDoc && <p className="m-0 text-[13px] text-fg2">
+          {preparedOnly ? `Choosing a prepared voice for “${docTitle ?? "this document"}”. Only voices with audio saved for it are listed.` : `Choosing a voice for “${docTitle ?? "this document"}”.`}
+        </p>}
         {fishError && (
           <div role="status" className="rounded-panel border border-line bg-bg2 p-4 text-[13px] text-fg2">
             Fish Audio voices could not refresh: {fishError}. Your other voices are still available.
             <button type="button" onClick={() => void reload()} className="ml-2 border-0 bg-transparent text-accent underline">Retry</button>
           </div>
         )}
-        <nav aria-label="Make a voice" className="flex flex-wrap gap-2">
-          <Link to="/studio/clone" className={PILL_LINK}><Mic size={14} strokeWidth={1.5} aria-hidden />Clone a voice</Link>
-          <Link to="/studio/design" className={PILL_LINK}><WandSparkles size={14} strokeWidth={1.5} aria-hidden />Design a voice</Link>
-          <Link to="/studio/gallery" className={PILL_LINK}><LayoutGrid size={14} strokeWidth={1.5} aria-hidden />Browse designed voices</Link>
-        </nav>
-        {(pendingAvatars > 0 || failedAvatars > 0) && <p role="status" className="m-0 text-sm text-fg2">
+        {(pendingAvatars > 0 || failedAvatars > 0) && <p role="status" className="m-0 text-[13px] text-fg2">
           {pendingAvatars > 0 && `Creating ${pendingAvatars} voice avatar${pendingAvatars === 1 ? "" : "s"}. Portraits appear automatically. `}
           {failedAvatars > 0 && `${failedAvatars} avatar${failedAvatars === 1 ? "" : "s"} could not be created. Use the image button on a voice to retry.`}
         </p>}
-        <div className="flex flex-col gap-3" role="search" aria-label="Filter voices">
-          <Input type="search" aria-label="Search voices" placeholder="Search by name, tag or language…" leading={<Search size={16} aria-hidden />} wrapperClassName="h-10" value={filters.query} onChange={(e) => setFilter("query", e.target.value)} />
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Voice source">
-            <Chip size="sm" selected={!filters.source} onClick={() => setFilter("source", "")}>All sources</Chip>
-            {sources.map(([source, n]) => <Chip key={source} size="sm" selected={filters.source === source} onClick={() => setFilter("source", filters.source === source ? "" : source)}><VoiceSourceBadge source={source as VoiceSource} />{n}</Chip>)}
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,220px)_auto]">
-            <FilterSelect label="Language" any="All languages" value={filters.language} options={languages.map(([code, n]) => [code, `${languageLabel(code)} (${n})`])} onChange={(value) => setFilter("language", value)} />
-            {types.length > 1 && <FilterSelect label="Type" any="All types" value={filters.type} options={types.map(([type, n]) => [type, `${TYPE_LABELS[type]} (${n})`])} onChange={(value) => setFilter("type", value)} />}
-            <div className="flex items-end"><ClearFilters count={filterCount} onClear={() => setFilters(NO_VOICE_FILTERS)} /></div>
-          </div>
-          <p role="status" className="text-sm text-fg2">{filterCount ? `${shown.length} of ${pool.length} voices` : `${pool.length} voices`}</p>
-        </div>
+        <ActiveFilters clearAll={{ count: filterCount, onClear: () => setFilters(NO_VOICE_FILTERS) }} filters={([
+          filters.source && { name: SOURCE_INFO[filters.source]?.title ?? filters.source, label: <VoiceSourceBadge source={filters.source as VoiceSource} />, clear: () => setFilter("source", "") },
+          filters.language && { name: languageLabel(filters.language), clear: () => setFilter("language", "") },
+          filters.type && { name: TYPE_LABELS[filters.type] ?? filters.type, clear: () => setFilter("type", "") },
+        ] as (ActiveFilter | "")[]).filter((f): f is ActiveFilter => !!f)} />
         {preparedOnly && !pool.some((v) => v.id !== current) && (
           <p role="status" className="rounded-panel border border-line bg-bg2 p-4 text-[13px] text-fg2">
             No other voice has prepared audio for this document yet. Use “Prepare audio” in the player menu, or prepare more voices from the <Link to="/library" className="text-accent underline">Library</Link>.
@@ -289,8 +316,8 @@ export function VoicesPage() {
                 <h2 id={`voices-${source}`} className="m-0 font-serif text-xl"><VoiceSourceBadge source={source} className="px-3 py-1 text-sm" /></h2>
                 <span className="text-xs text-fg2">{voices.length === 1 ? "1 voice" : `${voices.length} voices`}</span>
               </div>
-              {SOURCE_INFO[source] && <p className="mt-2 text-sm text-fg2">{SOURCE_INFO[source].description}</p>}
-              {voices.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="mt-1 text-sm text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
+              {SOURCE_INFO[source] && <p className="mt-1.5 text-[13px] text-fg2">{SOURCE_INFO[source].description}</p>}
+              {voices.some((v) => v.id === JAMAICAN_PATOIS_VOICE_ID) && <p className="mt-1 text-[13px] text-fg2">Jamaican English reads your original wording. Jamaican Patois rewrites English into Patois before reading, using OpenAI for the rewrite and Fish Audio for speech. Your original is kept.</p>}
             </div>
             <div className={VOICE_GRID}>
               {voices.map((v) => (

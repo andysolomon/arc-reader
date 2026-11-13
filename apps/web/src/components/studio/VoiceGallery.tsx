@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, Plus, Search, Star } from "lucide-react";
-import { Button, Chip, Input, VoiceTile, cn, type PortraitVoice } from "@readaloud/ui";
+import { CheckCircle2, Plus, Search, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { Button, IconButton, Input, VoiceTile, cn, type PortraitVoice } from "@readaloud/ui";
 import { voiceServiceTextColor } from "@readaloud/tokens";
 import { useVoices } from "../../state/voices";
 import { galleryFavoriteKey, useGallery } from "../../state/gallery";
@@ -9,7 +9,9 @@ import { usePreviews } from "../../state/previews";
 import { hueFor } from "../../data/voices";
 import { studioJson, studioUrl, idPath, type Archetype, type PreviewSource } from "../../lib/studio";
 import { GALLERY_FACETS, NO_GALLERY_FILTERS, activeFilterCount, galleryParams, matchesGallery, type GalleryFilters } from "../../lib/filters";
-import { ClearFilters, FilterSelect, VOICE_GRID } from "../Filters";
+import { ActiveFilters, FilterSelect, VOICE_GRID } from "../Filters";
+import { ICON_ON } from "../IconMenu";
+import { useIsTouch } from "../../hooks/useMedia";
 import { GalleryPreview } from "./GalleryPreview";
 import { ErrorNotice, useOperation } from "./shared";
 
@@ -23,6 +25,10 @@ export function VoiceGallery() {
   const [featured, setFeatured] = useState(true);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [filters, setFilters] = useState<GalleryFilters>(NO_GALLERY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const touch = useIsTouch();
+  const size = touch ? 44 : 36;
+  const glyph = touch ? 20 : 18;
   const [page, setPage] = useState(0);
   const [items, setItems] = useState<Archetype[]>([]);
   const [total, setTotal] = useState(0);
@@ -95,23 +101,40 @@ export function VoiceGallery() {
 
   const previewed = preview && [...items, ...favoriteVoices].find((voice) => voice.id === preview.id);
 
-  return <div className="flex flex-col gap-5">
-    <div><h2 className="font-serif text-xl">Designed voice gallery</h2><p className="mt-2 text-sm text-fg2">VoiceStudio’s original catalog. Tap a portrait to hear a character, star it, or add its recipe to your saved voices. Added voices move to <Link to="/voices" className="underline">Voices</Link>, where you can send one back here.</p></div>
-    <div className="flex flex-col gap-3" role="search" aria-label="Find a designed voice">
-      <Input type="search" aria-label="Search designed voices" placeholder="Narrator, British, whisper…" leading={<Search size={16} aria-hidden />} wrapperClassName="h-10" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} />
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Gallery view">
-        <Chip size="sm" selected={!favoritesOnly} onClick={() => { setFavoritesOnly(false); setPage(0); }}>All voices</Chip>
-        <Chip size="sm" selected={favoritesOnly} onClick={() => { setFavoritesOnly(true); setPage(0); }}><Star size={14} aria-hidden />Favorites ({favoriteVoices.length})</Chip>
-        {!favoritesOnly && <Chip size="sm" selected={featured} className="ml-auto" onClick={() => { setFeatured(!featured); setPage(0); }}>Featured only</Chip>}
+  return <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <h2 className="m-0 font-serif text-xl">Designed voices</h2>
+        <p role="status" className="m-0 text-[13px] tabular-nums text-fg2">{loading ? "Loading gallery…" : `${count} ${favoritesOnly ? "favorite " : ""}${count === 1 ? "voice" : "voices"}`}{hidden > 0 && ` · ${hidden} on this page already in Voices`}{op.status && ` · ${op.status}`}</p>
       </div>
-      <fieldset className="m-0 grid grid-cols-2 gap-3 border-0 p-0 sm:grid-cols-4">
-        <legend className="sr-only">Filter designed voices</legend>
-        {GALLERY_FACETS.map((facet) => <FilterSelect key={facet.key} label={facet.label} any={facet.any} value={filters[facet.key]} options={facet.options} onChange={(value) => setFilter(facet.key, value)} />)}
-        <div className="flex items-end"><ClearFilters count={filterCount} onClear={() => { setFilters(NO_GALLERY_FILTERS); setPage(0); }} /></div>
-      </fieldset>
+      <p className="m-0 text-[13px] text-fg2">Tap a portrait to hear it. Voices you add move to <Link to="/voices" className="underline">Voices</Link>.</p>
     </div>
+    <div className="-mr-2 flex items-center gap-1 sm:mr-0" role="search" aria-label="Find a designed voice">
+      <Input type="search" aria-label="Search designed voices" placeholder="Narrator, British, whisper…" leading={<Search size={16} strokeWidth={1.5} aria-hidden />} wrapperClassName={cn("min-w-0 flex-1 sm:max-w-[320px]", touch && "h-10")} value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} />
+      <div className="flex gap-0.5 sm:ml-auto" role="group" aria-label="Gallery view">
+        <IconButton label={`Favorites (${favoriteVoices.length})`} size={size} active={favoritesOnly} className={cn(favoritesOnly && ICON_ON)} onClick={() => { setFavoritesOnly(!favoritesOnly); setPage(0); }}>
+          <Star size={glyph} strokeWidth={1.5} fill={favoritesOnly ? "currentColor" : "none"} />
+        </IconButton>
+        {!favoritesOnly && <IconButton label="Featured only" size={size} active={featured} className={cn(featured && ICON_ON)} onClick={() => { setFeatured(!featured); setPage(0); }}>
+          <Sparkles size={glyph} strokeWidth={1.5} />
+        </IconButton>}
+        <IconButton label="Filters" size={size} aria-expanded={filtersOpen} aria-controls="gallery-filters" data-on={filterCount > 0 || undefined} className={cn(filtersOpen && "bg-bg3 text-fg", filterCount > 0 && ICON_ON)} onClick={() => setFiltersOpen(!filtersOpen)}>
+          <SlidersHorizontal size={glyph} strokeWidth={1.5} />
+        </IconButton>
+      </div>
+    </div>
+    {filtersOpen && <fieldset id="gallery-filters" className="m-0 grid grid-cols-2 gap-3 rounded-panel border border-line bg-bg2 p-3 sm:grid-cols-4">
+      <legend className="sr-only">Filter designed voices</legend>
+      {GALLERY_FACETS.map((facet) => <FilterSelect key={facet.key} label={facet.label} any={facet.any} value={filters[facet.key]} options={facet.options} onChange={(value) => setFilter(facet.key, value)} />)}
+    </fieldset>}
+    <ActiveFilters clearAll={{ count: filterCount, onClear: () => { setFilters(NO_GALLERY_FILTERS); setPage(0); } }} filters={[
+      ...(favoritesOnly ? [{ name: "Favorites", label: <span className="inline-flex items-center gap-1.5"><Star size={12} strokeWidth={1.5} fill="currentColor" className="text-accent" aria-hidden />Favorites</span>, clear: () => { setFavoritesOnly(false); setPage(0); } }] : []),
+      ...GALLERY_FACETS.filter((facet) => filters[facet.key]).map((facet) => ({
+        name: `${facet.label}: ${facet.options.find(([v]) => v === filters[facet.key])?.[1] ?? filters[facet.key]}`,
+        clear: () => setFilter(facet.key, ""),
+      })),
+    ]} />
     {preview && <GalleryPreview id={preview.id} name={preview.name} voice={previewed ? portraitOf(previewed) : undefined} />}
-    <p role="status" className="text-sm text-fg2">{loading ? "Loading gallery…" : `${count} ${favoritesOnly ? "favorite voices" : "voices"}`}{hidden > 0 && ` · ${hidden} on this page already in Voices`}{op.status && ` · ${op.status}`}</p>
     <ErrorNotice error={loadError || op.error} />
     {visibleItems.length > 0 && <div className={`${VOICE_GRID} rounded-panel border border-line bg-bg2 p-2 sm:p-4`}>
       {visibleItems.map((voice) => {
@@ -139,7 +162,7 @@ export function VoiceGallery() {
       })}
     </div>}
     {!loading && !loadError && count > 0 && visibleItems.length === 0 && <p className="text-fg2">Every voice on this page is already in Voices.</p>}
-    {!loading && count === 0 && !loadError && <p className="text-fg2">{favoritesOnly && !favoriteVoices.length ? "No favorites yet. Star a voice in All voices to keep it here." : filterCount ? "No voices match these filters." : "No voices match that search."}</p>}
+    {!loading && count === 0 && !loadError && <p className="text-fg2">{favoritesOnly && !favoriteVoices.length ? "No favorites yet. Star a voice to keep it here." : filterCount ? "No voices match these filters." : "No voices match that search."}</p>}
     <div className="flex items-center justify-center gap-3"><Button pill disabled={currentPage === 0 || loading} onClick={() => setPage(currentPage - 1)}>Previous</Button><span className="text-sm text-fg2">Page {currentPage + 1}{count > PAGE_SIZE && ` of ${Math.ceil(count / PAGE_SIZE)}`}</span><Button pill disabled={(currentPage + 1) * PAGE_SIZE >= count || loading} onClick={() => setPage(currentPage + 1)}>Next</Button></div>
   </div>;
 }
