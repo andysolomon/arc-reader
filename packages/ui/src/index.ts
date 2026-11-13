@@ -11,6 +11,7 @@ export * from "./components/SectionLabel";
 export * from "./components/Kbd";
 export * from "./components/Skeleton";
 export * from "./components/ProgressRing";
+export * from "./components/ProgressBar";
 export * from "./components/VoiceAvatar";
 export * from "./components/VoiceSourceBadge";
 export * from "./components/PlayPauseIcon";
