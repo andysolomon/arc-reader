@@ -44,7 +44,9 @@ export const archetypeOf = (profile: Pick<Profile, "personality"> | undefined) =
 export interface ArchetypeFacets { gender?: string | null; age?: string | null; pitch?: string | null; accent?: string | null; whisper?: boolean; lang?: string }
 export interface Archetype { id: string; name: string; instruct: string; language: string; use_case: string; attrs: Record<string, string>; facets?: ArchetypeFacets }
 export interface PreviewSource { source: "gallery" | "cached" | "rendering" | "no_model"; message: string }
-export interface Design { attrs: Record<string, string>; instruct: string; unmatched: string[] }
+export interface DesignMatch { category: string; token: string; phrase: string }
+/** `/design/describe`: `matched` lists the phrase that decided each setting (one per setting); `unmatched` is VoiceStudio's clause-level list of what it ignored. */
+export interface Design { attrs: Record<string, string>; instruct: string; matched?: DesignMatch[]; unmatched: string[] }
 export interface Segment { id?: string | number; start: number; end: number; text: string; speaker?: string; profile_id?: string }
 export interface Transcript { text: string; segments?: Segment[]; language?: string }
 export interface TaskEvent { type?: string; event?: string; message?: string; stage?: string; error?: unknown; detail?: unknown; progress?: number; current?: number; total?: number; percent?: number }
