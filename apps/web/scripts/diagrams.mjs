@@ -121,10 +121,32 @@ export function filesByDiagram() {
   return out;
 }
 
-/** Diagrams whose cited files changed in `range` while neither page did. */
+/**
+ * Whether a page diff changes what the page says. Re-pointed line numbers don't count:
+ * `refs` makes those on its own, and they mustn't silence the reminder.
+ */
+export function describesChange(diff) {
+  const blank = (line) => line.replace(REF, (whole, srcPath, srcLine, path) => (srcPath ? `SRC + "${srcPath}:N"` : `"${path}:N"`));
+  const removed = new Map();
+  const added = [];
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("---") || line.startsWith("+++")) continue;
+    if (line.startsWith("-")) removed.set(blank(line.slice(1)), (removed.get(blank(line.slice(1))) ?? 0) + 1);
+    else if (line.startsWith("+")) added.push(blank(line.slice(1)));
+  }
+  for (const line of added) {
+    const n = removed.get(line);
+    if (!n) return true;
+    removed.set(line, n - 1);
+  }
+  return [...removed.values()].some((n) => n > 0);
+}
+
+/** Diagrams whose cited files changed in `range` while neither page's text did. */
 export function staleDiagrams(range) {
-  const changed = execFileSync("git", ["diff", "--name-only", range], { cwd: ROOT, encoding: "utf8" }).split("\n").filter(Boolean);
-  if (changed.some((f) => PAGES.includes(f))) return [];
+  const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28 });
+  const changed = git("diff", "--name-only", range).split("\n").filter(Boolean);
+  if (PAGES.some((page) => changed.includes(page) && describesChange(git("diff", "-U0", range, "--", page)))) return [];
   return filesByDiagram()
     .map((d) => ({ ...d, changed: changed.filter((f) => d.files.has(f)) }))
     .filter((d) => d.changed.length);

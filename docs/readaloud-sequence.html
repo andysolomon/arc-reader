@@ -208,20 +208,21 @@ const P = {
   EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:102"] },
   PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:454", SRC + "engine/preparation.ts:245"] },
   DB: { n: "IndexedDB", s: "docs · positions · audio", kind: "db", d: "The readaloud database (idb). docs: Library documents. positions: one per document. audio: clips keyed by engine + voice + text, up to 2000, oldest evicted first.", code: [SRC + "lib/db.ts:143", SRC + "lib/db.ts:233"] },
-  SV: { n: "App server", s: "Vite plugins · /api/*", d: "Node-side plugins of the Vite dev and preview servers (the Docker image runs preview on :4179). /api/fetch fetches pages; /api/vs, /api/oa and /api/fish proxy speech APIs with keys from server-side env, so keys never reach the bundle; /api/preparations is the background job service.", code: ["apps/web/vite.config.ts:19", "apps/web/vite.fetch.ts:28", "apps/web/vite.proxy.ts:44", "apps/web/vite.prepare.ts:501"] },
+  SV: { n: "App server", s: "Vite plugins · /api/*", d: "Node-side plugins of the Vite dev and preview servers (the Docker image runs preview on :4179). /api/fetch fetches pages; /api/vs, /api/phonon, /api/oa and /api/fish proxy speech APIs with keys from server-side env, so keys never reach the bundle; /api/preparations is the background job service.", code: ["apps/web/vite.config.ts:19", "apps/web/vite.fetch.ts:28", "apps/web/vite.proxy.ts:44", "apps/web/vite.prepare.ts:501"] },
   DK: { n: "Disk", s: "preparations · library.json", kind: "db", d: "Server-side files on volumes. Preparations: PREPARATION_DATA_DIR (default .readaloud-preparations) — job JSON written atomically, clips as <key>.bin + <key>.json (shared-<key> for clips uploaded by devices), restored after a restart and deleted after 7 days. Library: LIBRARY_DATA_DIR/library.json.", code: ["apps/web/vite.prepare.ts:61", "apps/web/vite.library.ts:173", "compose.yaml:75", "compose.yaml:77"] },
   VS: { n: "VoiceStudio", s: "Mac mini · container overflow", d: "Self-hosted TTS with an OpenAI-compatible API (/v1/audio/speech, /v1/audio/transcriptions). One worker that queues at most one more request; a third concurrent request gets 429. KittenTTS is fast on CPU; OmniVoice clones and designed voices are ~10× slower than real time on CPU, so the Mac (GPU) is preferred.", code: ["compose.yaml:58"] },
   VM: { n: "VoiceStudio · primary", s: "Mac mini (GPU)", d: "VOICESTUDIO_URL. Takes every new reading whenever it is free.", code: ["compose.yaml:61"] },
   VC: { n: "VoiceStudio · overflow", s: "local container", d: "VOICESTUDIO_SECONDARY_URL (named “Omarchy” by default). Used only while the primary is busy, and only for voices it can reproduce exactly.", code: ["compose.yaml:66", "apps/web/vite.preparation-workers.ts:92"] },
+  PH: { n: "Phonon", s: "Gradium · CPU beside the app", d: "Gradium’s small English speech model (gradium/phonon-31m-en) behind an OpenAI-compatible server of its own: 37 preset voices, Zoey the default. Only the app server calls it (PHONON_URL, http://phonon:8880 in the cluster). It generates one clip at a time and answers 429 to the rest.", code: ["compose.yaml:23", "apps/web/vite.proxy.ts:65", SRC + "data/voices.ts:147"] },
   EX: { n: "Web & cloud", s: "web pages · OpenAI · Fish · LLM", d: "Any web page the listener asked for (X posts through FxTwitter); OpenAI (the Patois rewrite and OpenAI voices) through /api/oa; Fish Audio through /api/fish; the LLM (OpenCode Go) that explains code, describes images and writes summaries, through /api/llm.", code: ["apps/web/vite.xpost.ts:11", "apps/web/vite.llm.ts:98"] },
   LS: { n: "librarySync", s: "lib/librarySync.ts", d: "Sends the outbox to the app server, which answers with each document’s version rather than its text, then downloads only the documents this device lacks or holds an older version of. One run at a time, triggered by changes, a 5 s timer, coming online and focus.", code: [SRC + "lib/librarySync.ts:116", SRC + "lib/librarySync.ts:170"] },
   SM: { n: "useSummaries", s: "state/summaries.ts · lib/summary.ts", d: "Requests article summaries from the LLM and stores them on the document.", code: [SRC + "state/summaries.ts:20", SRC + "lib/summary.ts:30"] },
 };
-const ORDER = ["U", "UI", "SM", "PL", "EN", "PR", "LS", "DB", "SV", "DK", "VS", "VM", "VC", "EX"];
+const ORDER = ["U", "UI", "SM", "PL", "EN", "PR", "LS", "DB", "SV", "DK", "VS", "VM", "VC", "PH", "EX"];
 const GROUPS = [
   { id: "browser", n: "Browser · PWA", ps: ["UI", "SM", "PL", "EN", "PR", "LS", "DB"] },
   { id: "server", n: "App server", ps: ["SV", "DK"] },
-  { id: "net", n: "Speech & the web", ps: ["VS", "VM", "VC", "EX"] },
+  { id: "net", n: "Speech & the web", ps: ["VS", "VM", "VC", "PH", "EX"] },
 ];
 const groupOf = (p) => GROUPS.find((g) => g.ps.includes(p))?.id || "";
 /** An arrow that leaves the browser, or leaves the app server for an upstream service. */
@@ -419,7 +420,7 @@ const SEQS = {
           { f: "DB", to: "PR", t: "ret", n: "clip, or nothing" },
           { op: "alt", id: "have", ops: [
             { g: "cached", rows: [
-              { op: "opt", id: "noise", g: "a VoiceStudio clip cached before the noise check", rows: [
+              { op: "opt", id: "noise", g: "a VoiceStudio or Phonon clip cached before the noise check", rows: [
                 { f: "PR", to: "PR", t: "self", n: "clipVoicedShare(): < 20 % voiced → generate again", say: "It’s checked once for breathy noise; a garbled clip falls through to a fresh generation.", code: [SRC + "engine/providers.ts:458", SRC + "engine/audio.ts:163"] },
               ] },
               { f: "PR", to: "PR", t: "self", n: "locateSentences (older clips only)", say: "Found. Clips saved before passages existed are measured once on the way out.",
@@ -437,7 +438,7 @@ const SEQS = {
             ] },
             { g: "not on the device", rows: [
               { op: "alt", id: "clip", ops: [
-                { g: "VoiceStudio voice, and a saved job lists this passage", rows: [
+                { g: "VoiceStudio or Phonon voice, and a saved job lists this passage", rows: [
                   { f: "PR", to: "SV", t: "call", n: "GET /api/preparations/:id/audio/:i", say: "A background job already rendered this passage, so the stored clip is fetched — no second render.",
                     d: "preparedAudio looks the cache key up in the jobs saved in localStorage. 404 or 410 (expired, or the device already had it) falls back to normal generation.",
                     code: [SRC + "engine/preparation.ts:315", "apps/web/vite.prepare.ts:356"] },
@@ -449,8 +450,8 @@ const SEQS = {
                 ] },
                 { g: "else: generate it now", rows: [
                   { op: "loop", id: "busy", g: "429 busy → wait Retry-After or 400 ms × 2ⁿ, at most 5 s, up to 4 retries", rows: [
-                    { f: "PR", to: "SV", t: "call", n: "POST /api/vs · oa · fish — speech at 1×", say: "A speech request at 1×. VoiceStudio requests go one at a time.",
-                      d: "apiSynthesize posts to /v1/audio/speech (VoiceStudio’s OpenAI-compatible API, or OpenAI) or Fish /v1/tts. VoiceStudio requests are serialized — one in flight — because its single worker refuses a third with 429. Each new generation records usage and cost.",
+                    { f: "PR", to: "SV", t: "call", n: "POST /api/vs · phonon · oa · fish — speech at 1×", say: "A speech request at 1×. VoiceStudio and Phonon requests each go one at a time.",
+                      d: "apiSynthesize posts to /v1/audio/speech (VoiceStudio’s, Phonon’s or OpenAI’s OpenAI-compatible API) or Fish /v1/tts. VoiceStudio and Phonon requests are serialized, one in flight each on a queue of its own, because both refuse extra concurrent requests with 429. Each new generation records usage and cost.",
                       facts: ["OmniVoice requests use VoiceStudio’s normal 16-step preset", "Cloned profiles are sent with the active-engine alias"],
                       code: [SRC + "engine/providers.ts:261", SRC + "engine/providers.ts:112", SRC + "engine/providers.ts:179", SRC + "lib/usage.ts:171"] },
                     { op: "alt", id: "upstream", ops: [
@@ -458,6 +459,11 @@ const SEQS = {
                         { f: "SV", to: "VS", t: "call", n: "POST /v1/audio/speech + Bearer key", say: "The proxy adds the key, drops Origin, Referer and Cookie, and forwards it.",
                           d: "VoiceStudio’s CSRF guard would reject a browser origin. Timeouts are 30 minutes; an unreachable upstream becomes 502 {error: “upstream_unreachable”}.", code: ["apps/web/vite.proxy.ts:11"] },
                         { f: "VS", to: "SV", t: "ret", n: "MP3", say: "VoiceStudio renders the passage." },
+                      ] },
+                      { g: "Phonon voice (the default, Zoey)", rows: [
+                        { f: "SV", to: "PH", t: "call", n: "POST /v1/audio/speech · phonon-31m-en", say: "Phonon voices go to the Phonon server, with the voice’s bare name (Zoey, not phonon:Zoey).",
+                          d: "Only the voice list and speech generation are let through /api/phonon. Phonon is fast on the CPU, so a passage takes a moment, not minutes.", code: ["apps/web/vite.proxy.ts:65", SRC + "engine/providers.ts:291"] },
+                        { f: "PH", to: "SV", t: "ret", n: "MP3", say: "Phonon renders the passage." },
                       ] },
                       { g: "OpenAI or Fish voice", rows: [
                         { f: "SV", to: "EX", t: "call", n: "speech + Bearer key", say: "Cloud voices go to OpenAI or Fish Audio; they handle concurrency themselves." },
@@ -469,7 +475,7 @@ const SEQS = {
                     ] },
                     { f: "SV", to: "PR", t: "ret", n: "audio (or 429 · 502 · error)" },
                   ] },
-                  { op: "loop", id: "retake", g: "VoiceStudio take is breathy noise (< 20 % voiced) · up to 2 more takes", rows: [
+                  { op: "loop", id: "retake", g: "VoiceStudio or Phonon take is breathy noise (< 20 % voiced) · up to 2 more takes", rows: [
                     { f: "PR", to: "PR", t: "self", n: "clipVoicedShare(take)", say: "OmniVoice sometimes renders a passage as breathy noise, so each take is measured…",
                       d: "8 kHz, 30 ms frames; a frame is voiced when its pitch (60–400 Hz) correlates above 0.75.", code: [SRC + "engine/providers.ts:273", SRC + "engine/voicing.ts:44"] },
                     { f: "PR", to: "SV", t: "call", n: "POST …/speech again", say: "…and asked again, keeping the clearest take." },
@@ -514,9 +520,10 @@ const SEQS = {
       { id: "hit", n: "Already cached", pick: { src: 1, have: 0 } },
       { id: "joined", n: "Join older sentence clips", pick: { src: 1, have: 1 } },
       { id: "prepared", n: "Rendered by a background job", pick: { src: 1, have: 2, clip: 0 } },
-      { id: "cloud", n: "OpenAI or Fish voice", pick: { src: 1, have: 2, clip: 2, upstream: 1 } },
+      { id: "phonon", n: "Phonon voice (the default)", pick: { src: 1, have: 2, clip: 2, upstream: 1 } },
+      { id: "cloud", n: "OpenAI or Fish voice", pick: { src: 1, have: 2, clip: 2, upstream: 2 } },
       { id: "words", n: "With word timings", pick: { src: 1, have: 2, clip: 2, words: 0 } },
-      { id: "down", n: "Server unreachable", pick: { src: 1, have: 2, clip: 2, upstream: 2, fail: 0 } },
+      { id: "down", n: "Server unreachable", pick: { src: 1, have: 2, clip: 2, upstream: 3, fail: 0 } },
       { id: "garbled", n: "OmniVoice returns breathy noise", pick: { src: 1, have: 2, clip: 2, retake: 0 } },
       { id: "ios", n: "Bundled iPhone app, no speech server", pick: { src: 1, have: 2, clip: 1, fail: 0, why: 1 } },
       { id: "local", n: "Browser voice", pick: { src: 0 } },
@@ -531,6 +538,7 @@ const SEQS = {
     overview: [
       "Cloned and designed voices (OmniVoice) render ~10× slower than real time on a laptop CPU, so playback would stall between passages. Preparation renders everything ahead of time.",
       "The job belongs to the app server, not the browser tab: it survives reloads, a sleeping phone and server restarts (jobs are files on disk), and identical readings share one job.",
+      "Phonon voices are fast, but their readings can be prepared too, so they play offline and on every device; they go to the Phonon server, which takes nothing else.",
     ],
     rows: [
       { f: "PL", to: "EN", t: "call", n: "prerender() → engine.prepare()", say: "Preparation starts only when asked for: from the player menu or from the Library’s queue.",
@@ -551,7 +559,7 @@ const SEQS = {
       { f: "PR", to: "SV", t: "call", n: "POST /api/preparations {requests, start}", say: "The whole reading is submitted as one job.",
         d: "Identical readings (same request signature) share one submission and one job. A transient error is retried every 1.5 s.", code: [SRC + "engine/preparation.ts:188"] },
       { f: "SV", to: "SV", t: "self", n: "validate · reuse an identical job", say: "The server checks the job and reuses an identical running one if there is one.",
-        d: "VoiceStudio voices only (not openai / fish / local), up to 5000 passages, at most 20 running jobs (else 429).", code: ["apps/web/vite.prepare.ts:231", "apps/web/vite.prepare.ts:258"] },
+        d: "VoiceStudio and Phonon voices only (not openai / fish / local). A Phonon reading is all Phonon preset voices and needs PHONON_URL. Up to 5000 passages, at most 20 running jobs (else 429).", code: ["apps/web/vite.prepare.ts:231", "apps/web/vite.prepare.ts:254", "apps/web/vite.prepare.ts:258"] },
       { f: "SV", to: "DK", t: "call", n: "write job JSON (atomic)", say: "The job is written to disk, so it survives a restart.", code: ["apps/web/vite.prepare.ts:84", "apps/web/vite.prepare.ts:90"] },
       { f: "DK", to: "SV", t: "ret", n: "ok" },
       { f: "SV", to: "PR", t: "ret", n: "{id, state: running, done: 0}" },
@@ -563,7 +571,7 @@ const SEQS = {
           { f: "SV", to: "SV", t: "self", n: "schedule(): oldest job first", say: "The scheduler picks a machine: one whole reading per machine at a time.",
             d: "A reading a reader moved up from the Library (Prepare next) goes before the others; Start now also makes the reading in progress give way after its passage and resume later. A job keeps its machine after a restart (its partial audio lives there). The scheduler runs again whenever a job finishes.", code: ["apps/web/vite.prepare.ts:158", "apps/web/vite.prepare.ts:173"] },
           { op: "alt", id: "machine", ops: [
-            { g: "Mac mini free (readings only it can prepare go first)", say: "The Mac mini is free, so it gets the reading.", rows: [
+            { g: "VoiceStudio voice, Mac mini free (readings only it can prepare go first)", say: "The Mac mini is free, so it gets the reading.", rows: [
               { op: "loop", id: "render", g: "each passage from the listener’s spot, wrapping round", rows: [
                 { f: "SV", to: "SV", t: "self", n: "wait: no live speech, then 15 s", say: "Playback comes first: before each passage the job waits until no listener’s speech request is in flight, then 15 s more.",
                   d: "Live POST /v1/audio/speech requests through the proxy are tracked; PREPARATION_YIELD_MS sets the grace period.", code: ["apps/web/vite.prepare.ts:323", "apps/web/vite.speech-activity.ts:9"] },
@@ -593,6 +601,16 @@ const SEQS = {
                 { f: "SV", to: "VC", t: "call", n: "POST /v1/audio/speech", say: "The container works on this reading as overflow.",
                   d: "Only if it has the same engine and — for cloned or designed voices — the same profile recipe and identical reference audio (SHA-256). It never substitutes a different voice.", code: ["apps/web/vite.preparation-workers.ts:92"] },
                 { f: "VC", to: "SV", t: "ret", n: "MP3" },
+                { f: "SV", to: "DK", t: "async", n: "write <key>.bin + .json · done += 1" },
+              ] },
+            ] },
+            { g: "Phonon voice, Phonon server free", say: "A Phonon reading goes to the Phonon server, which prepares nothing else and is never used for VoiceStudio voices.", rows: [
+              { op: "loop", id: "renderP", g: "each passage from the listener’s spot, wrapping round", rows: [
+                { f: "SV", to: "SV", t: "self", n: "wait: no live Phonon speech, then 15 s", say: "Someone listening to a Phonon voice comes first, as on VoiceStudio.", code: ["apps/web/vite.prepare.ts:187"] },
+                { f: "SV", to: "PH", t: "call", n: "POST /v1/audio/speech · bare voice name", say: "One passage at a time, with the model the bundle was built for.",
+                  d: "The device’s voice id is phonon:<name>; the server knows the bare name. Restarts and refusals are retried as on VoiceStudio.", code: ["apps/web/vite.prepare.ts:468", "apps/web/vite.preparation-workers.ts:48"] },
+                { f: "PH", to: "SV", t: "ret", n: "MP3" },
+                { f: "SV", to: "SV", t: "self", n: "check for breathy noise (re-ask ≤ 2)" },
                 { f: "SV", to: "DK", t: "async", n: "write <key>.bin + .json · done += 1" },
               ] },
             ] },
@@ -638,7 +656,8 @@ const SEQS = {
       { id: "happy", n: "Prepare a reading on the Mac mini", pick: { submit: 1 } },
       { id: "overflow", n: "Mac busy: overflow to the container", pick: { submit: 1, machine: 1 } },
       { id: "restart", n: "VoiceStudio restarts mid-job", pick: { submit: 1, outcome: 1 } },
-      { id: "busy", n: "No compatible machine free", pick: { submit: 1, machine: 2 } },
+      { id: "phonon", n: "Prepare a Phonon reading", pick: { submit: 1, machine: 2 } },
+      { id: "busy", n: "No compatible machine free", pick: { submit: 1, machine: 3 } },
       { id: "cached", n: "Everything already cached", pick: { none: 0 } },
       { id: "shared", n: "Another device already prepared it", pick: { submit: 0 } },
       { id: "failed", n: "Job fails", pick: { submit: 1, end: 1 } },
