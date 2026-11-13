@@ -10,6 +10,7 @@ import { LiveRegion } from "./LiveRegion";
 import { PullToRefresh } from "./PullToRefresh";
 import { useShortcuts } from "../hooks/useShortcuts";
 import { useBreakpoint } from "../hooks/useMedia";
+import { useHistoryTrail } from "../hooks/useBack";
 import { usePlayer } from "../state/player";
 import { useToast } from "../state/toast";
 import { useLinkToasts } from "../state/links";
@@ -17,6 +18,7 @@ import { ClipboardImportContext, useClipboardImportController } from "../hooks/u
 
 export function Shell() {
   useShortcuts();
+  useHistoryTrail();
   useLinkToasts();
   const bp = useBreakpoint();
   const mainRef = useRef<HTMLElement>(null);

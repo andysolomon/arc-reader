@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { Link, useNavigate, useNavigationType } from "react-router-dom";
 import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, UserRound, BookOpen, ChevronRight, ListPlus } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
@@ -39,6 +39,12 @@ type Entry = { kind: "doc"; it: LibraryItem } | { kind: "book"; shelf: Shelf; du
 /** Books left open stay open while you go and read a chapter. */
 const openBooks = new Set<string>();
 
+/** How the Library was left, so stepping back from a document lands on the same row. */
+const left = { q: "", vf: null as string | null, cf: null as string | null, favoritesOnly: false, top: 0 };
+
+/** A click on a row opens its document unless it landed on one of the row's own controls or finished a text selection. */
+const opensDocument = (e: MouseEvent<HTMLElement>) => !(e.target as Element).closest("button, a, input, label") && !window.getSelection()?.toString();
+
 export function LibraryPage() {
   const navigate = useNavigate();
   const bp = useBreakpoint();
@@ -52,17 +58,26 @@ export function LibraryPage() {
   const voices = useVoices((s) => s.voices);
   const hasDoc = usePlayer((s) => !!s.doc);
   const sync = useLibrarySync();
-  const [q, setQ] = useState("");
-  const [vf, setVf] = useState<string | null>(null);
-  const [cf, setCf] = useState<string | null>(null);
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  // Back and forward return to the Library as it was; arriving any other way starts it afresh.
+  const returning = useNavigationType() === "POP";
+  const [q, setQ] = useState(returning ? left.q : "");
+  const [vf, setVf] = useState<string | null>(returning ? left.vf : null);
+  const [cf, setCf] = useState<string | null>(returning ? left.cf : null);
+  const [favoritesOnly, setFavoritesOnly] = useState(returning && left.favoritesOnly);
   const [filing, setFiling] = useState(false);
   const jevReady = useJev((s) => !!s.config?.configured);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [prepareIds, setPrepareIds] = useState<string[] | null>(null);
   const closePrepare = useCallback(() => setPrepareIds(null), []);
   const searchRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLElement>(null);
 
+  useLayoutEffect(() => {
+    if (returning && scrollRef.current) scrollRef.current.scrollTop = left.top;
+    else left.top = 0;
+    // Only how the Library was entered matters.
+  }, []);
+  useEffect(() => { Object.assign(left, { q, vf, cf, favoritesOnly }); }, [q, vf, cf, favoritesOnly]);
   useEffect(() => {
     void refresh();
   }, [refresh, voices, openaiModel]);
@@ -176,7 +191,7 @@ export function LibraryPage() {
   };
 
   return (
-    <section data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
+    <section ref={scrollRef} onScroll={(e) => { left.top = e.currentTarget.scrollTop; }} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-8 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[880px] flex-col gap-5">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="m-0 flex-1 font-serif text-[26px] font-medium">Library</h1>
@@ -560,14 +575,17 @@ function SourceIcon({ rec }: { rec: LibraryItem["rec"] }) {
 /** Five 44px actions, their gaps and the panel's padding. */
 const SWIPE_W = 5 * 44 + 4 * 2 + 16;
 
-/** List row. Hover reveals actions; on touch, swipe left reveals them. */
+/** List row. A click or tap opens the document. Hover reveals actions; on touch, swipe left reveals them. */
 function Row(props: ItemProps & { touch: boolean }) {
   const { it, touch } = props;
   const [dx, setDx] = useState(0);
   const [open, setOpen] = useState(false);
   const start = useRef<{ x: number; y: number; id: number } | null>(null);
+  /** The press now ending was a swipe, so it must not also open the document */
+  const swiped = useRef(false);
 
   const onDown = (e: PointerEvent<HTMLLIElement>) => {
+    swiped.current = false;
     if (!touch || e.pointerType === "mouse") return;
     start.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
   };
@@ -576,7 +594,16 @@ function Row(props: ItemProps & { touch: boolean }) {
     const ddx = e.clientX - start.current.x;
     const ddy = e.clientY - start.current.y;
     if (Math.abs(ddy) > Math.abs(ddx)) return;
+    if (Math.abs(ddx) > 8) swiped.current = true;
     setDx(Math.max(-SWIPE_W, Math.min(0, (open ? -SWIPE_W : 0) + ddx)));
+  };
+  const onRowClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (swiped.current || !opensDocument(e)) return;
+    // With the actions showing, a tap on the row puts them away first.
+    if (touch && open) {
+      setOpen(false);
+      setDx(0);
+    } else props.open(it);
   };
   const onUp = () => {
     if (!start.current) return;
@@ -603,7 +630,8 @@ function Row(props: ItemProps & { touch: boolean }) {
       )}
       {/* The checkbox hangs in a narrow margin and the progress ring trails the title, so text runs the width of the row. */}
       <div
-        className={cn("relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 bg-bg2 px-5 py-4 transition-[background-color,transform] duration-fast group-hover:bg-bg3 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:gap-x-3.5", props.selected && "!bg-bg3")}
+        onClick={onRowClick}
+        className={cn("relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 bg-bg2 px-5 py-4 transition-[background-color,transform] duration-fast group-hover:bg-bg3 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:gap-x-3.5", props.selected && "!bg-bg3")}
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
       >
         <DocumentSelection {...props} className="col-start-1 row-start-1 mt-1" />
@@ -625,7 +653,7 @@ function Row(props: ItemProps & { touch: boolean }) {
 function CardItem(props: ItemProps) {
   const { it } = props;
   return (
-    <li className={cn("group flex min-h-[170px] flex-col gap-3.5 rounded-card border border-line bg-bg2 p-[18px] transition-colors duration-fast hover:border-fg3", props.selected && "!border-accent")}>
+    <li onClick={(e) => { if (opensDocument(e)) props.open(it); }} className={cn("group flex min-h-[170px] cursor-pointer flex-col gap-3.5 rounded-card border border-line bg-bg2 p-[18px] transition-colors duration-fast hover:border-fg3", props.selected && "!border-accent")}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-3"><DocumentSelection {...props} /><ReadProgress value={it.progress} size={36} /></div>
         <Actions {...props} size={32} className="opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100" />
@@ -644,6 +672,11 @@ function CardItem(props: ItemProps) {
   );
 }
 
+/** The checkbox answers a little beyond its edges, so a near miss selects the row instead of opening its document. */
 function DocumentSelection({ it, selected, toggleSelected, className }: ItemProps & { className?: string }) {
-  return <input type="checkbox" aria-label={`Select ${catalogue(it.rec).title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} onPointerDown={(e) => e.stopPropagation()} className={cn("size-4 shrink-0 cursor-pointer accent-[var(--accent)]", className)} />;
+  return (
+    <label onPointerDown={(e) => e.stopPropagation()} className={cn("relative grid shrink-0 cursor-pointer place-items-center before:absolute before:-inset-2.5 before:content-['']", className)}>
+      <input type="checkbox" aria-label={`Select ${catalogue(it.rec).title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} className="relative size-4 cursor-pointer accent-[var(--accent)]" />
+    </label>
+  );
 }
