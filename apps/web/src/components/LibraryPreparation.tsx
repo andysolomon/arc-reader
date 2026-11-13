@@ -82,7 +82,7 @@ export function PreparedStatus({ it, defaultVoice, onDetails }: { it: LibraryIte
   );
 }
 
-export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]; onClose: () => void }) {
+export function PrepareDialog({ documents, onClose, onQueued }: { documents: LibraryItem[]; onClose: () => void; /** Preparation was asked for, rather than the dialog dismissed */ onQueued?: () => void }) {
   const voices = useVoices((s) => s.voices);
   const defaultVoice = useSettings((s) => s.voice);
   const available = useMemo(() => voices.filter((v) => v.engine !== LOCAL_ENGINE && !!baseFor(v.engine)), [voices]);
@@ -116,6 +116,7 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
   const start = () => {
     const count = usePreparation.getState().enqueue(documents.map((it) => it.rec), chosen);
     toast(count ? `Queued ${count} ${count === 1 ? "reading" : "readings"} to prepare` : "These readings are already queued");
+    onQueued?.();
     onClose();
   };
   return (

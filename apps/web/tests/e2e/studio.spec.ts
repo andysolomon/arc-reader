@@ -178,7 +178,7 @@ test("transcribes a file and saves edited text to Library", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Download subtitles" })).toBeDisabled();
   await page.getByRole("button", { name: "Save to Library" }).click();
   await expect(page).toHaveURL(/\/library$/);
-  await expect(page.getByText("meeting", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-screen="library"]').getByText("meeting", { exact: true })).toBeVisible();
 });
 
 test("dubs a video through upload, script review and resumable render", async ({ page }) => {

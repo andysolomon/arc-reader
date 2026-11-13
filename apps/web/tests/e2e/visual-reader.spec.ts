@@ -33,7 +33,8 @@ for (const width of [390, 1440]) {
       if (request.url().endsWith("/api/preparations")) spoken.push(...request.postDataJSON().requests.map((r: { text: string }) => r.text));
     });
     // Pasted URL import uses the same fetch path as the composer and share target.
-    await page.goto("/");
+    // A phone opens on the Library, so Compose is asked for by name.
+    await page.goto("/compose");
     await page.locator('[data-screen="compose"]').evaluate((target) => {
       const clipboardData = new DataTransfer();
       clipboardData.setData("text/plain", "https://example.com/story");

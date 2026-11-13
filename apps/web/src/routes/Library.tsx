@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate, useNavigationType } from "react-router-dom";
-import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Globe, FileText, ClipboardList, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, UserRound, BookOpen, ChevronRight, ListPlus } from "lucide-react";
+import { Search, LayoutList, LayoutGrid, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X } from "lucide-react";
 import { Button, Chip, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
-import { useLibrary, type LibraryItem } from "../state/library";
+import { searchable, useLibrary, type LibraryItem } from "../state/library";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { usePreparation } from "../state/preparation";
 import { toast } from "../state/toast";
-import { dateLabel } from "../lib/dates";
+import { agoLabel, dateLabel } from "../lib/dates";
 import { openDocument } from "../lib/openDoc";
 import { FOCUS_SEARCH_EVENT } from "../hooks/useShortcuts";
 import { useBreakpoint, useIsTouch } from "../hooks/useMedia";
@@ -24,17 +24,12 @@ import { estimatePremium, type PremiumEstimate } from "../lib/premiumEstimate";
 import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
 import { catalogue } from "../lib/postTitle";
-import { finished, nextUnread, shelves, useBooks, type Shelf } from "../state/books";
+import { entriesOf, finished, nextUnread, shelves, useBooks, type LibraryEntry, type Shelf } from "../state/books";
+import { BookMark, SourceMark } from "../components/SourceMark";
 import { partNames } from "../lib/book";
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
-
-/** Everything a researcher might remember a document by. */
-const searchable = ({ rec }: LibraryItem) => [rec.title, rec.domain, rec.book?.title, rec.category?.name, ...Object.values(rec.meta ?? {})].join("\n").toLowerCase();
-
-/** A row of the Library: a document, or a book standing in for its chapters. */
-type Entry = { kind: "doc"; it: LibraryItem } | { kind: "book"; shelf: Shelf; duration: number };
 
 /** Books left open stay open while you go and read a chapter. */
 const openBooks = new Set<string>();
@@ -42,7 +37,7 @@ const openBooks = new Set<string>();
 /** How the Library was left, so stepping back from a document lands on the same row. */
 const left = { q: "", vf: null as string | null, cf: null as string | null, favoritesOnly: false, top: 0 };
 
-/** A click on a row opens its document unless it landed on one of the row's own controls or finished a text selection. */
+/** A click on a row is for the row (open its document, or pick it while selecting) unless it landed on one of the row's own controls or finished a text selection. */
 const opensDocument = (e: MouseEvent<HTMLElement>) => !(e.target as Element).closest("button, a, input, label") && !window.getSelection()?.toString();
 
 export function LibraryPage() {
@@ -66,7 +61,10 @@ export function LibraryPage() {
   const [favoritesOnly, setFavoritesOnly] = useState(returning && left.favoritesOnly);
   const [filing, setFiling] = useState(false);
   const jevReady = useJev((s) => !!s.config?.configured);
+  // Selecting is a mode: rows show no checkboxes until you ask to pick several, and it ends once they are queued.
+  const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const stopSelecting = useCallback(() => { setSelecting(false); setSelected(new Set()); }, []);
   const [prepareIds, setPrepareIds] = useState<string[] | null>(null);
   const closePrepare = useCallback(() => setPrepareIds(null), []);
   const [details, setDetails] = useState<Reading | null>(null);
@@ -98,6 +96,13 @@ export function LibraryPage() {
     return () => window.removeEventListener(FOCUS_SEARCH_EVENT, on);
   }, []);
 
+  useEffect(() => {
+    if (!selecting || prepareIds) return;
+    const on = (e: KeyboardEvent) => { if (e.key === "Escape") stopSelecting(); };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [selecting, prepareIds, stopSelecting]);
+
   const usedVoices = useMemo(() => Array.from(new Set(items.flatMap((i) => [i.rec.voice ?? defaultVoice, ...i.prepared.map((v) => v.voiceId)]))), [items, defaultVoice]);
   const voiceName = (id: string) => voices.find((v) => v.id === id)?.name ?? items.flatMap((i) => i.prepared).find((v) => v.voiceId === id)?.name ?? id;
   const categories = useMemo(() => {
@@ -121,22 +126,11 @@ export function LibraryPage() {
     });
   }, [items, q, vf, cf, favoritesOnly, defaultVoice]);
   const library = useMemo(() => shelves(items), [items]);
-  // Two or more chapters of a book share one row, placed where its newest chapter would be.
   const entries = useMemo(() => {
-    const books = shelves(filtered);
-    const placed = new Set<string>();
-    const list: Entry[] = [];
-    for (const it of filtered) {
-      const shelf = it.rec.book ? books.get(it.rec.book.id) : undefined;
-      if (!shelf || shelf.items.length < 2) list.push({ kind: "doc", it });
-      else if (!placed.has(shelf.id)) {
-        placed.add(shelf.id);
-        list.push({ kind: "book", shelf, duration: shelf.items.reduce((sum, chapter) => sum + chapter.duration, 0) });
-      }
-    }
+    const list = entriesOf(filtered);
     // Items arrive newest first; equal durations keep that order.
     if (libSort === "created") return list;
-    const length = (entry: Entry) => entry.kind === "doc" ? entry.it.duration : entry.duration;
+    const length = (entry: LibraryEntry) => entry.kind === "doc" ? entry.it.duration : entry.duration;
     return list.sort((a, b) => libSort === "shortest" ? length(a) - length(b) : length(b) - length(a));
   }, [filtered, libSort]);
   const [, setOpened] = useState(0);
@@ -158,9 +152,17 @@ export function LibraryPage() {
   const grid = bp === "md" || libView === "grid";
   const selectedItems = items.filter((it) => selected.has(it.rec.id));
   const allVisibleSelected = filtered.length > 0 && filtered.every((it) => selected.has(it.rec.id));
-  const toggleSelected = (id: string) => setSelected((prev) => {
+  const toggleSelected = (id: string) => {
+    setSelecting(true);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleVisible = () => setSelected((prev) => {
     const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
+    for (const it of filtered) { if (allVisibleSelected) next.delete(it.rec.id); else next.add(it.rec.id); }
     return next;
   });
 
@@ -219,6 +221,11 @@ export function LibraryPage() {
               </IconButton>
             </div>
           )}
+          {items.length > 0 && (
+            <Button aria-pressed={selecting} leading={<ListChecks size={16} strokeWidth={1.5} />} className={cn("h-[38px]", selecting && "!bg-bg3")} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+              Select
+            </Button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-[13px] text-fg2" role="status" aria-label="Library sync">
           <span>{sync.status === "synced" ? "Shared library · Synced" : sync.status === "syncing" ? "Shared library · Syncing…" : sync.pending ? "Saved on this device · Waiting to sync" : "Server unavailable · Showing saved library"}</span>
@@ -261,24 +268,19 @@ export function LibraryPage() {
             )}
           </div>
         )}
-        {items.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex cursor-pointer items-center gap-2 text-[13px] text-fg2">
-              <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={allVisibleSelected} disabled={filtered.length === 0} onChange={() => setSelected((prev) => {
-                const next = new Set(prev);
-                for (const it of filtered) { if (allVisibleSelected) next.delete(it.rec.id); else next.add(it.rec.id); }
-                return next;
-              })} />
-              Select {q || vf || cf || favoritesOnly ? "visible" : "all"}
-            </label>
-            <span className="flex-1 text-[13px] text-fg2">{selectedItems.length > 0 ? `${selectedItems.length} selected` : "Select documents to prepare together"}</span>
-            {selectedItems.length > 0 && <Button variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>}
-            <Button leading={<Zap size={15} />} disabled={selectedItems.length === 0} onClick={() => setPrepareIds(selectedItems.map((it) => it.rec.id))}>Prepare selected</Button>
+        {selecting && (
+          <div role="toolbar" aria-label="Selection" className="sticky top-2 z-20 -mx-2 flex flex-wrap items-center gap-1.5 rounded-panel border border-line bg-bg2 py-1.5 pl-1.5 pr-2 shadow-overlay">
+            <IconButton label="Done selecting" onClick={stopSelecting}>
+              <X size={18} strokeWidth={1.5} />
+            </IconButton>
+            <span className="min-w-0 flex-1 truncate text-[13px] text-fg" role="status">{selectedItems.length > 0 ? `${selectedItems.length} selected` : "Choose documents to prepare together"}</span>
+            <Button variant="ghost" aria-pressed={allVisibleSelected} disabled={filtered.length === 0} onClick={toggleVisible}>Select {q || vf || cf || favoritesOnly ? "visible" : "all"}</Button>
+            <Button variant="primary" leading={<Zap size={15} />} disabled={selectedItems.length === 0} onClick={() => setPrepareIds(selectedItems.map((it) => it.rec.id))}>Prepare selected</Button>
           </div>
         )}
         <PreparationQueue onDetails={setDetails} />
         {loaded && items.length === 0 && (
-          <EmptyState action={<Link to="/">Paste something to listen to</Link>}>Nothing here yet. Documents you listen to appear here with your place saved.</EmptyState>
+          <EmptyState action={<Link to="/compose">Paste something to listen to</Link>}>Nothing here yet. Documents you listen to appear here with your place saved.</EmptyState>
         )}
         {items.length > 0 && filtered.length === 0 && (
           <EmptyState
@@ -292,13 +294,13 @@ export function LibraryPage() {
           </EmptyState>
         )}
         {filtered.length > 0 && !grid && (
-          <ul className="-mx-5 m-0 flex list-none flex-col overflow-hidden border-y border-line bg-bg2 p-0 sm:mx-0 sm:rounded-card sm:border-x">
+          <ul className="m-0 -mx-5 flex list-none flex-col border-t border-line p-0 sm:-mx-4">
             {entries.map((entry) => entry.kind === "doc" ? (
-              <Row key={entry.it.rec.id} it={entry.it} touch={touch} defaultVoice={defaultVoice} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
+              <Row key={entry.it.rec.id} it={entry.it} touch={touch} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
             ) : (
               <BookGroup key={entry.shelf.id} {...bookProps(entry.shelf)}>
                 {entry.shelf.items.map((it) => (
-                  <Row key={it.rec.id} it={it} inBook touch={touch} defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+                  <Row key={it.rec.id} it={it} inBook touch={touch} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
                 ))}
               </BookGroup>
             ))}
@@ -307,11 +309,11 @@ export function LibraryPage() {
         {filtered.length > 0 && grid && (
           <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 p-0">
             {entries.map((entry) => entry.kind === "doc" ? (
-              <CardItem key={entry.it.rec.id} it={entry.it} defaultVoice={defaultVoice} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
+              <CardItem key={entry.it.rec.id} it={entry.it} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
             ) : (
               <BookGroup key={entry.shelf.id} {...bookProps(entry.shelf)}>
                 {entry.shelf.items.map((it) => (
-                  <CardItem key={it.rec.id} it={it} inBook defaultVoice={defaultVoice} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+                  <CardItem key={it.rec.id} it={it} inBook defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
                 ))}
               </BookGroup>
             ))}
@@ -319,7 +321,7 @@ export function LibraryPage() {
         )}
       </div>
       {detailsItem && details && !prepareIds && <PreparationDetails it={detailsItem} reading={details} defaultVoice={defaultVoice} onClose={closeDetails} onChooseVoices={() => { setDetails(null); setPrepareIds([details.docId]); }} />}
-      {prepareIds && <PrepareDialog documents={items.filter((it) => prepareIds.includes(it.rec.id))} onClose={closePrepare} />}
+      {prepareIds && <PrepareDialog documents={items.filter((it) => prepareIds.includes(it.rec.id))} onClose={closePrepare} onQueued={stopSelecting} />}
     </section>
   );
 }
@@ -329,6 +331,8 @@ interface ItemProps {
   /** Listed under its book, which already names the book and orders the chapters */
   inBook?: boolean;
   defaultVoice: string;
+  /** Picking several documents: a press picks one instead of opening it */
+  selecting: boolean;
   selected: boolean;
   /** Premium read estimate, for favorites */
   estimate?: PremiumEstimate;
@@ -343,6 +347,15 @@ interface ItemProps {
   revoice: (it: LibraryItem) => void;
   del: (it: LibraryItem) => void;
 }
+
+/** Open a document, or pick it while selecting. Ctrl or ⌘ starts a selection from an ordinary click. */
+function activate(e: MouseEvent<HTMLElement>, { it, selecting, toggleSelected, open }: ItemProps) {
+  if (selecting || e.metaKey || e.ctrlKey) toggleSelected(it.rec.id);
+  else open(it);
+}
+
+const TITLE = "line-clamp-2 border-0 bg-transparent p-0 text-left text-[16px] font-medium leading-[22px] text-fg sm:text-[15px]";
+const PICKED = "!bg-[color-mix(in_oklch,var(--accent)_8%,var(--bg))]";
 
 function Actions({ it, resume, revoice, prepare, favorite, del, size = 36, className }: ItemProps & { size?: 32 | 36 | 44; className?: string }) {
   const starred = !!it.rec.favoritedAt;
@@ -367,19 +380,34 @@ function Actions({ it, resume, revoice, prepare, favorite, del, size = 36, class
   );
 }
 
+/** What leads a row: where the document came from, or while selecting, whether it is picked. */
+function Lead({ it, inBook, selecting, selected, className }: Pick<ItemProps, "it" | "inBook" | "selecting" | "selected"> & { className?: string }) {
+  if (selecting) {
+    return (
+      <span aria-hidden className={cn("grid size-6 shrink-0 place-items-center", className)}>
+        <span className={cn("grid size-[22px] place-items-center rounded-full border-[1.5px] transition-colors duration-fast", selected ? "border-accent bg-accent text-accent-fg" : "border-fg3")}>
+          {selected && <Check size={13} strokeWidth={3} />}
+        </span>
+      </span>
+    );
+  }
+  // A chapter sits under its book's mark.
+  if (inBook) return <span aria-hidden className={cn("size-6 shrink-0", className)} />;
+  return <SourceMark rec={it.rec} className={className} />;
+}
+
 /**
  * Facts about a document, shortest first so a narrow row breaks before the long ones.
  * Each separator belongs to the fact after it and the one starting a line is clipped,
  * so a wrap never strands a dot. The reading voice is in the prepared-audio chips.
  */
-function Meta({ it, inBook, withDate, estimate, className }: { it: LibraryItem; inBook?: boolean; withDate?: boolean; estimate?: PremiumEstimate; className?: string }) {
+function Meta({ it, inBook, card, estimate, className }: { it: LibraryItem; inBook?: boolean; /** A card has no trailing edge, so its facts carry the date and readings too */ card?: boolean; estimate?: PremiumEstimate; className?: string }) {
+  const { author } = catalogue(it.rec);
   return (
-    <div className={cn("min-w-0 overflow-hidden text-[12px] leading-[18px] text-fg2", className)}>
+    <div className={cn("min-w-0 overflow-hidden text-[13px] leading-5 text-fg2", className)}>
       <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
-        <Fact>
-          <SourceIcon rec={it.rec} />
-          <span className="truncate">{it.rec.domain}</span>
-        </Fact>
+        {author && <Fact title="Author"><span className="truncate">{author}</span></Fact>}
+        <Fact><span className="truncate">{it.rec.domain}</span></Fact>
         <Fact className="tabular-nums">{fmtTime(it.duration)}</Fact>
         {it.rec.book && !inBook && (
           <Fact title={`${partNames(it.rec.book).One} ${it.rec.book.chapter} of ${it.rec.book.title}`}>
@@ -387,8 +415,8 @@ function Meta({ it, inBook, withDate, estimate, className }: { it: LibraryItem; 
             <span className="truncate">{partNames(it.rec.book).short} {it.rec.book.chapter} · {it.rec.book.title}</span>
           </Fact>
         )}
-        {withDate && <Fact title="Added">{dateLabel(it.rec.createdAt)}</Fact>}
-        {it.reads > 0 && <Fact><ReadBadge reads={it.reads} /></Fact>}
+        {card && <Fact title={`Added ${dateLabel(it.rec.createdAt)}`} className="tabular-nums">{agoLabel(it.rec.createdAt)}</Fact>}
+        {card && it.reads > 0 && <Fact><ReadBadge reads={it.reads} /></Fact>}
         {it.rec.category && (
           <Fact title={it.rec.category.by === "jev" ? "Filed by Jev" : "Category"}>
             <Tag size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
@@ -406,7 +434,7 @@ const rowTitle = ({ it, inBook }: Pick<ItemProps, "it" | "inBook">) => `${inBook
 
 /**
  * A book's chapters behind one row: how far through the book you are, with the chapters
- * a click away. Continue picks up at the first chapter you haven't finished.
+ * a press away. Continue picks up at the first chapter you haven't finished.
  */
 function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, onComplete, children }: {
   /** The chapters that pass the current filters */
@@ -434,60 +462,42 @@ function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, 
   const started = heard > 0;
   const panel = `book-${shelf.id.replace(/\W/g, "-")}`;
   return (
-    <li data-book={shelf.title} className={cn(grid ? "col-span-full overflow-hidden rounded-card border border-line bg-bg2" : "border-b border-line last:border-b-0")}>
-      <div className={cn("grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 bg-bg2 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:gap-x-3.5", grid ? "p-[18px]" : "px-5 py-4")}>
-        <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} ${many} of ${shelf.title}`} onClick={onToggle} className="col-start-1 row-start-1 -m-1 grid size-6 place-items-center rounded-control border-0 bg-transparent text-fg2 hover:bg-bg3 hover:text-fg">
+    <li data-book={shelf.title} className={cn(grid ? "col-span-full overflow-hidden rounded-card border border-line bg-bg2" : "border-b border-line")}>
+      <div
+        onClick={(e) => { if (opensDocument(e)) onToggle(); }}
+        className={cn("grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 transition-colors duration-fast", grid ? "p-4" : "px-5 py-3.5 active:bg-bg2 sm:px-4 [@media(hover:hover)]:hover:bg-bg2")}
+      >
+        <BookMark />
+        <div className={cn(TITLE, "min-w-0")}>{shelf.title}</div>
+        <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} ${many} of ${shelf.title}`} onClick={onToggle} className="-mr-1 grid size-[22px] shrink-0 place-items-center rounded-control border-0 bg-transparent text-fg3 hover:text-fg">
           <ChevronRight size={16} strokeWidth={1.5} className={cn("transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
         </button>
-        <div className="col-start-2 row-start-1 min-w-0">
-          <button type="button" onClick={onToggle} tabIndex={-1} aria-hidden className="line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
-            {shelf.title}
-          </button>
-        </div>
-        <div className="col-start-2 row-start-2 min-w-0 overflow-hidden text-[12px] leading-[18px] text-fg2">
+        <div className="col-span-2 col-start-2 mt-0.5 min-w-0 overflow-hidden text-[13px] leading-5 text-fg2">
           <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
-            <Fact><BookOpen size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />{whole.kind === "course" ? "Course" : "Book"}</Fact>
+            <Fact>{whole.kind === "course" ? "Course" : "Book"}</Fact>
             <Fact className="tabular-nums">{missing > 0 ? `${have} of ${whole.chapters} ${many}` : `${have} ${many}`}</Fact>
             <Fact className="tabular-nums">{fmtTime(total)}</Fact>
             {read > 0 && <Fact className="tabular-nums text-accent">{read === have ? "All read" : `${read} read`}</Fact>}
             {shelf.items.length < whole.items.length && <Fact className="tabular-nums">{shelf.items.length} shown</Fact>}
           </div>
         </div>
-        {(adding || ((missing > 0 || growing) && onComplete)) && (
-          <div className="col-span-2 col-start-2 row-start-3 mt-1.5 text-[13px] text-fg2 sm:col-span-1">
+        <div className="col-span-2 col-start-2 mt-1 flex items-start justify-between gap-3">
+          <div className="-ml-2 flex flex-wrap items-center gap-x-1 text-[13px] text-fg2">
+            <Button variant="ghost" className="px-2" aria-label={`${started ? "Continue" : "Start"} ${shelf.title}`} leading={<Play size={15} strokeWidth={1.5} />} onClick={onContinue}>{started ? "Continue" : "Start"}</Button>
+            <Button variant="ghost" className="px-2" aria-label={`Prepare audio for ${shelf.title}`} leading={<Zap size={15} strokeWidth={1.5} />} onClick={onPrepare}>Prepare</Button>
             {adding
-              ? <span role="status" className="tabular-nums">{adding.total ? `Adding ${many} · ${adding.done} of ${adding.total}` : `Checking for new ${many}…`}</span>
-              : <Button variant="ghost" className="-ml-3" leading={<ListPlus size={15} strokeWidth={1.5} />} onClick={onComplete}>{missing <= 0 ? `Check for new ${many}` : missing === 1 ? `Add the missing ${one}` : `Add the ${missing} missing ${many}`}</Button>}
+              ? <span role="status" className="px-2 tabular-nums">{adding.total ? `Adding ${many} · ${adding.done} of ${adding.total}` : `Checking for new ${many}…`}</span>
+              : (missing > 0 || growing) && onComplete && <Button variant="ghost" className="px-2" leading={<ListPlus size={15} strokeWidth={1.5} />} onClick={onComplete}>{missing <= 0 ? `Check for new ${many}` : missing === 1 ? `Add the missing ${one}` : `Add the ${missing} missing ${many}`}</Button>}
           </div>
-        )}
-        <ReadProgress value={total ? heard / total : 0} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3" />
-        <div className="col-span-2 col-start-2 row-start-4 -ml-2 flex gap-0.5 sm:col-span-1 sm:col-start-3 sm:row-span-3 sm:row-start-1 sm:-my-0.5 sm:ml-0">
-          <IconButton label={`${started ? "Continue" : "Start"} ${shelf.title}`} onClick={onContinue}>
-            <Play size={20} strokeWidth={1.5} />
-          </IconButton>
-          <IconButton label={`Prepare audio for ${shelf.title}`} onClick={onPrepare}>
-            <Zap size={20} strokeWidth={1.5} />
-          </IconButton>
+          <Progress value={total ? heard / total : 0} className="h-[34px]" />
         </div>
       </div>
       {open && (
-        <ul id={panel} aria-label={`${One}s of ${shelf.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 bg-bg p-[18px]" : "flex flex-col pl-4 sm:pl-8")}>
+        <ul id={panel} aria-label={`${One}s of ${shelf.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 bg-bg p-4" : "flex flex-col [&>li:last-child]:border-b-0")}>
           {children}
         </ul>
       )}
     </li>
-  );
-}
-
-/** Who wrote it, on its own line under the title. */
-function Author({ it, className }: { it: LibraryItem; className?: string }) {
-  const { author } = catalogue(it.rec);
-  if (!author) return null;
-  return (
-    <p className={cn("m-0 flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px] text-fg2", className)}>
-      <UserRound size={12} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
-      <span className="truncate">{author}</span>
-    </p>
   );
 }
 
@@ -555,12 +565,14 @@ function ReadBadge({ reads }: { reads: number }) {
   );
 }
 
-/** Listening progress: a ring with the percentage inside, or a check once finished. */
-function ReadProgress({ value, size = 40, className }: { value: number; size?: 36 | 40; className?: string }) {
-  const percent = Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+const percentOf = (value: number) => Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+
+/** Listening progress for a card: a ring with the percentage inside, or a check once finished. */
+function ReadProgress({ value, className }: { value: number; className?: string }) {
+  const percent = percentOf(value);
   return (
-    <div className={cn("relative grid shrink-0 place-items-center", className)} style={{ width: size, height: size }}>
-      <ProgressRing value={value} size={size} />
+    <div className={cn("relative grid size-9 shrink-0 place-items-center", className)}>
+      <ProgressRing value={value} size={36} />
       <span aria-hidden className="absolute inset-0 grid place-items-center text-[10px] font-medium tabular-nums text-fg2">
         {percent >= 100 ? <Check size={14} strokeWidth={2} className="text-accent" /> : `${percent}%`}
       </span>
@@ -568,23 +580,28 @@ function ReadProgress({ value, size = 40, className }: { value: number; size?: 3
   );
 }
 
-/** Site favicon for articles, via the server so the browser never reports library sites elsewhere. */
-function SourceIcon({ rec }: { rec: LibraryItem["rec"] }) {
-  const [failed, setFailed] = useState(false);
-  const site = (rec.source === "url" || rec.source === "share") && rec.domain.includes(".") && !/[\s/]/.test(rec.domain);
-  if (site && !failed) {
-    return <img src={`/api/favicon?host=${encodeURIComponent(rec.domain)}`} alt="" width={14} height={14} loading="lazy" decoding="async" onError={() => setFailed(true)} className="size-3.5 shrink-0 rounded-[3px]" />;
-  }
-  const Icon = site ? Globe : rec.source === "file" ? FileText : ClipboardList;
-  return <Icon size={14} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />;
+/** Listening progress on a row's trailing edge: past readings, the percentage once begun, and a small ring. */
+function Progress({ value, reads = 0, className }: { value: number; reads?: number; className?: string }) {
+  const percent = percentOf(value);
+  return (
+    <span className={cn("flex h-7 shrink-0 items-center gap-1.5 text-[12px] text-fg2", className)}>
+      {reads > 0 && <ReadBadge reads={reads} />}
+      {percent > 0 && percent < 100 && <span aria-hidden className="tabular-nums">{percent}%</span>}
+      {percent >= 100 && reads === 0 && <Check size={13} strokeWidth={2} className="text-accent" aria-hidden />}
+      <ProgressRing value={value} size={22} stroke={2} />
+    </span>
+  );
 }
 
 /** Five 44px actions, their gaps and the panel's padding. */
 const SWIPE_W = 5 * 44 + 4 * 2 + 16;
 
-/** List row. A click or tap opens the document. Hover reveals actions; on touch, swipe left reveals them. */
+/**
+ * List row, edge to edge: a press anywhere opens the document. Hover reveals its actions
+ * over the trailing edge; on touch, swipe left reveals them.
+ */
 function Row(props: ItemProps & { touch: boolean }) {
-  const { it, touch } = props;
+  const { it, touch, selecting, selected, inBook } = props;
   const [dx, setDx] = useState(0);
   const [open, setOpen] = useState(false);
   const start = useRef<{ x: number; y: number; id: number } | null>(null);
@@ -604,14 +621,6 @@ function Row(props: ItemProps & { touch: boolean }) {
     if (Math.abs(ddx) > 8) swiped.current = true;
     setDx(Math.max(-SWIPE_W, Math.min(0, (open ? -SWIPE_W : 0) + ddx)));
   };
-  const onRowClick = (e: MouseEvent<HTMLDivElement>) => {
-    if (swiped.current || !opensDocument(e)) return;
-    // With the actions showing, a tap on the row puts them away first.
-    if (touch && open) {
-      setOpen(false);
-      setDx(0);
-    } else props.open(it);
-  };
   const onUp = () => {
     if (!start.current) return;
     start.current = null;
@@ -620,10 +629,17 @@ function Row(props: ItemProps & { touch: boolean }) {
     setDx(o ? -SWIPE_W : 0);
   };
   const offset = touch ? dx : 0;
+  const press = (e: MouseEvent<HTMLElement>) => {
+    // The click that ends a swipe only reveals the actions.
+    if (swiped.current) { swiped.current = false; return; }
+    // With its actions swiped into view, a press on the row puts them away.
+    if (touch && open) { setOpen(false); setDx(0); return; }
+    activate(e, props);
+  };
 
   return (
     <li
-      className="group relative touch-pan-y overflow-hidden border-b border-line last:border-b-0"
+      className="group relative touch-pan-y overflow-hidden border-b border-line"
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
@@ -635,55 +651,56 @@ function Row(props: ItemProps & { touch: boolean }) {
           <Actions {...props} size={44} />
         </div>
       )}
-      {/* The checkbox hangs in a narrow margin and the progress ring trails the title, so text runs the width of the row. */}
       <div
-        onClick={onRowClick}
-        className={cn("relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 bg-bg2 px-5 py-4 transition-[background-color,transform] duration-fast group-hover:bg-bg3 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:gap-x-3.5", props.selected && "!bg-bg3")}
+        onClick={(e) => { if (opensDocument(e)) press(e); }}
+        className={cn(
+          "relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 bg-bg px-5 py-3.5 transition-[background-color,transform] duration-fast active:bg-bg2 sm:px-4 [@media(hover:hover)]:group-hover:bg-bg2",
+          selected && PICKED,
+        )}
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
       >
-        <DocumentSelection {...props} className="col-start-1 row-start-1 mt-1" />
-        <div className="col-start-2 row-start-1 min-w-0">
-          <button type="button" onClick={() => props.open(it)} className="line-clamp-2 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[23px] text-fg hover:text-accent sm:text-[16px] sm:leading-6">
+        <Lead {...props} />
+        <div className="min-w-0">
+          <button type="button" aria-pressed={selecting ? selected : undefined} onClick={press} className={cn(TITLE, inBook && "font-normal")}>
             {rowTitle(props)}
           </button>
-          <Author it={it} className="mt-1" />
         </div>
-        <Meta it={it} inBook={props.inBook} estimate={props.estimate} withDate className="col-start-2 row-start-2" />
-        <div className="col-span-2 col-start-2 row-start-3 mt-1.5 sm:col-span-1 sm:col-start-2"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} /></div>
-        <ReadProgress value={it.progress} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3 sm:row-start-1" />
-        {!touch && <Actions {...props} className="col-span-2 col-start-2 row-start-4 -ml-2 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 sm:col-span-1 sm:col-start-3 sm:row-span-3 sm:row-start-1 sm:-my-0.5 sm:ml-0 sm:opacity-0" />}
+        <time dateTime={Number.isFinite(it.rec.createdAt) ? new Date(it.rec.createdAt).toISOString() : undefined} title={`Added ${dateLabel(it.rec.createdAt)}`} className="shrink-0 text-[12px] leading-[22px] tabular-nums text-fg2">
+          {agoLabel(it.rec.createdAt)}
+        </time>
+        <Meta it={it} inBook={inBook} estimate={props.estimate} className="col-span-2 col-start-2 mt-0.5" />
+        <div className="col-span-2 col-start-2 mt-2 flex items-start justify-between gap-3">
+          <PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} />
+          <Progress value={it.progress} reads={it.reads} />
+        </div>
+        {!touch && !selecting && (
+          <Actions {...props} size={32} className="absolute right-2 top-2 rounded-control bg-bg2 opacity-0 shadow-[-12px_0_10px_var(--bg2)] transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 sm:right-2.5" />
+        )}
       </div>
     </li>
   );
 }
 
 function CardItem(props: ItemProps) {
-  const { it } = props;
+  const { it, selecting, selected } = props;
   return (
-    <li onClick={(e) => { if (opensDocument(e)) props.open(it); }} className={cn("group flex min-h-[170px] cursor-pointer flex-col gap-3.5 rounded-card border border-line bg-bg2 p-[18px] transition-colors duration-fast hover:border-fg3", props.selected && "!border-accent")}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-3"><DocumentSelection {...props} /><ReadProgress value={it.progress} size={36} /></div>
-        <Actions {...props} size={32} className="opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100" />
+    <li
+      onClick={(e) => { if (opensDocument(e)) activate(e, props); }}
+      className={cn("group flex min-h-[170px] cursor-pointer flex-col gap-3 rounded-card border border-line bg-bg2 p-4 transition-colors duration-fast hover:border-fg3", selected && "!border-accent")}
+    >
+      <div className="flex h-9 items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5"><Lead {...props} inBook={false} /><ReadProgress value={it.progress} /></div>
+        {!selecting && <Actions {...props} size={32} className="-mr-1.5 opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100" />}
       </div>
       <div className="flex-1">
-        <button type="button" onClick={() => props.open(it)} className="line-clamp-3 border-0 bg-transparent p-0 text-left font-serif text-[17px] leading-[1.35] text-fg hover:text-accent">
+        <button type="button" aria-pressed={selecting ? selected : undefined} onClick={(e) => activate(e, props)} className={cn(TITLE, "line-clamp-3 sm:text-[16px]")}>
           {rowTitle(props)}
         </button>
-        <Author it={it} className="mt-1.5" />
+        <Meta it={it} inBook={props.inBook} estimate={props.estimate} card className="mt-1" />
       </div>
-      <div className="flex flex-col gap-2.5 border-t border-line pt-3">
-        <Meta it={it} inBook={props.inBook} estimate={props.estimate} />
+      <div className="border-t border-line pt-3">
         <PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} />
       </div>
     </li>
-  );
-}
-
-/** The checkbox answers a little beyond its edges, so a near miss selects the row instead of opening its document. */
-function DocumentSelection({ it, selected, toggleSelected, className }: ItemProps & { className?: string }) {
-  return (
-    <label onPointerDown={(e) => e.stopPropagation()} className={cn("relative grid shrink-0 cursor-pointer place-items-center before:absolute before:-inset-2.5 before:content-['']", className)}>
-      <input type="checkbox" aria-label={`Select ${catalogue(it.rec).title}`} checked={selected} onChange={() => toggleSelected(it.rec.id)} className="relative size-4 cursor-pointer accent-[var(--accent)]" />
-    </label>
   );
 }

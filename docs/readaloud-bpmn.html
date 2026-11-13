@@ -192,7 +192,7 @@ const DIAGRAMS = {
     pools: [
       { id: "P_app", n: "ReadAloud web app (browser PWA)", x: 0, y: 0, w: 3030, lanes: [
         { id: "L_user", n: "Listener", h: 150, d: "The person using the app: pastes, shares, presses play, picks voices." },
-        { id: "L_ui", n: "Screens", h: 170, d: "React Router routes: Compose (/), ReadNew (/read/new, the share target) and Reader (/read/:id).", code: [SRC + "App.tsx:48"] },
+        { id: "L_ui", n: "Screens", h: 170, d: "React Router routes: Compose (/), ReadNew (/read/new, the share target) and Reader (/read/:id).", code: [SRC + "App.tsx:58"] },
         { id: "L_player", n: "Player · usePlayer + PlaybackEngine", h: 430, d: "The Zustand player store (state/player.ts) wraps one PlaybackEngine instance (engine/engine.ts), which owns segmentation, passage planning, audio elements, the clock and prefetch.", code: [SRC + "state/player.ts:86", SRC + "engine/engine.ts:96"] },
       ], d: "Single-page app; state in Zustand stores, persistence in IndexedDB (idb) and localStorage, offline via a Workbox service worker." , code: [SRC + "main.tsx", "apps/web/vite.config.ts:25"] },
       { id: "X_server", bb: true, n: "App server (Vite) — /api/fetch page fetch · /api/vs /api/oa /api/fish speech proxy · /api/llm explanations & summaries · /api/library/sync · /api/preparations jobs", x: 0, y: 890, w: 3030, h: 70,
@@ -225,7 +225,7 @@ const DIAGRAMS = {
       { id: "G_merge", t: "gw", g: "x", n: "", x: 610, y: 235, lane: "L_ui", d: "Merge: text from Compose, a share, or a fetched page continues the same way." },
       { id: "T_create", t: "task", n: "Save the document to the Library", x: 735, y: 235, lane: "L_ui",
         d: "useLibrary.create stores a DocRecord — title, text, source, domain, page metadata, hyperlinks and an optional per-document voice — and the same transaction queues it in the outbox for library sync. If a TypeSafe key is set, Jev quietly suggests a shelf in the background. A fetched page goes through importPage first: a chapter of a book takes its title and place from the book, and the Reader offers to add the chapters the Library is missing. openDocument then hands it to the player and navigates to /read/:id; a book’s contents page opens without playing.",
-        code: [SRC + "state/library.ts:73", SRC + "lib/db.ts:190", SRC + "state/categories.ts:28", SRC + "lib/openDoc.ts:7"] },
+        code: [SRC + "state/library.ts:76", SRC + "lib/db.ts:190", SRC + "state/categories.ts:28", SRC + "lib/openDoc.ts:7"] },
       { id: "G_patois", t: "gw", g: "x", n: "Patois voice?", lp: "l", x: 860, y: 400, lane: "L_player",
         d: "player.open resolves the effective voice (the document’s own, else the default — the Librarian once the server’s voices load). The Jamaican Patois voice reads a rewritten text. A summary opened from the Reader is read as written and skips this, code explanations and resume.", code: [SRC + "state/player.ts:243", SRC + "state/player.ts:257"] },
       { id: "T_patois", t: "task", k: "service", n: "Rewrite into Jamaican Patois", x: 980, y: 400, lane: "L_player",
@@ -815,7 +815,7 @@ const DIAGRAMS = {
       { id: "P_dev", n: "Browser · lib/db.ts + lib/librarySync.ts", x: 0, y: 0, w: 1580, lanes: [
         { id: "L_store", n: "Library storage", h: 170, d: "IndexedDB readaloud v2: docs, positions, audio, plus the outbox and meta stores added for sync.", code: [SRC + "lib/db.ts:140"] },
         { id: "L_sync", n: "Sync loop", h: 200, d: "startLibrarySync runs syncLibrary on every trigger; only one run is in flight at a time.", code: [SRC + "lib/librarySync.ts:170", SRC + "lib/librarySync.ts:116"] },
-      ], d: "One shared library across devices, synced through the app server.", code: [SRC + "App.tsx:42"] },
+      ], d: "One shared library across devices, synced through the app server.", code: [SRC + "App.tsx:52"] },
       { id: "P_lsrv", n: "App server · LibraryService (/api/library/sync)", x: 0, y: 470, w: 1150, h: 170, lanes: [], d: "A plugin of the Vite server. Requests are handled one at a time.", code: ["apps/web/vite.library.ts:91"] },
       { id: "X_prepS", bb: true, n: "PreparationService — GET /api/preparations · PUT …/audio/:i", x: 1190, y: 470, w: 390, h: 80, d: "The shared catalogue of prepared readings (see Prepare whole reading).", code: ["apps/web/vite.prepare.ts:268", "apps/web/vite.prepare.ts:377"] },
     ],

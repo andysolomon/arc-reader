@@ -22,9 +22,9 @@ export async function composeText(page: Page, text: string) {
   await page.getByLabel("Text to read").fill(text);
 }
 
-/** Compose → Listen with real text. Returns once the Reader is showing. */
+/** Compose → Listen with real text. Returns once the Reader is showing. A phone opens on the Library, so Compose is asked for by name. */
 export async function composeAndListen(page: Page) {
-  await page.goto("/");
+  await page.goto("/compose");
   await composeText(page, TEXT);
   await page.getByTestId("listen").click();
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
