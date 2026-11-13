@@ -15,16 +15,28 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
-/* No double-tap zoom on repeated taps (play, skip); pinch zoom still works. */
+/* No double-tap zoom on repeated taps (play, skip). The iOS app also turns off pinch and
+   focus zoom (lockZoom in apps/web/src/lib/native.ts); browsers keep pinch zoom. */
 * {
   touch-action: manipulation;
 }
+/* No scroll indicators on touch screens, as in a native app. Content still scrolls. */
+@media (pointer: coarse) {
+  * {
+    scrollbar-width: none;
+  }
+  *::-webkit-scrollbar {
+    display: none;
+  }
+}
 /* iOS Safari zooms into any focused field under 16px. Inputs and selects outrank text-size
-   utilities here; textareas don't, so larger reading sizes (Compose) still apply. */
+   utilities here; textareas don't, so larger reading sizes (Compose) still apply.
+   `html textarea` must still outrank the bare `textarea` font resets below and in Tailwind's
+   preflight, which load later and would otherwise put textareas back to 14px. */
 @media (pointer: coarse) {
   input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]),
   select:not([multiple]),
-  textarea {
+  html textarea {
     font-size: 16px;
   }
 }

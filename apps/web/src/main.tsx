@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { reloadOnNewBuild, reloadWhenIdle } from "./lib/appUpdate";
-import { isBundledApp, isNativeApp } from "./lib/native";
+import { isBundledApp, isNativeApp, lockZoom } from "./lib/native";
 import { usePlayer } from "./state/player";
 import "./styles.css";
 
@@ -11,6 +11,7 @@ import "./styles.css";
 // blank screen, and loaded from the server the shell should show each deploy,
 // not a cached copy.
 if (isNativeApp()) {
+  lockZoom();
   void navigator.serviceWorker?.getRegistrations().then((regs) => {
     for (const reg of regs) void reg.unregister();
   });
