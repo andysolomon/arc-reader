@@ -69,7 +69,16 @@ const config: CapacitorConfig = {
   webDir: "dist",
   // Shown behind the web view until the first paint. Matches the dark theme.
   backgroundColor: "#161412",
-  ...(serverUrl && { server: { url: startUrl, errorPath: UNREACHABLE_PAGE } }),
+  ...(serverUrl && {
+    server: {
+      url: startUrl,
+      errorPath: UNREACHABLE_PAGE,
+      // Capacitor keeps a page in the web view only when its address starts with `url`
+      // or its host is listed here, and hands anything else to Safari. With the access
+      // token in `url`, the server's redirect to the same page without it would leave.
+      allowNavigation: [new URL(serverUrl).hostname],
+    },
+  }),
   ios: {
     backgroundColor: "#161412",
     // The shell pads itself with env(safe-area-inset-*). Automatic insets
