@@ -15,7 +15,7 @@ import { FOCUS_SEARCH_EVENT } from "../hooks/useShortcuts";
 import { useBreakpoint, useIsTouch } from "../hooks/useMedia";
 import { audioCache } from "../lib/db";
 import { syncLibrary, useLibrarySync } from "../lib/librarySync";
-import { PreparationQueue, PrepareDialog, PreparedStatus } from "../components/LibraryPreparation";
+import { PreparationDetails, PreparationQueue, PrepareDialog, PreparedStatus, type Reading } from "../components/LibraryPreparation";
 import { useCategories } from "../state/categories";
 import { useJev } from "../state/llm";
 import { useFavorites } from "../state/favorites";
@@ -61,6 +61,9 @@ export function LibraryPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [prepareIds, setPrepareIds] = useState<string[] | null>(null);
   const closePrepare = useCallback(() => setPrepareIds(null), []);
+  const [details, setDetails] = useState<Reading | null>(null);
+  const closeDetails = useCallback(() => setDetails(null), []);
+  const detailsItem = details ? items.find((it) => it.rec.id === details.docId) : undefined;
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -151,6 +154,7 @@ export function LibraryPage() {
     resume: (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: true, resume: it.progress < 1 }),
     revoice: (it: LibraryItem) => navigate(`/voices?for=${it.rec.id}`),
     prepare: (it: LibraryItem) => setPrepareIds([it.rec.id]),
+    details: setDetails,
     favorite: (it: LibraryItem) => {
       void useFavorites.getState().toggle(it.rec);
       toast(it.rec.favoritedAt ? "Removed from favorites" : "Added to favorites · estimating a premium read");
@@ -257,7 +261,7 @@ export function LibraryPage() {
             <Button leading={<Zap size={15} />} disabled={selectedItems.length === 0} onClick={() => setPrepareIds(selectedItems.map((it) => it.rec.id))}>Prepare selected</Button>
           </div>
         )}
-        <PreparationQueue />
+        <PreparationQueue onDetails={setDetails} />
         {loaded && items.length === 0 && (
           <EmptyState action={<Link to="/">Paste something to listen to</Link>}>Nothing here yet. Documents you listen to appear here with your place saved.</EmptyState>
         )}
@@ -299,6 +303,7 @@ export function LibraryPage() {
           </ul>
         )}
       </div>
+      {detailsItem && details && !prepareIds && <PreparationDetails it={detailsItem} reading={details} defaultVoice={defaultVoice} onClose={closeDetails} onChooseVoices={() => { setDetails(null); setPrepareIds([details.docId]); }} />}
       {prepareIds && <PrepareDialog documents={items.filter((it) => prepareIds.includes(it.rec.id))} onClose={closePrepare} />}
     </section>
   );
@@ -314,6 +319,8 @@ interface ItemProps {
   estimate?: PremiumEstimate;
   toggleSelected: (id: string) => void;
   prepare: (it: LibraryItem) => void;
+  /** Show what one voice has prepared for a document. */
+  details: (reading: Reading) => void;
   favorite: (it: LibraryItem) => void;
   /** Open in the Reader without starting playback. */
   open: (it: LibraryItem) => void;
@@ -614,7 +621,7 @@ function Row(props: ItemProps & { touch: boolean }) {
           <Author it={it} className="mt-1" />
         </div>
         <Meta it={it} inBook={props.inBook} estimate={props.estimate} withDate className="col-start-2 row-start-2" />
-        <div className="col-span-2 col-start-2 row-start-3 mt-1.5 sm:col-span-1 sm:col-start-2"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} /></div>
+        <div className="col-span-2 col-start-2 row-start-3 mt-1.5 sm:col-span-1 sm:col-start-2"><PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} /></div>
         <ReadProgress value={it.progress} className="col-start-3 row-span-2 row-start-1 sm:col-start-4 sm:row-span-3 sm:row-start-1" />
         {!touch && <Actions {...props} className="col-span-2 col-start-2 row-start-4 -ml-2 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 sm:col-span-1 sm:col-start-3 sm:row-span-3 sm:row-start-1 sm:-my-0.5 sm:ml-0 sm:opacity-0" />}
       </div>
@@ -638,7 +645,7 @@ function CardItem(props: ItemProps) {
       </div>
       <div className="flex flex-col gap-2.5 border-t border-line pt-3">
         <Meta it={it} inBook={props.inBook} estimate={props.estimate} />
-        <PreparedStatus it={it} defaultVoice={props.defaultVoice} onPrepare={() => props.prepare(it)} />
+        <PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} />
       </div>
     </li>
   );
