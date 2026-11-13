@@ -8,7 +8,7 @@ vi.mock("../engine/providers", async (original) => ({
   ...await original<typeof import("../engine/providers")>(),
   fetchFishVoices: vi.fn(), fetchPhononVoices: vi.fn(), fetchServerVoices: vi.fn(),
 }));
-const profiles: { id: string; name: string; kind: string; language: string; personality?: string | null }[] = [];
+const profiles: { id: string; name: string; kind: string; language: string; personality?: string | null; instruct?: string }[] = [];
 const studioFetch = vi.fn(async () => new Response("{}"));
 vi.mock("../lib/studio", async (original) => ({
   ...await original<typeof import("../lib/studio")>(),
@@ -129,12 +129,12 @@ describe("voice providers", () => {
   });
   it("links voices added from the Studio gallery to their recipe and sends them back on removal", async () => {
     profiles.push(
-      { id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" },
+      { id: "lib", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian", instruct: "A calm, gentle narrator" },
       { id: "mine", name: "My voice", kind: "clone", language: "English", personality: null },
     );
     vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "lib", name: "The Librarian", type: "profile" }, { id: "mine", name: "My voice", type: "profile" }], engines: [] });
     await useVoices.getState().loadServer();
-    expect(getVoice("lib")).toMatchObject({ kind: "profile", archetype: "librarian", tags: ["designed"] });
+    expect(getVoice("lib")).toMatchObject({ kind: "profile", archetype: "librarian", tags: ["designed"], description: "A calm, gentle narrator" });
     expect(getVoice("mine").archetype).toBeUndefined();
     profiles.splice(0, 1);
     vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "mine", name: "My voice", type: "profile" }], engines: [] });

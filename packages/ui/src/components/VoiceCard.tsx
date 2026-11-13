@@ -41,7 +41,7 @@ export function VoiceCard({ voice, selected, previewing, generating, source, onP
   return (
     <Card interactive selected={selected} className={cn("flex min-h-[200px] flex-col gap-3.5", className)} data-voice={voice.id}>
       <div className="flex items-center justify-between">
-        <VoiceAvatar voice={voice} size={40} />
+        <VoiceAvatar voice={voice} size={52} />
         <div className="flex items-center gap-2">
           {selected ? (
             <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent">

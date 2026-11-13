@@ -128,7 +128,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
         .map((v): Voice => {
           const profile = profileMap.get(v.id);
           const archetype = archetypeOf(profile);
-          return { id: v.id, name: v.name, lang: langLabel(v.language), tags: [profile?.kind === "design" ? "designed" : "cloned"], hue: hueFor(v.id), engine: profileEngine, kind: "profile", ...(archetype ? { archetype } : {}) };
+          return { id: v.id, name: v.name, lang: langLabel(v.language), tags: [profile?.kind === "design" ? "designed" : "cloned"], description: profile?.instruct || (!archetype ? profile?.personality ?? undefined : undefined), hue: hueFor(v.id), engine: profileEngine, kind: "profile", ...(archetype ? { archetype } : {}) };
         });
       const engineOpts: EngineOption[] = (engines as ServerEngine[])
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false, cloning: e.supports_cloning === true }));
