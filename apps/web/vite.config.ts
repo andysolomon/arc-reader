@@ -8,6 +8,7 @@ import { siteFavicons } from "./vite.favicon";
 import { audioPreparation } from "./vite.prepare";
 import { sharedLibrary } from "./vite.library";
 import { SpeechActivity } from "./vite.speech-activity";
+import { voiceAvatars } from "./vite.avatars";
 import { llm } from "./vite.llm";
 import { jev } from "./vite.jev";
 import { shellFallback } from "./vite.shell";
@@ -29,6 +30,7 @@ export default defineConfig(({ mode }) => {
     siteFavicons(),
     audioPreparation(env, activity),
     sharedLibrary(env),
+    voiceAvatars(env),
     llm(env),
     jev(env),
     shellFallback(serverUrl, UNREACHABLE_PAGE, startUrl),

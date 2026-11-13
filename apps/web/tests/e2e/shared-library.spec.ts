@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { hash } from "../../src/lib/hash";
+import { libraryOption } from "./helpers";
 
 async function legacyLibrary(page: Page, id: string) {
   // Same origin, before the app loads: reproduce a pre-sync v1 browser library.
@@ -31,7 +32,7 @@ test("independent browsers merge legacy libraries, open shared links, and sync o
   try {
     await legacyLibrary(page, first);
     await page.goto("/library");
-    await expect(page.getByText("Shared library · Synced", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Library sync" })).toHaveText("Shared library · Synced");
     await legacyLibrary(secondPage, second);
     await secondPage.goto(`/read/${first}`);
     await expect(secondPage.locator("article")).toContainText("Second sentence.");
@@ -46,13 +47,13 @@ test("independent browsers merge legacy libraries, open shared links, and sync o
     }, second);
     expect(progress).toBe(0.5);
     await other.setOffline(true);
-    await secondPage.getByRole("button", { name: "Cards", exact: true }).click();
+    await libraryOption(secondPage, "Cards");
     const item = secondPage.getByRole("listitem").filter({ has: secondPage.getByRole("button", { name: first, exact: true }) });
     await item.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(secondPage.getByRole("button", { name: first, exact: true })).toHaveCount(0);
     await expect(secondPage.getByText("Saved on this device · Waiting to sync", { exact: true })).toBeVisible();
     await other.setOffline(false);
-    await expect(secondPage.getByText("Shared library · Synced", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(secondPage.getByRole("status", { name: "Library sync" })).toHaveText("Shared library · Synced", { timeout: 15_000 });
     await expect(page.getByRole("button", { name: first, exact: true })).toHaveCount(0, { timeout: 15_000 });
     await secondPage.reload();
     await expect(secondPage.getByRole("button", { name: second, exact: true })).toBeVisible();
@@ -68,7 +69,7 @@ test("repairs a library that says Synced but has an unqueued local document", as
   const other = await browser.newContext({ baseURL });
   try {
     await page.goto("/library");
-    await expect(page.getByText("Shared library · Synced", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Library sync" })).toHaveText("Shared library · Synced");
     await page.evaluate(async (id) => {
       const d = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open("readaloud"); r.onsuccess = () => resolve(r.result); });
       const tx = d.transaction("docs", "readwrite");

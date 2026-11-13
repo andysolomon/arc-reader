@@ -192,9 +192,9 @@ const DIAGRAMS = {
     pools: [
       { id: "P_app", n: "ReadAloud web app (browser PWA)", x: 0, y: 0, w: 3030, lanes: [
         { id: "L_user", n: "Listener", h: 150, d: "The person using the app: pastes, shares, presses play, picks voices." },
-        { id: "L_ui", n: "Screens", h: 170, d: "React Router routes: Compose (/), ReadNew (/read/new, the share target) and Reader (/read/:id).", code: [SRC + "App.tsx:58"] },
+        { id: "L_ui", n: "Screens", h: 170, d: "React Router routes: Compose (/), ReadNew (/read/new, the share target) and Reader (/read/:id).", code: [SRC + "App.tsx:59"] },
         { id: "L_player", n: "Player · usePlayer + PlaybackEngine", h: 430, d: "The Zustand player store (state/player.ts) wraps one PlaybackEngine instance (engine/engine.ts), which owns segmentation, passage planning, audio elements, the clock and prefetch.", code: [SRC + "state/player.ts:86", SRC + "engine/engine.ts:96"] },
-      ], d: "Single-page app; state in Zustand stores, persistence in IndexedDB (idb) and localStorage, offline via a Workbox service worker." , code: [SRC + "main.tsx", "apps/web/vite.config.ts:27"] },
+      ], d: "Single-page app; state in Zustand stores, persistence in IndexedDB (idb) and localStorage, offline via a Workbox service worker." , code: [SRC + "main.tsx", "apps/web/vite.config.ts:28"] },
       { id: "X_server", bb: true, n: "App server (Vite) — /api/fetch page fetch · /api/vs /api/oa /api/fish speech proxy · /api/llm explanations & summaries · /api/library/sync · /api/preparations jobs", x: 0, y: 890, w: 3030, h: 70,
         d: "Node-side plugins of the Vite dev and preview servers (production runs vite preview in the kind cluster). API keys come from server-side env or a key saved on the server, so they never reach the bundle; the speech proxy drops Origin/Referer/Cookie and adds the Bearer key.",
         code: ["apps/web/vite.config.ts:9", "apps/web/vite.proxy.ts:44", "apps/web/vite.fetch.ts:28", "apps/web/vite.llm.ts:98", "apps/web/vite.library.ts:91", "apps/web/vite.prepare.ts:501"] },
@@ -214,7 +214,7 @@ const DIAGRAMS = {
         code: [SRC + "routes/Compose.tsx:76", SRC + "routes/Compose.tsx:118", SRC + "routes/Compose.tsx:134"] },
       { id: "S_share", t: "start", ev: "message", n: "Shared from another app", lw: 84, x: 100, y: 235, lane: "L_ui",
         d: "The installed PWA is a Web Share Target: sharing a page or text from another app opens /read/new?title=&text=&url=.",
-        code: ["apps/web/vite.config.ts:54", SRC + "routes/ReadNew.tsx:15"] },
+        code: ["apps/web/vite.config.ts:56", SRC + "routes/ReadNew.tsx:15"] },
       { id: "T_shareParse", t: "task", n: "Read the shared title, text and link", x: 215, y: 235, lane: "L_ui",
         d: "ReadNew reads the query parameters once. A bare http(s) link in the text field is treated as the URL.", code: [SRC + "routes/ReadNew.tsx:19"] },
       { id: "G_url", t: "gw", g: "x", n: "Web address?", lp: "tl", x: 350, y: 235, lane: "L_ui", d: "Is there a URL to fetch, or is the text already here?" },
@@ -815,7 +815,7 @@ const DIAGRAMS = {
       { id: "P_dev", n: "Browser · lib/db.ts + lib/librarySync.ts", x: 0, y: 0, w: 1580, lanes: [
         { id: "L_store", n: "Library storage", h: 170, d: "IndexedDB readaloud v2: docs, positions, audio, plus the outbox and meta stores added for sync.", code: [SRC + "lib/db.ts:140"] },
         { id: "L_sync", n: "Sync loop", h: 200, d: "startLibrarySync runs syncLibrary on every trigger; only one run is in flight at a time.", code: [SRC + "lib/librarySync.ts:170", SRC + "lib/librarySync.ts:116"] },
-      ], d: "One shared library across devices, synced through the app server.", code: [SRC + "App.tsx:52"] },
+      ], d: "One shared library across devices, synced through the app server.", code: [SRC + "App.tsx:53"] },
       { id: "P_lsrv", n: "App server · LibraryService (/api/library/sync)", x: 0, y: 470, w: 1150, h: 170, lanes: [], d: "A plugin of the Vite server. Requests are handled one at a time.", code: ["apps/web/vite.library.ts:91"] },
       { id: "X_prepS", bb: true, n: "PreparationService — GET /api/preparations · PUT …/audio/:i", x: 1190, y: 470, w: 390, h: 80, d: "The shared catalogue of prepared readings (see Prepare whole reading).", code: ["apps/web/vite.prepare.ts:268", "apps/web/vite.prepare.ts:377"] },
     ],

@@ -20,13 +20,16 @@ export function VoicePortrait({ portrait: p }: { portrait: Portrait }) {
       {long && <path d={hair === "bob" ? "M24 48c-2-42 54-43 53 0l4 30q-29 14-59 0Z" : "M25 49C17 7 78 5 77 46c-4 21 11 28 8 43H16c-5-17 12-21 9-40Z"} fill={hairColor} />}
       {hair === "coils" && <path d="M21 57C6 48 15 35 19 32c-7-13 9-21 17-19C44 1 56 9 60 11c16-6 27 6 23 16 14 9 12 22 2 28l-3 17H23Z" fill={hairColor} />}
       {hair === "bun" && <><circle cx="53" cy="18" r="14" fill={hairColor} /><path d="M38 17q15-10 26 1" stroke={cream} strokeOpacity=".18" strokeWidth="3" strokeLinecap="round" /></>}
+      {hair === "ponytail" && <><path d="M65 26C79 7 96 20 85 40c-7 13-4 22 2 25-22 2-23-18-16-28Z" fill={hairColor} /><path d="m69 26 7 5" stroke={p.accent} strokeWidth="4" /></>}
+      {hair === "braid" && <g fill={hairColor}><ellipse cx="73" cy="52" rx="9" ry="12" /><ellipse cx="75" cy="67" rx="8" ry="11" /><ellipse cx="73" cy="82" rx="7" ry="10" /><path d="m69 89 8 1 2 10-13-1Z" /><path d="m67 63 12-5m-11 20 12-5" stroke={cream} strokeOpacity=".2" strokeWidth="2" /></g>}
+      {hair === "locs" && <path d="M25 35v36m8-46v52m34-52v52m8-42v36" stroke={hairColor} strokeWidth="9" strokeLinecap="round" />}
       <path d="M9 104c2-23 13-28 30-31h22c18 3 29 8 31 31" fill={p.clothing} />
       <path d="m38 75 12 17 13-17" fill={p.accent} />
       <path d="M41 64h18v15q-9 10-18 0Z" fill={skin} />
       <path d="M41 66q9 7 18 0v7q-10 6-18 0Z" fill={ink} opacity=".12" />
       <path d="m37 75 13 17-15-6-4-8m32-3L50 92l16-6 4-8" fill={cream} opacity=".2" />
       <path d={character === "elf" || character === "ogre" ? "M33 45 14 34q0 23 20 23m33-12 19-11q0 23-20 23" : "M32 45c-12-6-13 13 0 14m36-14c12-6 13 13 0 14"} fill={skin} />
-      <path d={expression === "serious" ? "M28 39q0-21 22-21t22 21l-3 21-10 13H41L30 60Z" : "M28 39q0-21 22-21t22 21l-2 17c-2 13-12 19-20 19s-18-6-20-19Z"} fill={skin} />
+      <path d={expression === "serious" || p.presentation === "male" ? "M28 39q0-21 22-21t22 21l-3 21-10 13H41L30 60Z" : "M28 39q0-21 22-21t22 21l-2 17c-2 13-12 19-20 19s-18-6-20-19Z"} fill={skin} />
       <path d="M31 48v8c1 8 5 12 10 15-8-3-12-8-13-17Z" fill={ink} opacity=".09" />
       <HairFront hair={hair} color={hairColor} />
       {character === "demon" && <path d="M31 30C12 24 20 9 21 8c1 10 10 9 16 16m32 6C88 24 80 9 79 8c-1 10-10 9-16 16" fill="#50313D" />}
@@ -39,6 +42,12 @@ export function VoicePortrait({ portrait: p }: { portrait: Portrait }) {
       {character === "ogre" && <path d="m39 66 1-10 6 11m15-1-1-10-6 11" fill={cream} />}
       {accessory === "beard" && <path d="M30 54q4 4 6 9l6-5h16l6 5q3-5 6-9c1 17-10 24-20 24S29 71 30 54m12 7q8 12 16 0Z" fill={hairColor} fillRule="evenodd" />}
       {accessory === "glasses" && <g stroke={ink} strokeWidth="2" fill="none"><rect x="31" y="43" width="16" height="12" rx="5" /><rect x="53" y="43" width="16" height="12" rx="5" /><path d="M47 47h6m-25-1h3m38 0h3" /></g>}
+      {accessory === "round-glasses" && <g stroke={ink} strokeWidth="2.5"><circle cx="39" cy="48" r="10" /><circle cx="61" cy="48" r="10" /><path d="M49 46h2m-25 0h3m42 0h3" /></g>}
+      {accessory === "stubble" && <><path d="M31 57q19 24 38 0c-3 14-12 18-19 18S34 71 31 57" fill={hairColor} opacity=".35" /><path d="M38 66v2m5 1v2m7-1v2m7-3v2m5-5v2" stroke={hairColor} strokeWidth="1.5" strokeLinecap="round" /></>}
+      {accessory === "hairclip" && <path d="m62 30 11 5m-13 0 11 5" stroke={p.accent} strokeWidth="4" strokeLinecap="round" />}
+      {accessory === "pendant" && <><path d="M37 77q13 24 26 0" stroke={p.accent} strokeWidth="2" /><path d="m50 86 5 7-5 7-5-7Z" fill={p.accent} /></>}
+      {accessory === "bandana" && <><path d="M26 28q24-12 48 0v9q-24-10-48 0Z" fill={p.accent} /><path d="m73 31 13-5-3 14-11-3Z" fill={p.accent} /><path d="m35 30 3-2 3 2-3 2Zm20-1 3-2 3 2-3 2Z" fill={cream} /></>}
+      {accessory === "cap" && <><path d="M24 30q2-24 26-24t26 24Z" fill={p.clothing} /><path d="M20 31q29-9 62 0" stroke={p.accent} strokeWidth="7" strokeLinecap="round" /><path d="M50 7v18" stroke={p.accent} strokeWidth="2" /></>}
       {accessory === "earrings" && <g stroke={p.accent} strokeWidth="3"><circle cx="28" cy="61" r="3" /><circle cx="72" cy="61" r="3" /></g>}
       {accessory === "scarf" && <><path d="M31 75q18 13 38 0l3 10q-22 12-43-1Z" fill={p.accent} /><path d="m55 86 13-1 5 19H57Z" fill={p.accent} /><path d="m34 81 18 5m9 5 7-1" stroke={p.clothing} strokeWidth="2" opacity=".35" /></>}
       {accessory === "bowtie" && <><path d="m50 85-12-7v14Zm0 0 12-7v14Z" fill={p.accent} /><circle cx="50" cy="85" r="3" fill={cream} /></>}
@@ -61,6 +70,12 @@ function HairFront({ hair, color }: { hair: Portrait["hair"]; color: string }) {
     coils: "M25 43c-8-8-5-17 3-19-1-12 12-15 19-9 8-10 19-5 21 3 11-2 18 9 11 17 4 9-2 15-8 14l-4-17q-6 8-15 2-11 8-18 0l-5 17Z",
     quiff: "M26 46C16 30 24 18 35 18c5-12 17-12 23-7 18-4 25 9 20 19l-6 17-5-18q-14 9-35 4Z",
     bald: "M28 39q-5 3-1 12l5-12Zm44 0q5 3 1 12l-5-12Z",
+    braid: "M27 45C17 14 40 10 50 16c19-5 30 9 24 31l-9-18Q42 41 32 29Z",
+    ponytail: "M27 45C19 19 34 14 50 17c19-5 30 10 23 28l-8-18q-16 10-31 1Z",
+    pixie: "M26 45 22 30l9-14 18-5 23 10 5 20-9-10-7-8-17 15 2-13-14 16-2 9Z",
+    locs: "M25 41c-5-25 12-31 25-27 20-5 30 10 25 27l-7-9-3-12-4 17-9-2-3-15-5 16-9-3-2 12Z",
+    sidepart: "M26 44V29c0-17 24-21 38-12l10 10v19l-9-18-2-5q-13 14-31 10Z",
+    mohawk: "M40 30 37 16l8 3 4-15 7 11 6-5 3 21-12-5Z",
   };
   return <path d={paths[hair]} fill={color} />;
 }

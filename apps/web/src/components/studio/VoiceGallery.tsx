@@ -16,7 +16,7 @@ import { ErrorNotice, useOperation } from "./shared";
 const PAGE_SIZE = 24;
 
 /** A recipe keeps one portrait here, in the preview and once saved to Voices: all are keyed by its id. */
-const portraitOf = (voice: Archetype): PortraitVoice => ({ id: voice.id, archetype: voice.id, name: voice.name, description: voice.instruct, hue: hueFor(voice.id), engine: "omnivoice" });
+const portraitOf = (voice: Archetype): PortraitVoice => ({ id: voice.id, archetype: voice.id, name: voice.name, description: voice.instruct, gender: voice.facets?.gender ?? voice.attrs?.Gender, age: voice.facets?.age ?? voice.attrs?.Age, hue: hueFor(voice.id), engine: "omnivoice" });
 
 export function VoiceGallery() {
   const [query, setQuery] = useState("");

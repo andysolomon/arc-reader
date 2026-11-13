@@ -1,7 +1,6 @@
 export * from "./lib/cn";
 export * from "./lib/format";
 export * from "./lib/types";
-export type { PortraitVoice } from "./lib/voicePortraits";
 export * from "./lib/useReducedMotion";
 export * from "./components/Button";
 export * from "./components/IconButton";
@@ -38,3 +37,5 @@ export * from "./components/Switch";
 export * from "./components/Segmented";
 export * from "./components/Input";
 export * from "./components/icons";
+
+export { voiceAvatarIdentity, hasCuratedPortrait, type PortraitVoice } from "./lib/voicePortraits";

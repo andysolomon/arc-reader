@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Chip, Dialog, Input, VoiceCard, VoiceSourceBadge, type VoiceCardAction } from "@readaloud/ui";
+import { Button, Chip, Dialog, Input, VoiceCard, VoiceSourceBadge, voiceAvatarIdentity, type VoiceCardAction } from "@readaloud/ui";
 import type { VoiceSource } from "@readaloud/tokens";
-import { LayoutGrid, Mic, Search, Trash2, Undo2, WandSparkles } from "lucide-react";
+import { ImagePlus, LayoutGrid, Mic, Search, Trash2, Undo2, WandSparkles } from "lucide-react";
+import { useAvatars } from "../state/avatars";
 import { useVoices, getVoice, voiceLang, isLocalVoice, defaultVoiceId } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
@@ -34,6 +35,10 @@ function preparedNote(fraction: number | undefined) {
 
 export function VoicesPage() {
   const navigate = useNavigate();
+  const avatarEntries = useAvatars((s) => s.entries);
+  const avatarsConfigured = useAvatars((s) => s.configured);
+  const pendingAvatars = Object.values(avatarEntries).filter((r) => r.status === "queued" || r.status === "generating").length;
+  const failedAvatars = Object.values(avatarEntries).filter((r) => r.status === "failed").length;
   const [params] = useSearchParams();
   const forDoc = params.get("for");
   // From the player menu: only voices with audio saved for this document.
@@ -204,12 +209,28 @@ export function VoicesPage() {
     if (ok) toast(`${deleting.name} deleted`);
     setDeleting(null);
   };
-  const actionsFor = (v: Voice): VoiceCardAction[] | undefined => {
+  const profileActionsFor = (v: Voice): VoiceCardAction[] | undefined => {
     if (v.kind !== "profile") return undefined;
     if (v.archetype) return [{ label: `Send ${v.name} back to Studio`, icon: <Undo2 size={16} strokeWidth={1.5} aria-hidden />, onClick: () => void demote(v) }];
     const remove: VoiceCardAction = { label: `Delete ${v.name}`, icon: <Trash2 size={16} strokeWidth={1.5} aria-hidden />, onClick: () => setDeleting(v), danger: true };
     if (!v.tags.includes("cloned")) return [remove];
     return [{ label: `Re-record ${v.name}`, icon: <Mic size={16} strokeWidth={1.5} aria-hidden />, onClick: () => { stopPreview(); navigate(`/studio/clone?voice=${encodeURIComponent(v.id)}`); } }, remove];
+  };
+
+
+  const actionsFor = (v: Voice): VoiceCardAction[] => {
+    const actions = profileActionsFor(v) ?? [];
+    const entry = avatarEntries[voiceAvatarIdentity(v)];
+    if (!avatarsConfigured || v.kind === "local" || entry?.status === "ready") return actions;
+    const pending = entry?.status === "queued" || entry?.status === "generating";
+    return [{
+      label: pending ? `Creating avatar for ${v.name}` : entry?.status === "failed" ? `Retry avatar for ${v.name}: ${entry.error}` : `Create illustrated avatar for ${v.name}`,
+      icon: <ImagePlus size={16} strokeWidth={1.5} aria-hidden />,
+      onClick: () => {
+        if (pending) { toast(`The avatar for ${v.name} is being created.`); return; }
+        void useAvatars.getState().ensure(v, true).then(() => toast(`Creating an avatar for ${v.name}. It will appear automatically.`)).catch((e) => toast(e instanceof Error ? e.message : "Could not create avatar."));
+      },
+    }, ...actions];
   };
 
   // Group by the service that renders each voice. Sections keep a fixed order:
@@ -238,6 +259,10 @@ export function VoicesPage() {
           <Link to="/studio/design" className={PILL_LINK}><WandSparkles size={14} strokeWidth={1.5} aria-hidden />Design a voice</Link>
           <Link to="/studio/gallery" className={PILL_LINK}><LayoutGrid size={14} strokeWidth={1.5} aria-hidden />Browse designed voices</Link>
         </nav>
+        {(pendingAvatars > 0 || failedAvatars > 0) && <p role="status" className="m-0 text-sm text-fg2">
+          {pendingAvatars > 0 && `Creating ${pendingAvatars} voice avatar${pendingAvatars === 1 ? "" : "s"}. Portraits appear automatically. `}
+          {failedAvatars > 0 && `${failedAvatars} avatar${failedAvatars === 1 ? "" : "s"} could not be created. Use the image button on a voice to retry.`}
+        </p>}
         <div className="flex flex-col gap-3" role="search" aria-label="Filter voices">
           <Input type="search" aria-label="Search voices" placeholder="Search by name, tag or language…" leading={<Search size={16} aria-hidden />} wrapperClassName="h-10" value={filters.query} onChange={(e) => setFilter("query", e.target.value)} />
           <div className="flex flex-wrap gap-2" role="group" aria-label="Voice source">
