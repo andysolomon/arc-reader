@@ -53,7 +53,7 @@ const oklch = (L, C, h) => {
   ];
   return lin.map((c) => Math.max(0, Math.min(1, c)) <= 0.0031308 ? 12.92 * Math.max(0, c) * 255 : (1.055 * Math.max(0, Math.min(1, c)) ** (1 / 2.4) - 0.055) * 255).concat([1]);
 };
-const serviceHues = { VoiceStudio: 155, Phonon: 200, ChatGPT: 305, Fish: 240 };
+const serviceHues = { VoiceStudio: 155, Phonon: 200, ChatGPT: 305, Fish: 30 };
 const voiceTextL = (t) => parseFloat(t.vars["voice-text-l"] ?? blocks[0].vars["voice-text-l"]);
 
 let failed = false;

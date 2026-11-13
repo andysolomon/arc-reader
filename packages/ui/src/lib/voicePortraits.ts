@@ -1,4 +1,4 @@
-import { voiceSourceForEngine } from "@readaloud/tokens";
+import { voiceServiceColor, voiceSourceForEngine } from "@readaloud/tokens";
 import type { Voice } from "./types";
 
 export type PortraitVoice = Pick<Voice, "name" | "hue" | "engine"> & Partial<Pick<Voice, "id" | "tags" | "description" | "archetype">>;
@@ -147,6 +147,8 @@ export function voicePortrait(voice: PortraitVoice): Portrait {
   const expression = direction?.[1] ?? personality(text, expressions[pick("expression", expressions.length)]);
   const paletteName = direction?.[2] ?? ({ warm: "apricot", calm: "sage", bright: "gold", serious: "dusk", soft: "lilac", expressive: "rose" } as const)[expression];
   const [background, halo, clothing, accent] = palettes[paletteName];
+  // The backdrop identifies the rendering service; the character keeps its own palette.
+  const serviceColor = voice.engine ? voiceServiceColor(voiceSourceForEngine(voice.engine)) : undefined;
   const accessory = accessories[pick("accessory", accessories.length)];
   return {
     hair: direction?.[0] ?? hairstyles[pick("hair", hairstyles.length)],
@@ -155,7 +157,9 @@ export function voicePortrait(voice: PortraitVoice): Portrait {
     character: direction ? direction[7] ?? "human" : characterFor(`${voice.name} ${text}`),
     skin: skins[direction?.[3] ?? pick("skin", skins.length)],
     hairColor: hairColors[direction?.[4] ?? pick("hairColor", hairColors.length)],
-    background, halo, clothing, accent,
+    background: serviceColor ?? background,
+    halo: serviceColor ? `color-mix(in oklab, ${serviceColor} 25%, white)` : halo,
+    clothing, accent,
     concept: direction?.[6] ?? `An original ${expression} reading companion`,
   };
 }

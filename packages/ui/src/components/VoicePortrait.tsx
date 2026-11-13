@@ -45,6 +45,7 @@ export function VoicePortrait({ portrait: p }: { portrait: Portrait }) {
       {accessory === "headphones" && <><path d="M24 51v-9a26 26 0 0 1 52 0v9" stroke={p.clothing} strokeWidth="6" /><rect x="20" y="44" width="9" height="19" rx="4" fill={p.accent} /><rect x="71" y="44" width="9" height="19" rx="4" fill={p.accent} /></>}
       <Costume p={p} />
     </>}
+    <circle cx="50" cy="50" r="48.5" stroke={p.background} strokeWidth="3" />
   </svg>;
 }
 

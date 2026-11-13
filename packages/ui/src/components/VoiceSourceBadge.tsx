@@ -10,7 +10,7 @@ export function VoiceSourceBadge({ source, className }: { source: VoiceSource; c
       data-voice-source={source}
       title={service.description}
       className={cn("inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-pill border px-2 py-0.5 text-[11px] font-medium text-fg", className)}
-      style={{ background: `color-mix(in oklch, ${color} 14%, var(--bg2))`, borderColor: `color-mix(in oklch, ${color} 40%, var(--line))` }}
+      style={{ background: `color-mix(in oklab, ${color} 14%, var(--bg2))`, borderColor: `color-mix(in oklab, ${color} 40%, var(--line))` }}
     >
       <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: source === "Browser" ? "var(--fg2)" : color }} />
       {service.title}
