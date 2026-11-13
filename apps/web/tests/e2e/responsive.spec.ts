@@ -64,4 +64,31 @@ test.describe("touch phone", () => {
     expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[aria-label=Delete]"), { x: d.x + d.width / 2, y: d.y + d.height / 2 })).toBeNull();
     expect(t.width).toBeGreaterThan(200);
   });
+
+  test("a tap on a library row opens its document, while a swipe only shows its actions", async ({ page }) => {
+    await composeAndListen(page);
+    await page.goto("/library");
+    const row = page.locator('[data-screen="library"] li').first();
+    const source = row.getByText("Pasted text");
+    const at = (await source.boundingBox())!;
+    const y = at.y + at.height / 2;
+    const touch = (type: string, x: number) => row.evaluate((el, e) => { el.dispatchEvent(new PointerEvent(e.type, { bubbles: true, pointerId: 7, pointerType: "touch", clientX: e.x, clientY: e.y })); }, { type, x, y });
+
+    // Swipe left. Should the browser still report a click as the finger lifts, the row stays put.
+    await touch("pointerdown", 330);
+    for (const x of [300, 240, 160, 80]) await touch("pointermove", x);
+    await touch("pointerup", 80);
+    await source.dispatchEvent("click");
+    await expect(row).toHaveAttribute("data-swipe-open", "true");
+    await expect(page).toHaveURL(/\/library$/);
+
+    // With the actions showing, a tap on the row puts them away; the next one opens the document.
+    await page.touchscreen.tap(60, y);
+    await expect(row).not.toHaveAttribute("data-swipe-open");
+    await expect(page).toHaveURL(/\/library$/);
+    await source.tap();
+    await expect(page).toHaveURL(/\/read\//);
+    await page.getByRole("button", { name: "Back", exact: true }).tap();
+    await expect(page).toHaveURL(/\/library$/);
+  });
 });

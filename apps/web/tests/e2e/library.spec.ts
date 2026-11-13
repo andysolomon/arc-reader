@@ -390,3 +390,48 @@ test("keeps documents in the order they were added and sorts by duration on requ
   await page.getByRole("button", { name: "Newest first" }).click();
   await expect(titles).toHaveText(["Newest document", "Middle document", "Oldest document"]);
 });
+
+test("a row opens its document wherever it is clicked, and Back returns to the Library as it was left", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 520 });
+  await seedLibrary(page, ["local", "local", "local", "local"]);
+  const library = page.locator('[data-screen="library"]');
+  const row = (name: string) => library.getByRole("listitem").filter({ has: page.getByRole("button", { name: `${name} document`, exact: true }) });
+
+  // The row's own controls keep their jobs.
+  await row("First").getByRole("checkbox").click();
+  await expect(row("First").getByRole("checkbox")).toBeChecked();
+  await expect(page).toHaveURL(/\/library$/);
+
+  // Narrow to one document, then open it by its details rather than its title.
+  await page.getByLabel("Search library").fill("Fourth");
+  await expect(library.getByRole("checkbox", { name: /Select .* document/ })).toHaveCount(1);
+  await row("Fourth").getByText("Pasted text").click();
+  await expect(page).toHaveURL(/\/read\/Fourth$/);
+  await expect(page.locator('[data-screen="reader"] h1')).toHaveText("Fourth document");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(page.getByLabel("Search library")).toHaveValue("Fourth");
+
+  // Back also returns to the same place in a long list.
+  await page.getByLabel("Search library").fill("");
+  await library.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  const top = await library.evaluate((el) => el.scrollTop);
+  expect(top).toBeGreaterThan(0);
+  await row("First").getByText("Pasted text").click();
+  await expect(page).toHaveURL(/\/read\/First$/);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect.poll(() => library.evaluate((el) => el.scrollTop)).toBe(top);
+
+  // Cards open the same way.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole("button", { name: "Cards", exact: true }).click();
+  await row("Second").getByText("Pasted text").click();
+  await expect(page).toHaveURL(/\/read\/Second$/);
+
+  // A document opened by its link has no screen behind it, so Back leads to the Library.
+  await page.goto("/read/Third");
+  await expect(page.locator('[data-screen="reader"] h1')).toHaveText("Third document");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+});
