@@ -12,6 +12,8 @@ import { getVoice, isLocalVoice, useVoices } from "../state/voices";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 import type { LibraryItem } from "../state/library";
+import type { PreparedVoice } from "../lib/prepared";
+import { usePlayer } from "../state/player";
 import { catalogue } from "../lib/postTitle";
 import { dateLabel } from "../lib/dates";
 
@@ -20,14 +22,42 @@ export interface Reading { docId: string; voiceId: string; engine: string }
 const sameReading = (job: PreparationJob, reading: Reading, openaiModel: string) => job.docId === reading.docId && job.voice.id === reading.voiceId
   && job.voice.engine === reading.engine && (reading.engine !== "openai" || job.remote || job.openaiModel === openaiModel);
 
-export function PreparedStatus({ it, defaultVoice, onDetails }: { it: LibraryItem; defaultVoice: string; onDetails: (reading: Reading) => void }) {
+/** One voice's audio for a document as a list shows it: how much is saved, and what is happening to it now. */
+export interface ReadingStatus {
+  voice: PreparedVoice;
+  reading: Reading;
+  /** 0..1: generated so far while it is being made, saved on this device otherwise */
+  fraction: number;
+  /** Queued, being made or being saved right now */
+  active: boolean;
+  stage?: string;
+  /** The few words a chip needs beside the ring: only partial audio and work in progress need any */
+  detail: string | null;
+  label: string;
+  /** The voice the document is read in */
+  isReading: boolean;
+  /** Nothing saved and nothing on the way */
+  empty: boolean;
+}
+
+/**
+ * Every voice with audio for a document or on its way to having some, the reading voice first.
+ * The reading the player is preparing for the open document counts as work in progress too.
+ */
+export function useReadings(it: LibraryItem, defaultVoice: string): { voiceId: string; /** Read live by the browser, which saves nothing */ live: boolean; readings: ReadingStatus[] } {
   const jobs = usePreparation((s) => s.jobs);
   const openaiModel = useSettings((s) => s.openaiModel);
   useVoices((s) => s.voices);
+  const playing = usePlayer((s) => (s.doc?.id === it.rec.id ? s.prerendering : null));
+  const playingVoice = usePlayer((s) => (s.doc?.id === it.rec.id && s.prerendering ? s.voiceId : null));
   const voiceId = it.rec.voice ?? defaultVoice;
   const prepared = [...it.prepared];
   for (const job of jobs) {
     if (job.docId === it.rec.id && isPreparing(job) && !prepared.some((v) => v.voiceId === job.voice.id)) prepared.push({ voiceId: job.voice.id, name: job.voice.name, engine: job.voice.engine, fraction: 0 });
+  }
+  if (playingVoice && !prepared.some((v) => v.voiceId === playingVoice)) {
+    const voice = getVoice(playingVoice);
+    prepared.push({ voiceId: playingVoice, name: voice.name, engine: voice.engine, fraction: 0 });
   }
   // The voice this document is read in leads, whether or not it has audio saved.
   const reading = prepared.find((v) => v.voiceId === voiceId);
@@ -38,6 +68,32 @@ export function PreparedStatus({ it, defaultVoice, onDetails }: { it: LibraryIte
   } else if (reading) {
     prepared.unshift(...prepared.splice(prepared.indexOf(reading), 1));
   }
+  const readings = prepared.map((voice): ReadingStatus => {
+    const job = jobs.find((j) => j.docId === it.rec.id && j.voice.id === voice.voiceId && j.voice.engine === voice.engine && (voice.engine !== "openai" || j.openaiModel === openaiModel) && isPreparing(j));
+    // Without a queued job, the player may still be preparing this voice for the document it has open.
+    const player = !job && playing && voice.voiceId === playingVoice ? playing : null;
+    const counted = job ?? player;
+    // Server generation precedes downloading into the browser's audio cache.
+    // While a reading is being made, its confirmed passage count is the live progress.
+    const fraction = counted && counted.total > 0 ? Math.max(0, Math.min(1, counted.done / counted.total)) : voice.fraction;
+    const percent = Math.floor(fraction * 100);
+    const stage = job
+      ? job.message ?? (job.status === "queued" ? (job.waitingFor ? `Waiting for ${job.waitingFor}` : "Queued") : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing")
+      : player ? (player.unreachable ? "Can’t reach server" : "Preparing") : undefined;
+    const progress = counted && counted.total > 0 ? `${percent}% generated · ${counted.done}/${counted.total} passages` : `${percent}% prepared`;
+    return {
+      voice, reading: { docId: it.rec.id, voiceId: voice.voiceId, engine: voice.engine }, fraction, active: !!counted, stage,
+      detail: counted ? (counted.total > 0 ? `${percent}% · ${counted.done}/${counted.total}` : null) : percent > 0 && percent < 100 ? `${percent}%` : null,
+      label: `${voice.name}: ${progress}${stage ? ` · ${stage}` : ""}`,
+      isReading: voice.voiceId === voiceId,
+      empty: !counted && percent === 0,
+    };
+  });
+  return { voiceId, live, readings };
+}
+
+export function PreparedStatus({ it, defaultVoice, onDetails }: { it: LibraryItem; defaultVoice: string; onDetails: (reading: Reading) => void }) {
+  const { voiceId, live, readings } = useReadings(it, defaultVoice);
   return (
     <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Prepared audio">
       {live && (
@@ -47,37 +103,83 @@ export function PreparedStatus({ it, defaultVoice, onDetails }: { it: LibraryIte
           <span><VoiceServiceName source={voiceSource(getVoice(voiceId))}>{getVoice(voiceId).name}</VoiceServiceName> · live audio</span>
         </span>
       )}
-      {prepared.map((voice) => {
-        const job = jobs.find((j) => j.docId === it.rec.id && j.voice.id === voice.voiceId && j.voice.engine === voice.engine && (voice.engine !== "openai" || j.openaiModel === openaiModel) && isPreparing(j));
-        // Server generation precedes downloading into the browser's audio cache.
-        // While a job is active, its confirmed passage count is the live progress.
-        const fraction = job && job.total > 0 ? Math.max(0, Math.min(1, job.done / job.total)) : voice.fraction;
-        const percent = Math.floor(fraction * 100);
-        const stage = job && (job.message ?? (job.status === "queued" ? (job.waitingFor ? `Waiting for ${job.waitingFor}` : "Queued") : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing"));
-        const progress = job && job.total > 0 ? `${percent}% generated · ${job.done}/${job.total} passages` : `${percent}% prepared`;
-        const isReading = voice.voiceId === voiceId;
-        const label = `${voice.name}: ${progress}${stage ? ` · ${stage}` : ""}`;
+      {readings.map(({ voice, reading, fraction, active, stage, detail, label, isReading, empty }) => (
         // The ring and outline carry the two ends: full is ready, empty and dashed is not prepared. Only partial audio needs words.
-        const empty = !job && percent === 0;
-        const detail = job ? (job.total > 0 ? `${percent}% · ${job.done}/${job.total}` : null) : percent > 0 && percent < 100 ? `${percent}%` : null;
-        return (
-          <button
-            key={voice.voiceId}
-            type="button"
-            onClick={() => onDetails({ docId: it.rec.id, voiceId: voice.voiceId, engine: voice.engine })}
-            aria-haspopup="dialog"
-            title={`${isReading ? "Reading voice · " : ""}${empty ? `${voice.name}: not prepared` : label}`}
-            data-reading-voice={isReading || undefined}
-            className={cn("inline-flex h-7 max-w-full items-center gap-1.5 rounded-pill border bg-bg pl-1.5 pr-2.5 text-left text-[12px] text-fg2 transition-colors duration-fast hover:border-fg3 hover:text-fg", job ? "border-[color-mix(in_oklch,var(--accent)_45%,var(--line))]" : "border-line", empty && "border-dashed bg-transparent")}
-          >
-            <ProgressRing value={fraction} size={18} stroke={2} label={label} />
-            {isReading && <><Volume2 size={13} strokeWidth={1.5} className="-mr-0.5 shrink-0" aria-hidden /><span className="sr-only">Reading voice</span></>}
-            <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
-            {detail && <span className="whitespace-nowrap tabular-nums">{detail}</span>}
-            {stage && <span className="min-w-0 truncate text-accent">{stage}</span>}
-          </button>
-        );
-      })}
+        <button
+          key={voice.voiceId}
+          type="button"
+          onClick={() => onDetails(reading)}
+          aria-haspopup="dialog"
+          title={`${isReading ? "Reading voice · " : ""}${empty ? `${voice.name}: not prepared` : label}`}
+          data-reading-voice={isReading || undefined}
+          className={cn("inline-flex h-7 max-w-full items-center gap-1.5 rounded-pill border bg-bg pl-1.5 pr-2.5 text-left text-[12px] text-fg2 transition-colors duration-fast hover:border-fg3 hover:text-fg", active ? "border-[color-mix(in_oklch,var(--accent)_45%,var(--line))]" : "border-line", empty && "border-dashed bg-transparent")}
+        >
+          <ProgressRing value={fraction} size={18} stroke={2} label={label} />
+          {isReading && <><Volume2 size={13} strokeWidth={1.5} className="-mr-0.5 shrink-0" aria-hidden /><span className="sr-only">Reading voice</span></>}
+          <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
+          {detail && <span className="whitespace-nowrap tabular-nums">{detail}</span>}
+          {stage && <span className="min-w-0 truncate text-accent">{stage}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const CHIP = "inline-flex h-6 max-w-full items-center gap-1 rounded-pill border bg-bg pl-1 pr-2 text-left text-[11px] text-fg2";
+const BUSY = "border-[color-mix(in_oklch,var(--accent)_45%,var(--line))]";
+
+/**
+ * The same readings in the space of a sidebar row: only the voices with audio made or on its
+ * way, each opening its details. A document nothing was made for adds no line.
+ */
+export function PreparedSummary({ it, defaultVoice, onDetails, className }: { it: LibraryItem; defaultVoice: string; onDetails: (reading: Reading) => void; className?: string }) {
+  const made = useReadings(it, defaultVoice).readings.filter((r) => !r.empty);
+  if (!made.length) return null;
+  return (
+    <div className={cn("flex flex-wrap gap-1", className)} role="group" aria-label="Audio made">
+      {made.map(({ voice, reading, fraction, active, stage, detail, label }) => (
+        <button key={voice.voiceId} type="button" onClick={() => onDetails(reading)} aria-haspopup="dialog" title={label} className={cn(CHIP, "transition-colors duration-fast hover:border-fg3 hover:text-fg", active ? BUSY : "border-line")}>
+          {/* The words beside it say what the ring shows. */}
+          <span aria-hidden className="shrink-0"><ProgressRing value={fraction} size={16} stroke={1.75} /></span>
+          <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
+          {detail && <span className="whitespace-nowrap tabular-nums">{detail}</span>}
+          {stage && <span className="min-w-0 truncate text-accent">{stage}</span>}
+          {!detail && !stage && <span className="sr-only">prepared</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A book's readings in one line of the sidebar: for each voice, how many chapters are fully
+ * prepared, and whether more are being made.
+ */
+export function ShelfSummary({ items, className }: { items: LibraryItem[]; className?: string }) {
+  const jobs = usePreparation((s) => s.jobs);
+  const ids = new Set(items.map((it) => it.rec.id));
+  const voices = new Map<string, { voice: PreparedVoice; complete: number; saved: number; busy: number }>();
+  const entry = (voice: PreparedVoice) => voices.get(voice.voiceId) ?? voices.set(voice.voiceId, { voice, complete: 0, saved: 0, busy: 0 }).get(voice.voiceId)!;
+  for (const it of items) {
+    for (const voice of it.prepared) {
+      if (voice.fraction <= 0) continue;
+      const tally = entry(voice);
+      tally.saved += voice.fraction;
+      if (voice.fraction >= 1) tally.complete++;
+    }
+  }
+  for (const job of jobs) if (ids.has(job.docId) && isPreparing(job)) entry({ voiceId: job.voice.id, name: job.voice.name, engine: job.voice.engine, fraction: 0 }).busy++;
+  if (!voices.size) return null;
+  return (
+    <div className={cn("flex flex-wrap gap-1", className)} role="group" aria-label="Audio made">
+      {[...voices.values()].map(({ voice, complete, saved, busy }) => (
+        <span key={voice.voiceId} title={`${voice.name}: ${complete} of ${items.length} prepared${busy ? ` · ${busy} being prepared` : ""}`} className={cn(CHIP, busy ? BUSY : "border-line")}>
+          <span aria-hidden className="shrink-0"><ProgressRing value={saved / items.length} size={16} stroke={1.75} /></span>
+          <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
+          <span className="whitespace-nowrap tabular-nums">{complete}/{items.length}</span>
+          {busy > 0 && <span className="min-w-0 truncate text-accent">Preparing {busy}</span>}
+        </span>
+      ))}
     </div>
   );
 }
