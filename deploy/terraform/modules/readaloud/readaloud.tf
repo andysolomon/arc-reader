@@ -26,6 +26,7 @@ locals {
     FISH_API_KEY                  = var.fish_api_key
     LLM_API_KEY                   = var.llm_api_key
     TYPESAFE_API_KEY              = var.typesafe_api_key
+    READALOUD_ACCESS_TOKEN        = var.access_token
   }
   # Pods only read configuration at start. These change with it, so the pods restart.
   web_config_hash         = nonsensitive(substr(sha256(jsonencode([local.config, local.secrets])), 0, 16))

@@ -16,8 +16,10 @@ export const PROBE_IMAGE = "/icons/icon-192.png";
 const TIMING = { retryMs: 4000, giveUpMs: 10000 };
 
 /** Colors are the dark theme's (packages/tokens): the shell paints that behind the web view. */
-export function unreachablePage(serverUrl: string, timing = TIMING): string {
+export function unreachablePage(serverUrl: string, timing = TIMING, startUrl = serverUrl): string {
   const host = escapeHtml(new URL(serverUrl).host);
+  // With an access token the shell uses the public address, which needs no Tailscale.
+  const hint = startUrl === serverUrl ? "Check that Tailscale is connected on this iPhone." : "Check that this iPhone is online.";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -45,10 +47,11 @@ export function unreachablePage(serverUrl: string, timing = TIMING): string {
 </head>
 <body>
 <h1>Can’t reach ReadAloud</h1>
-<p>The app loads from <span class="host">${host}</span>. Check that Tailscale is connected on this iPhone. It opens by itself once the server answers.</p>
+<p>The app loads from <span class="host">${host}</span>. ${hint} It opens by itself once the server answers.</p>
 <button type="button" id="retry">Try again</button>
 <script>
   var server = ${JSON.stringify(serverUrl).replace(/</g, "\\u003c")};
+  var start = ${JSON.stringify(startUrl).replace(/</g, "\\u003c")};
   var button = document.getElementById("retry");
   var leaving = false, checking = false, next = 0;
 
@@ -59,7 +62,7 @@ export function unreachablePage(serverUrl: string, timing = TIMING): string {
     leaving = true;
     button.disabled = true;
     button.textContent = "Connecting…";
-    location.replace(server);
+    location.replace(start);
     setTimeout(function () {
       window.stop();
       leaving = false;
@@ -106,12 +109,12 @@ export function unreachablePage(serverUrl: string, timing = TIMING): string {
 `;
 }
 
-export function shellFallback(serverUrl: string, fileName: string): Plugin {
+export function shellFallback(serverUrl: string, fileName: string, startUrl = serverUrl): Plugin {
   return {
     name: "readaloud:shell-fallback",
     apply: "build",
     generateBundle() {
-      if (serverUrl) this.emitFile({ type: "asset", fileName, source: unreachablePage(serverUrl) });
+      if (serverUrl) this.emitFile({ type: "asset", fileName, source: unreachablePage(serverUrl, TIMING, startUrl) });
     },
   };
 }

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { publicUrl } from "./capacitor.config";
+import { publicUrl, startAddress } from "./capacitor.config";
 import { PROBE_IMAGE, shellFallback, unreachablePage } from "./vite.shell";
 
 describe("iOS shell loading from a server", () => {
@@ -20,6 +20,18 @@ describe("iOS shell loading from a server", () => {
     const html = unreachablePage("https://host.tailnet.ts.net:8449");
     expect(html).toContain("host.tailnet.ts.net:8449</span>");
     expect(html).toContain('var server = "https://host.tailnet.ts.net:8449";');
+  });
+
+  it("starts at the public address with the access token, and opens that from the fallback page", () => {
+    expect(startAddress("https://host.tailnet.ts.net:10000", "a b/c")).toBe("https://host.tailnet.ts.net:10000/?access=a%20b%2Fc");
+    expect(startAddress("https://host.tailnet.ts.net:8449", undefined)).toBe("https://host.tailnet.ts.net:8449");
+    expect(startAddress("", "token")).toBe("");
+    const html = unreachablePage("https://host.tailnet.ts.net:10000", undefined, "https://host.tailnet.ts.net:10000/?access=t");
+    expect(html).toContain('var server = "https://host.tailnet.ts.net:10000";');
+    expect(html).toContain('var start = "https://host.tailnet.ts.net:10000/?access=t";');
+    expect(html).toContain("Check that this iPhone is online.");
+    expect(html).not.toContain("Tailscale is connected");
+    expect(unreachablePage("https://host.tailnet.ts.net:8449")).toContain("Tailscale is connected");
   });
 
   it("checks for the server with a file the web app really serves", () => {

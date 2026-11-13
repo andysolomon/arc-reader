@@ -119,3 +119,11 @@ variable "typesafe_api_key" {
   nullable  = false
   default   = ""
 }
+
+variable "access_token" {
+  type        = string
+  sensitive   = true
+  nullable    = false
+  default     = ""
+  description = "READALOUD_ACCESS_TOKEN: requests through Tailscale Funnel need it (apps/web/vite.gate.ts). Empty refuses them all."
+}
