@@ -206,7 +206,7 @@ const P = {
   UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:48", SRC + "routes/Compose.tsx:119", SRC + "routes/ReadNew.tsx:15"] },
   PL: { n: "usePlayer", s: "state/player.ts", d: "The Zustand player store. It owns the single PlaybackEngine, resolves the voice, rewrites Patois, restores the saved place, and turns engine callbacks into UI state (speechError, offline, toasts).", code: [SRC + "state/player.ts:105", SRC + "state/player.ts:162"] },
   EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:102"] },
-  PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:454", SRC + "engine/preparation.ts:204"] },
+  PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:454", SRC + "engine/preparation.ts:235"] },
   DB: { n: "IndexedDB", s: "docs · positions · audio", kind: "db", d: "The readaloud database (idb). docs: Library documents. positions: one per document. audio: clips keyed by engine + voice + text, up to 2000, oldest evicted first.", code: [SRC + "lib/db.ts:143", SRC + "lib/db.ts:233"] },
   SV: { n: "App server", s: "Vite plugins · /api/*", d: "Node-side plugins of the Vite dev and preview servers (the Docker image runs preview on :4179). /api/fetch fetches pages; /api/vs, /api/oa and /api/fish proxy speech APIs with keys from server-side env, so keys never reach the bundle; /api/preparations is the background job service.", code: ["apps/web/vite.config.ts:16", "apps/web/vite.fetch.ts:28", "apps/web/vite.proxy.ts:44", "apps/web/vite.prepare.ts:503"] },
   DK: { n: "Disk", s: "preparations · library.json", kind: "db", d: "Server-side files on volumes. Preparations: PREPARATION_DATA_DIR (default .readaloud-preparations) — job JSON written atomically, clips as <key>.bin + <key>.json (shared-<key> for clips uploaded by devices), restored after a restart and deleted after 7 days. Library: LIBRARY_DATA_DIR/library.json.", code: ["apps/web/vite.prepare.ts:60", "apps/web/vite.library.ts:173", "compose.yaml:75", "compose.yaml:77"] },
@@ -440,7 +440,7 @@ const SEQS = {
                 { g: "VoiceStudio voice, and a saved job lists this passage", rows: [
                   { f: "PR", to: "SV", t: "call", n: "GET /api/preparations/:id/audio/:i", say: "A background job already rendered this passage, so the stored clip is fetched — no second render.",
                     d: "preparedAudio looks the cache key up in the jobs saved in localStorage. 404 or 410 (expired, or the device already had it) falls back to normal generation.",
-                    code: [SRC + "engine/preparation.ts:267", "apps/web/vite.prepare.ts:355"] },
+                    code: [SRC + "engine/preparation.ts:305", "apps/web/vite.prepare.ts:304"] },
                   { f: "SV", to: "PR", t: "ret", n: "stored clip" },
                   { f: "PR", to: "PR", t: "self", n: "check for noise (garbled → ask for a fresh take)", code: [SRC + "engine/providers.ts:476"] },
                 ] },
@@ -534,7 +534,7 @@ const SEQS = {
     ],
     rows: [
       { f: "PL", to: "EN", t: "call", n: "prerender() → engine.prepare()", say: "Preparation starts: from the player menu, from Compose for a slow VoiceStudio voice, or from the Library’s queue.",
-        d: "The Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:319", SRC + "engine/engine.ts:389", SRC + "state/preparation.ts:167"] },
+        d: "The Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:319", SRC + "engine/engine.ts:389", SRC + "state/preparation.ts:168"] },
       { f: "EN", to: "PR", t: "call", n: "prepareInBackground(passages, start)", say: "Every passage is listed, starting from the listener’s current one.", code: [SRC + "engine/providers.ts:410"] },
       { op: "loop", id: "check", g: "each passage", rows: [
         { f: "PR", to: "DB", t: "call", n: "fromCache()", say: "Passages already on this device are marked cached, so the server skips them." },
@@ -545,11 +545,11 @@ const SEQS = {
       ] },
       { op: "alt", id: "submit", ops: [
         { g: "a shared job for these passages is running or complete", rows: [
-          { f: "PR", to: "PR", t: "self", n: "reuse the shared job — no POST", say: "Another device already prepared (or is preparing) this reading, so its job is reused.", code: [SRC + "engine/preparation.ts:151"] },
+          { f: "PR", to: "PR", t: "self", n: "reuse the shared job — no POST", say: "Another device already prepared (or is preparing) this reading, so its job is reused.", code: [SRC + "engine/preparation.ts:180"] },
         ] },
         { g: "else", rows: [
       { f: "PR", to: "SV", t: "call", n: "POST /api/preparations {requests, start}", say: "The whole reading is submitted as one job.",
-        d: "Identical readings (same request signature) share one submission and one job. A transient error is retried every 1.5 s.", code: [SRC + "engine/preparation.ts:149"] },
+        d: "Identical readings (same request signature) share one submission and one job. A transient error is retried every 1.5 s.", code: [SRC + "engine/preparation.ts:178"] },
       { f: "SV", to: "SV", t: "self", n: "validate · reuse an identical job", say: "The server checks the job and reuses an identical running one if there is one.",
         d: "VoiceStudio voices only (not openai / fish / local), up to 5000 passages, at most 20 running jobs (else 429).", code: ["apps/web/vite.prepare.ts:230", "apps/web/vite.prepare.ts:257"] },
       { f: "SV", to: "DK", t: "call", n: "write job JSON (atomic)", say: "The job is written to disk, so it survives a restart.", code: ["apps/web/vite.prepare.ts:83", "apps/web/vite.prepare.ts:89"] },
@@ -557,7 +557,7 @@ const SEQS = {
       { f: "SV", to: "PR", t: "ret", n: "{id, state: running, done: 0}" },
         ] },
       ] },
-      { f: "PR", to: "PR", t: "self", n: "save job id + cache keys (localStorage)", say: "The job id is saved, so a reload reconnects to it instead of resubmitting.", code: [SRC + "engine/preparation.ts:155"] },
+      { f: "PR", to: "PR", t: "self", n: "save job id + cache keys (localStorage)", say: "The job id is saved, so a reload reconnects to it instead of resubmitting.", code: [SRC + "engine/preparation.ts:184"] },
       { op: "par", id: "par", ops: [
         { g: "the server renders — the job is owned by the server, not the tab", rows: [
           { f: "SV", to: "SV", t: "self", n: "schedule(): oldest job first", say: "The scheduler picks a machine: one whole reading per machine at a time.",
@@ -605,7 +605,7 @@ const SEQS = {
         { g: "the browser watches", rows: [
           { op: "loop", id: "poll", g: "every 1.5 s while the job runs", rows: [
             { f: "PR", to: "SV", t: "call", n: "GET /api/preparations/:id", say: "Meanwhile the browser polls every 1.5 s.",
-              d: "Network errors (a suspended phone) are retried, not fatal — the job keeps running on the server. Cancel sends DELETE only when no other reader still needs the job.", code: [SRC + "engine/preparation.ts:236", "apps/web/vite.prepare.ts:266"] },
+              d: "Network errors and status checks that get no answer within 10 s (a suspended phone, a stalled tunnel) are retried, not fatal — the job keeps running on the server. Cancel sends DELETE only when no other reader still needs the job.", code: [SRC + "engine/preparation.ts:274", "apps/web/vite.prepare.ts:230"] },
             { f: "SV", to: "PR", t: "ret", n: "state · done/total · machine" },
             { f: "PR", to: "PL", t: "async", n: "onProgress(done, total)", say: "Progress — and which machine is working — shows in the player menu and the Library." },
           ] },
@@ -616,7 +616,7 @@ const SEQS = {
           { f: "PR", to: "EN", t: "ret", n: "resolved", say: "The job is done." },
           { op: "loop", id: "hydrate", g: "each passage, from the current one, wrapping round", rows: [
             { f: "EN", to: "PR", t: "call", n: "ensureChunk(i) → synthesize()", say: "Now every passage is pulled into the device cache.", code: [SRC + "engine/engine.ts:389"] },
-            { f: "PR", to: "SV", t: "call", n: "GET /api/preparations/:id/audio/:i", say: "synthesize() finds the passage in the saved job and fetches the stored clip.", code: [SRC + "engine/preparation.ts:267"] },
+            { f: "PR", to: "SV", t: "call", n: "GET /api/preparations/:id/audio/:i", say: "synthesize() finds the passage in the saved job and fetches the stored clip.", code: [SRC + "engine/preparation.ts:305"] },
             { f: "SV", to: "DK", t: "call", n: "read <key>.bin" },
             { f: "DK", to: "SV", t: "ret", n: "clip" },
             { f: "SV", to: "PR", t: "ret", n: "stored clip (410 if the device already had it)", code: ["apps/web/vite.prepare.ts:355"] },
@@ -682,14 +682,14 @@ const SEQS = {
       ] },
       { f: "LS", to: "LS", t: "self", n: "compare document IDs with the server", say: "With nothing pending, both sides must have the same documents.", code: [SRC + "lib/librarySync.ts:118"] },
       { f: "LS", to: "UI", t: "async", n: "status: synced · refresh the Library", say: "Synced. Other devices pick the change up within 5 s." },
-      { f: "LS", to: "PR", t: "call", n: "refresh shared preparations", say: "The shared catalogue of prepared readings is refreshed too.", code: [SRC + "App.tsx:42", SRC + "engine/preparation.ts:46"] },
-      { f: "PR", to: "SV", t: "call", n: "GET /api/preparations", d: "10 s timeout.", code: ["apps/web/vite.prepare.ts:267"] },
+      { f: "LS", to: "PR", t: "call", n: "refresh shared preparations", say: "The shared catalogue of prepared readings is refreshed too.", code: [SRC + "App.tsx:42", SRC + "engine/preparation.ts:48"] },
+      { f: "PR", to: "SV", t: "call", n: "GET /api/preparations", d: "10 s timeout.", code: ["apps/web/vite.prepare.ts:231"] },
       { f: "SV", to: "PR", t: "ret", n: "available · device-only keys" },
       { op: "opt", id: "upload", g: "this device holds clips the server lacks", rows: [
         { op: "loop", id: "clips", g: "≤ 8 per pass", rows: [
           { f: "PR", to: "DB", t: "call", n: "audio.get(key)", say: "Clips only this device has are shared, so other devices needn’t render them." },
           { f: "DB", to: "PR", t: "ret", n: "clip" },
-          { f: "PR", to: "SV", t: "call", n: "PUT /api/preparations/:id/audio/:i", d: "30 s timeout; up to 32 MB.", code: [SRC + "engine/preparation.ts:52", "apps/web/vite.prepare.ts:376"] },
+          { f: "PR", to: "SV", t: "call", n: "PUT /api/preparations/:id/audio/:i", d: "30 s timeout; up to 32 MB.", code: [SRC + "engine/preparation.ts:54", "apps/web/vite.prepare.ts:325"] },
           { f: "SV", to: "DK", t: "async", n: "shared-<key>.bin + .json" },
           { f: "SV", to: "PR", t: "ret", n: "published" },
         ] },

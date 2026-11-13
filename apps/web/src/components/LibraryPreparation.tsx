@@ -87,7 +87,11 @@ export function PrepareDialog({ documents, onClose }: { documents: LibraryItem[]
   const defaultVoice = useSettings((s) => s.voice);
   const available = useMemo(() => voices.filter((v) => v.engine !== LOCAL_ENGINE && !!baseFor(v.engine)), [voices]);
   const [selected, setSelected] = useState<string[]>(() => {
-    const used = new Set(documents.flatMap((it) => [it.rec.voice ?? defaultVoice, ...it.prepared.map((v) => v.voiceId)]));
+    // Preselect the voices a document still needs: its reading voice and any partly prepared voice, but not finished ones.
+    const used = new Set(documents.flatMap((it) => {
+      const complete = new Set(it.prepared.filter((v) => v.fraction >= 1).map((v) => v.voiceId));
+      return [it.rec.voice ?? defaultVoice, ...it.prepared.map((v) => v.voiceId)].filter((id) => !complete.has(id));
+    }));
     return available.filter((v) => used.has(v.id)).map((v) => v.id);
   });
   const [query, setQuery] = useState("");

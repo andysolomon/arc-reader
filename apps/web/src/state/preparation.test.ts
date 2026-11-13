@@ -133,6 +133,24 @@ describe("Library preparation queue", () => {
     expect(synthesize).toHaveBeenCalledTimes(3);
   });
 
+  it("says a reading is being sent until the server accepts it, then that the server can't be reached", async () => {
+    let report!: (status: { submitting?: boolean; unreachable?: boolean; queued?: boolean }) => void;
+    vi.mocked(prepareInBackground).mockImplementation((requests, _start, progress, signal) => new Promise<void>((resolve) => {
+      report = (flags) => progress?.(0, requests.length, { id: "", state: "running", done: 0, total: requests.length, ...flags });
+      signal!.addEventListener("abort", () => resolve(), { once: true });
+    }));
+    usePreparation.getState().enqueue([record("a")], [bella]);
+    // Before the server has answered at all, nothing is waiting for a machine.
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", message: "Sending to the server…" });
+    await vi.waitFor(() => expect(report).toBeDefined());
+    report({ submitting: true });
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", message: "Sending to the server…" });
+    report({ unreachable: true });
+    expect(usePreparation.getState().jobs[0].message).toBe("Can't reach the server. Retrying…");
+    report({ queued: true });
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", message: undefined });
+  });
+
   it("submits local readings to the machine queue and reports the actual assignment", async () => {
     const pending = holdBackgroundJobs();
     usePreparation.getState().enqueue([record("a"), record("b")], [bella, jasper]);
