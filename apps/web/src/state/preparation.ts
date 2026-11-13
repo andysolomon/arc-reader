@@ -39,6 +39,7 @@ export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "sav
 export const PREPARATION_CONCURRENCY = 3;
 export const PREPARATION_QUEUE_LIMIT = 20;
 const active = new Map<string, { controller: AbortController; provider: string }>();
+const SENDING = "Sending to the server…";
 const providerFor = (job: PreparationJob) => hasOwnServer(job.voice.engine) ? job.voice.engine : "voicestudio";
 
 interface PreparationState {
@@ -150,7 +151,8 @@ function drain() {
     const controller = new AbortController();
     active.set(job.id, { controller, provider });
     counts.set(provider, (counts.get(provider) || 0) + 1);
-    update(job.id, { status: background ? "queued" : "preparing", worker: undefined, waitingFor: undefined });
+    // A server reading is not waiting for a machine until the server has it.
+    update(job.id, { status: background ? "queued" : "preparing", worker: undefined, waitingFor: undefined, message: background ? SENDING : undefined });
     void run(job, controller.signal).finally(() => {
       active.delete(job.id);
       drain();
@@ -188,15 +190,16 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     const { sentences } = segment(text, rec.codeSummaries, rec.visualDescriptions);
     const passages = planPassages(sentences);
     if (!passages.length) throw new Error("There is no text to prepare.");
-    update(job.id, { total: passages.length, message: undefined });
-    if (preparesOnServer(job.voice.engine)) {
+    const onServer = preparesOnServer(job.voice.engine);
+    update(job.id, { total: passages.length, message: onServer ? SENDING : undefined });
+    if (onServer) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {
-        if (!signal.aborted) update(job.id, { done, total, status: status?.queued ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor, ...(status?.id ? { serverId: status.id } : {}), message: status?.unreachable ? "Can't reach the server. Retrying…" : undefined });
+        if (!signal.aborted) update(job.id, { done, total, status: status?.queued || status?.submitting ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor, ...(status?.id ? { serverId: status.id } : {}), message: status?.unreachable ? "Can't reach the server. Retrying…" : status?.submitting ? SENDING : undefined });
       }, signal);
       signal.throwIfAborted();
-      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined });
+      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined, message: undefined });
     }
     for (const passage of passages) {
       signal.throwIfAborted();

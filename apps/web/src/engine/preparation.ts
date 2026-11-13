@@ -23,6 +23,8 @@ export interface PreparationStatus {
   waitingFor?: string;
   /** The app's own server is not answering; the request is being retried. */
   unreachable?: boolean;
+  /** The reading is on its way to the server, which has not accepted it yet. */
+  submitting?: boolean;
 }
 export interface SharedPreparation extends PreparationStatus {
   keys: string[];
@@ -85,14 +87,18 @@ interface PreparationSession {
   observers: Set<PreparationObserver>;
   cancelled: boolean;
   controller: AbortController;
+  /** What a reader sees until the server has accepted the reading. */
+  submitting?: PreparationStatus;
 }
 /** Retrying is silent by design, but a reader watching "0 of 55" should know nothing is arriving. */
 const waiting = (id: string, done: number, total: number): PreparationStatus => ({ id, state: "running", done, total, unreachable: true });
+/** Nothing is queued anywhere until the server answers, so a reading is not "waiting for a machine" yet. */
+const sending = (total: number): PreparationStatus => ({ id: "", state: "running", done: 0, total, submitting: true });
 const sessions = new Map<string, PreparationSession>();
 class PreparationHttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
-export const isTransientPreparationError = (error: unknown) => error instanceof TypeError || (error as Error)?.name === "AbortError"
+export const isTransientPreparationError = (error: unknown) => error instanceof TypeError || ["AbortError", "TimeoutError"].includes((error as Error)?.name)
   || (error instanceof PreparationHttpError && (error.status === 408 || error.status === 429 || error.status >= 500));
 const STORAGE = "readaloud:preparations";
 const BASE = "/api/preparations";
@@ -115,8 +121,31 @@ export function hasActivePreparation(requests: PreparationRequest[]): boolean {
     || shared.some((job) => job.state === "running" && matches(job, requests));
 }
 
-async function json<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, init);
+// A request on a stalled connection (a phone whose tunnel dropped) can hang for minutes
+// without failing. Give up instead, so the reader is told and the request is retried.
+const STATUS_TIMEOUT_MS = 10_000;
+const SUBMIT_TIMEOUT_MS = 20_000;
+/** A submission carries the whole reading's text; allow a slow uplink 10 KB a second. */
+const submitTimeout = (body: string) => Math.max(SUBMIT_TIMEOUT_MS, body.length / 10);
+
+async function json<T>(path: string, init?: RequestInit, timeout?: number): Promise<T> {
+  if (!timeout) return answer<T>(await fetch(`${BASE}${path}`, init));
+  const outer = init?.signal;
+  const controller = new AbortController();
+  const cancel = () => controller.abort(outer?.reason);
+  const timer = setTimeout(() => controller.abort(new DOMException("The server did not answer in time.", "TimeoutError")), timeout);
+  if (outer?.aborted) cancel();
+  else outer?.addEventListener("abort", cancel, { once: true });
+  try {
+    // The body is read inside the time limit too.
+    return await answer<T>(await fetch(`${BASE}${path}`, { ...init, signal: controller.signal }));
+  } finally {
+    clearTimeout(timer);
+    outer?.removeEventListener("abort", cancel);
+  }
+}
+
+async function answer<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string } | null;
     throw new PreparationHttpError(response.status, detail?.error || `Audio preparation failed (HTTP ${response.status}).`);
@@ -134,7 +163,7 @@ function delay(signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function submit(requests: PreparationRequest[], start: number, fingerprint: string, signal: AbortSignal, unreachable: () => void): Promise<SavedPreparation> {
+async function submit(requests: PreparationRequest[], start: number, fingerprint: string, signal: AbortSignal, report: (status: PreparationStatus) => void): Promise<SavedPreparation> {
   let entry = saved().find((job) => job.signature === fingerprint && job.active);
   if (!entry) {
     const existing = shared.find((job) => (job.state === "running" || job.available.length === job.total) && matches(job, requests));
@@ -144,20 +173,22 @@ async function submit(requests: PreparationRequest[], start: number, fingerprint
     }
   }
   if (!entry) {
-    // Do not abort the submission: if Cancel races the response, obtain the job id
-    // first so the server job can be cancelled explicitly.
+    // Do not abort the submission on Cancel: if Cancel races the response, obtain the job
+    // id first so the server job can be cancelled explicitly. A submission that gets no
+    // answer is given up and sent again; the server returns the reading it already has
+    // for the same passages, so a late arrival is not prepared twice.
+    const body = JSON.stringify({ requests, start });
     let status: PreparationStatus;
+    report(sending(requests.length));
     for (;;) {
       signal?.throwIfAborted();
       try {
-        status = await json<PreparationStatus>("", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requests, start }),
-        });
+        status = await json<PreparationStatus>("", { method: "POST", headers: { "Content-Type": "application/json" }, body }, submitTimeout(body));
         break;
       } catch (error) {
         signal?.throwIfAborted();
         if (!isTransientPreparationError(error)) throw error;
-        unreachable();
+        report(waiting("", 0, requests.length));
         await delay(signal);
       }
     }
@@ -196,12 +227,19 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
   if (!session) {
     const controller = new AbortController();
     const observers = new Set<PreparationObserver>();
-    const unreachable = () => { for (const other of observers) if (!other.signal?.aborted) other.progress?.(0, requests.length, waiting("", 0, requests.length)); };
-    session = { entry: submit(requests, start, fingerprint, controller.signal, unreachable), observers, cancelled: false, controller };
+    const created: PreparationSession = { entry: undefined as never, observers, cancelled: false, controller };
+    const report = (status: PreparationStatus) => {
+      created.submitting = status;
+      for (const other of observers) if (!other.signal?.aborted) other.progress?.(0, requests.length, status);
+    };
+    created.entry = submit(requests, start, fingerprint, controller.signal, report);
+    session = created;
     sessions.set(fingerprint, session);
   }
   const observer = { signal, progress };
   session.observers.add(observer);
+  // A reader who joins before the server has answered sees where the submission stands.
+  if (session.submitting) progress?.(0, requests.length, session.submitting);
   let id: string | undefined;
   const cancel = () => {
     if (session.cancelled || [...session.observers].some((other) => !other.signal?.aborted)) return;
@@ -215,13 +253,13 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
   signal?.addEventListener("abort", cancel, { once: true });
   try {
     try { id = (await session.entry).id; }
-    finally { submitted?.(); }
+    finally { session.submitting = undefined; submitted?.(); }
     if (signal?.aborted) { cancel(); signal.throwIfAborted(); }
     let done = 0, total = requests.length;
     for (;;) {
       let status: PreparationStatus;
       try {
-        status = await json<PreparationStatus>(`/${id}`, { signal });
+        status = await json<PreparationStatus>(`/${id}`, { signal }, STATUS_TIMEOUT_MS);
       } catch (error) {
         signal?.throwIfAborted();
         // A suspended phone can lose its connection. The job remains on the

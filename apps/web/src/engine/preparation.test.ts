@@ -63,11 +63,49 @@ describe("background preparation client", () => {
       .mockRejectedValueOnce(new TypeError("Connection refused"))
       .mockResolvedValueOnce(response(status("done", 2)));
     const seen: string[] = [];
-    const run = prepareAudio(requests, 0, (done, total, state) => seen.push(`${done}/${total}${state?.unreachable ? " unreachable" : ""}`));
+    const run = prepareAudio(requests, 0, (done, total, state) => seen.push(`${done}/${total}${state?.unreachable ? " unreachable" : state?.submitting ? " sending" : ""}`));
     await vi.advanceTimersByTimeAsync(6000);
     await run;
     // Not reachable to submit, then a poll that kept what was already known.
-    expect(seen).toEqual(["0/2 unreachable", "1/2", "1/2 unreachable", "2/2"]);
+    expect(seen).toEqual(["0/2 sending", "0/2 unreachable", "1/2", "1/2 unreachable", "2/2"]);
+  });
+
+  it("gives up on a submission and a status check that never answer, and says so", async () => {
+    vi.useFakeTimers();
+    // A stalled connection: the request neither fails nor answers until it is abandoned.
+    const hang = (_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+    });
+    fetchMock.mockImplementationOnce(hang)
+      .mockResolvedValueOnce(response(status("running", 0)))
+      .mockResolvedValueOnce(response(status("running", 1)))
+      .mockImplementationOnce(hang)
+      .mockResolvedValueOnce(response(status("done", 2)));
+    const seen: string[] = [];
+    const run = prepareAudio(requests, 0, (done, total, state) => seen.push(`${done}/${total}${state?.unreachable ? " unreachable" : state?.submitting ? " sending" : ""}`));
+    await vi.advanceTimersByTimeAsync(19_000);
+    expect(seen).toEqual(["0/2 sending"]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seen).toEqual(["0/2 sending", "0/2 unreachable"]);
+    // Sent again and accepted, then a status check that hangs for its own ten seconds.
+    await vi.advanceTimersByTimeAsync(20_000);
+    await run;
+    expect(seen).toEqual(["0/2 sending", "0/2 unreachable", "1/2", "1/2 unreachable", "2/2"]);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2);
+  });
+
+  it("tells a reader who joins a submission in flight that it has not been accepted yet", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockRejectedValueOnce(new TypeError("Connection refused")).mockImplementation(async () => response(status("done", 2)));
+    const first: string[] = [], second: string[] = [];
+    const label = (seen: string[]) => (done: number, total: number, state?: { unreachable?: boolean; submitting?: boolean }) => seen.push(`${done}/${total}${state?.unreachable ? " unreachable" : state?.submitting ? " sending" : ""}`);
+    const firstRun = prepareAudio(requests, 0, label(first));
+    await vi.advanceTimersByTimeAsync(0);
+    const secondRun = prepareAudio(requests, 0, label(second));
+    await vi.advanceTimersByTimeAsync(3000);
+    await Promise.all([firstRun, secondRun]);
+    expect(first).toEqual(["0/2 sending", "0/2 unreachable", "2/2"]);
+    expect(second).toEqual(["0/2 unreachable", "2/2"]);
   });
 
   it("can cancel while waiting for the web server to return", async () => {
@@ -111,7 +149,10 @@ describe("background preparation client", () => {
     await vi.advanceTimersByTimeAsync(1500);
     await run;
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ requests, start: 1 });
-    expect(progress.mock.calls).toEqual([[1, 2, status("running", 1)], [2, 2, status("done", 2)]]);
+    expect(progress.mock.calls).toEqual([
+      [0, 2, { id: "", state: "running", done: 0, total: 2, submitting: true }],
+      [1, 2, status("running", 1)], [2, 2, status("done", 2)],
+    ]);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     vi.resetModules();
     const reloaded = await import("./preparation");
