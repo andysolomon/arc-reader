@@ -26,6 +26,10 @@ export interface PlayerState {
   badge?: string;
   /** Short live note beside the time, e.g. "Preparing 12/120" */
   status?: string;
+  /** Anchored overlay opened from the voice avatar (e.g. a Popover listing voices). */
+  voicePicker?: ReactNode;
+  /** Whether `voicePicker` is showing, for the avatar's aria-expanded. */
+  voicePickerOpen?: boolean;
 }
 
 export interface PlayerActions {
@@ -91,12 +95,34 @@ export function buildMenuItems(a: PlayerActions, extra: MenuItem[] = []): MenuIt
   return items.concat(extra);
 }
 
+/** The voice avatar; with a picker it opens it in place instead of leaving the page. */
+export function PlayerVoiceButton(p: PlayerProps) {
+  const avatar = (
+    <VoiceAvatar
+      voice={p.voice}
+      size={36}
+      interactive
+      onClick={p.onVoice}
+      aria-haspopup={p.voicePicker !== undefined ? "dialog" : undefined}
+      aria-expanded={p.voicePicker !== undefined ? !!p.voicePickerOpen : undefined}
+      className={p.className}
+    />
+  );
+  if (p.voicePicker === undefined) return avatar;
+  return (
+    <div className="relative shrink-0">
+      {avatar}
+      {p.voicePicker}
+    </div>
+  );
+}
+
 /** The row of controls shared by PlayerPill and PlayerBar. */
 export function PlayerControls(p: PlayerProps & { children?: ReactNode }) {
   const items = buildMenuItems(p, p.extraMenu);
   return (
     <>
-      <VoiceAvatar voice={p.voice} size={36} interactive onClick={p.onVoice} className="ml-1" />
+      <PlayerVoiceButton {...p} className="ml-1" />
       <IconButton label="Previous sentence" title="Previous sentence (←)" size={44} round onClick={p.onPrev}>
         <SkipBack size={20} strokeWidth={1.5} />
       </IconButton>

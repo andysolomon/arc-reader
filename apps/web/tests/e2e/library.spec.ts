@@ -398,7 +398,7 @@ test("selects filtered documents and offers explicit paid voice preparation", as
   expect(await library.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
 
-test("the player only offers voices with prepared audio for the open document", async ({ page }) => {
+test("the player's voice avatar picks this document's voice in place, prepared voices first", async ({ page }) => {
   await seedLibrary(page, [null]);
   await selectAll(page);
   await page.getByRole("button", { name: "Prepare selected" }).click();
@@ -408,13 +408,25 @@ test("the player only offers voices with prepared audio for the open document", 
   await expect(page.getByRole("img", { name: "Jasper: 100% prepared", exact: true })).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "First document", exact: true }).click();
   await page.waitForURL(/\/read\//);
+  const player = page.getByRole("region", { name: "Player" });
+  await player.getByRole("button", { name: /^Voice: Bella/ }).click();
+  const picker = page.getByRole("dialog", { name: "Voice for this document" });
+  const options = picker.getByRole("menuitemradio");
+  await expect(options.nth(0)).toContainText("Bella");
+  await expect(options.nth(0)).toHaveAttribute("aria-checked", "true");
+  await expect(options.nth(1)).toContainText("Jasper");
+  await expect(options.nth(1)).toContainText("Prepared");
+  await expect(picker.getByText("Other voices")).toBeVisible();
+  await picker.getByRole("menuitemradio", { name: /Jasper/ }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(page).toHaveURL(/\/read\//);
+  await expect(player.getByRole("button", { name: /^Voice: Jasper/ })).toBeVisible();
+  // The menu's "Change voice" opens the same picker, with the new choice kept for this document.
   await page.getByRole("button", { name: "More" }).first().click();
   await page.getByRole("menuitem", { name: "Change voice for this document" }).click();
-  await expect(page.getByText("Choosing a prepared voice for “First document”.", { exact: false })).toBeVisible();
-  await expect(page.locator('[data-voice="expr-voice-2-f"]')).toContainText("Selected");
-  await expect(page.locator('[data-voice="expr-voice-2-m"]')).toBeVisible();
-  await expect(page.locator("[data-voice]")).toHaveCount(2);
-  await expect(page.getByRole("status").filter({ hasText: "2 voices" })).toBeVisible();
+  await expect(picker.getByRole("menuitemradio", { name: /Jasper/ })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect(picker).toHaveCount(0);
   // Re-voicing from the Library still offers the whole catalogue.
   await page.goto("/library");
   await page.getByRole("button", { name: "Re-voice" }).first().click();
