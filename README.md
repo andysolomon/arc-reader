@@ -63,10 +63,25 @@ READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:8449
 
 `ios:sync` writes it into the app as Capacitor's `server.url`, so changing the address means building and installing the app again. The local kind deployment owns the other end: with the same setting, Terraform has Tailscale serve the cluster's web port at that address, and `deploy/kind/deploy.sh` fails unless the address ends up serving the build it just deployed (see [the kind cluster](#or-run-it-in-a-local-kind-cluster)).
 
-- The phone must be on the tailnet to open the app. When the server cannot be reached, the app shows a page stored inside it that names the server. The page checks for the server every few seconds and opens the app by itself once it answers, so reconnecting Tailscale is enough. **Try again** opens it at once, and gives the button back after 10 seconds if the connection hangs. If the server answers with an error instead (for a few seconds while a deploy restarts the web pod), that error is what the web view shows; close and reopen the app.
+- The phone must be on the tailnet to open the app, unless it uses the public address below. When the server cannot be reached, the app shows a page stored inside it that names the server. The page checks for the server every few seconds and opens the app by itself once it answers, so reconnecting Tailscale is enough. **Try again** opens it at once, and gives the button back after 10 seconds if the connection hangs. If the server answers with an error instead (for a few seconds while a deploy restarts the web pod), that error is what the web view shows; close and reopen the app.
 - iOS keeps the page alive for days, so the app asks the server which build it serves each time it comes to the foreground, and reloads once nothing is playing when a deploy has happened.
 - The app's storage belongs to the address it loads from. Documents saved in an app that ran its own files stay with that build; the server's shared library takes their place.
 - The speech server setting described below is hidden. Speech goes through the server's `/api/vs` proxy, and the Local voice still reads with the iPhone's own voices.
+
+#### Without Tailscale on the phone
+
+The iOS Tailscale client can stall (the app then shows "Can't reach ReadAloud" until the VPN is toggled). To avoid it, the kind deployment can also publish the app to the internet through [Tailscale Funnel](https://tailscale.com/kb/1223/funnel), and the phone loads it from there with no VPN:
+
+```sh
+# root .env
+READALOUD_FUNNEL_PORT=10000                              # 443, 8443 or 10000
+READALOUD_ACCESS_TOKEN=<openssl rand -base64 32>
+READALOUD_APP_URL=https://<machine>.<tailnet>.ts.net:10000  # what the iOS app loads
+```
+
+Funnel needs the `funnel` node attribute in the tailnet policy. The next deploy rolls out the web server with the token, and only then opens the Funnel (`deploy/kind/terraform/app/funnel.tf`). It refuses to open one without a token of at least 32 characters.
+
+Tailscale marks every request that arrives through Funnel (`Tailscale-Funnel-Request`, which a client cannot forge or remove), and the web server refuses those unless they carry the token (`apps/web/vite.gate.ts`). Tailnet requests are not affected. Opening any page with `?access=<token>` stores a 400-day HttpOnly cookie and redirects to the same page without the token. `ios:sync` builds the app to start at `READALOUD_APP_URL/?access=<token>`, so the phone never asks. To revoke access, change the token, deploy, and rebuild the app. The one exception is the icon the offline page checks for, which is public.
 
 ### Voices on device
 
@@ -197,7 +212,7 @@ curl -X POST -H "Authorization: Bearer $VOICESTUDIO_API_KEY" -H "Content-Type: a
 
 Terraform owns all of it in two stages: `deploy/kind/terraform/cluster` creates the kind cluster (ports, mounts, node image) and `deploy/kind/terraform/app` calls the shared `deploy/terraform/modules/readaloud` module for everything in it (Traefik, the Deployments, Services, Ingresses, config and secrets from `.env`). The state lives in `~/.local/state/readaloud/terraform`, outside the repository, so every checkout deploys the same cluster; the app state holds the `.env` secrets.
 
-Set `READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:<port>` in `.env` and Terraform also has Tailscale serve the web port at that address (`deploy/kind/terraform/app/public-url.tf`): it runs `tailscale serve` when the address is first set or changes, runs it again if Tailscale has stopped serving it, and refuses an address that names another machine. Each deploy then ends by checking that the address serves the new build, and fails if it does not. The iOS app can be built to load from the same address ([iOS app](#load-the-app-from-the-server)), which makes this deploy the way the phone is updated. Without the setting, Terraform leaves Tailscale alone.
+Set `READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:<port>` in `.env` and Terraform also has Tailscale serve the web port at that address (`deploy/kind/terraform/app/public-url.tf`): it runs `tailscale serve` when the address is first set or changes, runs it again if Tailscale has stopped serving it, and refuses an address that names another machine. Each deploy then ends by checking that the address serves the new build, and fails if it does not. The iOS app can be built to load from the same address ([iOS app](#load-the-app-from-the-server)), which makes this deploy the way the phone is updated. Without the setting, Terraform leaves Tailscale alone. `READALOUD_FUNNEL_PORT` also opens the app to the internet through Tailscale Funnel, behind `READALOUD_ACCESS_TOKEN` ([without Tailscale on the phone](#without-tailscale-on-the-phone)).
 
 ```sh
 deploy/kind/deploy.sh   # build the web image, load it into kind, roll out
@@ -319,7 +334,7 @@ VITE_PHONON_BASE=/api/phonon
 PHONON_URL=http://127.0.0.1:8880
 ```
 
-The Voices page lists the 37 voices the server offers under **Phonon**: 12 American, 13 British and 12 character voices. The list follows the server, so a voice added there appears after a reload, and a saved document keeps its voice if the server later drops it. The proxy at `/api/phonon` forwards only the voice list and speech generation, and the server needs no key.
+The Voices page lists the 37 voices the server offers under **Phonon**: 12 American, 13 British and 12 character voices. The list follows the server, so a voice added there appears after a reload, and a saved document keeps its voice if the server later drops it. The proxy at `/api/phonon` forwards only the voice list and speech generation, and the server needs no key. Zoey is the app's default voice until you pick another; a deployment without Phonon defaults to KittenTTS's Bella on VoiceStudio.
 
 Phonon speaks the same OpenAI-style `POST /v1/audio/speech` as VoiceStudio and returns MP3. Each device sends it one request at a time, on a queue separate from VoiceStudio's, and asks again when another device's clip is in progress. About a minute is generated ahead as for other free voices, and clips are cached with the model name. **Prepare audio** and Library preparation run on the web server as for VoiceStudio voices: the Phonon server is a preparation machine of its own (shown as **Phonon** in the queue) that takes Phonon readings and nothing else, one whole reading at a time, and pauses while someone is listening to a Phonon voice. The audio is kept on the server and shared with every device. English only: other languages are read with English pronunciation.
 

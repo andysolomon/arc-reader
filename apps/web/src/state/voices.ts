@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_VOICE_ID, isDefaultArchetype, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PHONON_PREFIX, PHONON_VOICES, PRESET_VOICES, hueFor, phononVoice, type Voice } from "../data/voices";
+import { DEFAULT_VOICE_ID, FALLBACK_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PHONON_PREFIX, PHONON_VOICES, PRESET_VOICES, hueFor, phononVoice, type Voice } from "../data/voices";
 import { fetchServerVoices, fetchFishVoices, fetchPhononVoices, hasFish, hasApi, hasOpenAI, hasPhonon, hasOwnServer, API_KIND, OPENAI_ENGINE, FISH_ENGINE, PHONON_ENGINE, type ServerEngine } from "../engine/providers";
 import { archetypeOf, idPath, recordingRevision, studioFetch, studioJson, type Profile } from "../lib/studio";
 import { setVoiceRevision, setVoiceRevisions } from "../engine/voiceRevisions";
@@ -72,6 +72,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
   async load() {
     await Promise.all([get().loadFish(), get().loadPhonon(), get().loadServer()]);
     set({ loaded: true });
+    adoptDefaultVoice();
   },
   async loadFish() {
     if (!hasFish()) return;
@@ -133,7 +134,6 @@ export const useVoices = create<VoicesState>()((set, get) => ({
         .map((e) => ({ id: e.id, label: e.name || engineLabel(e.id), available: e.available !== false, cloning: e.supports_cloning === true }));
       const others = get().voices.filter((v) => hasOwnServer(v.engine));
       set({ voices: [...profiles, ...presets, ...others, LOCAL_VOICE], engines: engineOpts.length ? engineOpts : get().engines, activeEngine: activeEngine ?? get().activeEngine });
-      adoptDefaultVoice(profiles);
     } catch {
       // Keep available voices if the local speech server is offline.
     }
@@ -157,12 +157,15 @@ export const useVoices = create<VoicesState>()((set, get) => ({
   },
 }));
 
-/** Make the Librarian the default voice unless the user has picked one. */
-function adoptDefaultVoice(profiles: Voice[]) {
+/** Zoey when this deployment has Phonon, Bella when it does not. */
+export const defaultVoiceId = () => (useVoices.getState().voices.some((v) => v.id === DEFAULT_VOICE_ID) ? DEFAULT_VOICE_ID : FALLBACK_VOICE_ID);
+
+/** Keep the default voice speakable here unless the user has picked one. */
+function adoptDefaultVoice() {
   const settings = useSettings.getState();
-  if (settings.voiceChosen || settings.voice !== DEFAULT_VOICE_ID) return;
-  const librarian = profiles.find((v) => isDefaultArchetype(v.archetype));
-  if (librarian) settings.set("voice", librarian.id);
+  if (settings.voiceChosen || (settings.voice !== DEFAULT_VOICE_ID && settings.voice !== FALLBACK_VOICE_ID)) return;
+  const id = defaultVoiceId();
+  if (settings.voice !== id) settings.set("voice", id);
 }
 
 export function getVoice(id: string | null | undefined): Voice {
@@ -178,7 +181,7 @@ export function getVoice(id: string | null | undefined): Voice {
     return { ...FISH_DEFAULT_VOICE, id, name: "Fish Audio voice", hue: hueFor(id) };
   }
   if (id) return { id, name: "Saved VoiceStudio voice", engine: useVoices.getState().activeEngine ?? "omnivoice", kind: "profile", lang: "", tags: [], hue: hueFor(id) };
-  return list.find((v) => isDefaultArchetype(v.archetype)) ?? list.find((v) => v.id === DEFAULT_VOICE_ID) ?? PRESET_VOICES[0];
+  return list.find((v) => v.id === DEFAULT_VOICE_ID) ?? list.find((v) => v.id === FALLBACK_VOICE_ID) ?? PRESET_VOICES[0];
 }
 
 export const isLocalVoice = (id: string | null | undefined) => id === LOCAL_VOICE_ID;

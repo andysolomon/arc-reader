@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Chip, Dialog, Input, VoiceCard, VoiceSourceBadge, type VoiceCardAction } from "@readaloud/ui";
 import type { VoiceSource } from "@readaloud/tokens";
 import { Mic, Search, Trash2, Undo2 } from "lucide-react";
-import { useVoices, getVoice, voiceLang, isLocalVoice } from "../state/voices";
+import { useVoices, getVoice, voiceLang, isLocalVoice, defaultVoiceId } from "../state/voices";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
@@ -12,7 +12,7 @@ import { toast } from "../state/toast";
 import { docs } from "../lib/db";
 import { synthesize, DEFAULT_ENGINE } from "../engine/providers";
 import { ApiBusy, ApiRejected, ApiUnreachable } from "../engine/types";
-import { DEFAULT_VOICE_ID, JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource, type Voice } from "../data/voices";
+import { JAMAICAN_PATOIS_VOICE_ID, SOURCE_INFO, voiceSource, type Voice } from "../data/voices";
 import { preparePatois } from "../lib/patois";
 import { NO_VOICE_FILTERS, activeFilterCount, facetCounts, filterVoices, languageLabel, voiceLanguage, voiceType, type VoiceFilters } from "../lib/filters";
 import { ClearFilters, FilterSelect } from "../components/Filters";
@@ -186,7 +186,7 @@ export function VoicesPage() {
       toast(error instanceof Error ? error.message : failure);
       return false;
     }
-    if (useSettings.getState().voice === v.id) useSettings.getState().patch({ voice: DEFAULT_VOICE_ID, voiceChosen: false });
+    if (useSettings.getState().voice === v.id) useSettings.getState().patch({ voice: defaultVoiceId(), voiceChosen: false });
     return true;
   };
   // A gallery voice goes back to Studio: its recipe lives on there. Clones and voices designed

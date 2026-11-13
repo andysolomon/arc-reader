@@ -45,4 +45,5 @@ module "readaloud" {
   fish_api_key                     = local.env.fish_api_key
   llm_api_key                      = local.env.llm_api_key
   typesafe_api_key                 = local.env.typesafe_api_key
+  access_token                     = local.env.access_token
 }
