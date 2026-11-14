@@ -177,7 +177,7 @@ export function SettingsPage() {
         {geminiAvailable && (
           <Section title="Practice">
             <p className="m-0 text-[13px] text-fg2">
-              Practice checks a reading with Gemini Decision 1, Google’s model that listens to the recording itself. The recording and the passage are sent to Google. On Google’s free tier, what you send may be used to improve its products; a paid key isn’t.
+              Practice checks each word against a transcript made by your speech server. Phrasing, expression and pace come from Gemini Decision 1, Google’s model that listens to the recording itself, so the recording and the passage are sent to Google. On Google’s free tier, what you send may be used to improve its products; a paid key isn’t. Without a key, only the words are checked.
             </p>
             <div className="flex flex-col rounded-panel border border-line bg-bg2">
               <LlmKeyField store={useGemini} name="Gemini" envName="GEMINI_API_KEY" help="From Google AI Studio (aistudio.google.com/apikey)." last />

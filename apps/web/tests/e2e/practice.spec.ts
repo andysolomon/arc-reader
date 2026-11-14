@@ -5,47 +5,44 @@ test.use({
   launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] },
 });
 
-/** Grades 6–8 always uses the bundled passages, so no NPR or Jev request is involved. */
+/** The last bundled Grades 6–8 passage, which a pinned Math.random always picks (and never NPR). */
+const PASSAGE = "All children, except one, grow up. They soon know that they will grow up, and the way Wendy knew was this. One day when she was two years old she was playing in a garden, and she plucked another flower and ran with it to her mother. I suppose she must have looked rather delightful, for Mrs. Darling put her hand to her heart and cried, “Oh, why can’t you remain like this for ever!”";
+const WORDS = PASSAGE.split(/\s+/).length;
+/** What the speech server "heard": except → accept, Wendy → windy, garden → house, and no "another". */
+const TRANSCRIPT = "All children, accept one, grow up. They soon know that they will grow up, and the way windy knew was this. One day when she was 2 years old she was playing in a house, and she plucked flower and ran with it to her mother. I suppose she must have looked rather delightful, for Mrs. Darling put her hand to her heart and cried, oh, why can't you remain like this forever?";
+
 async function seed(page: Page) {
   await page.addInitScript(() => {
+    Math.random = () => 0.99;
     if (!localStorage.getItem("readaloud:practice")) {
       localStorage.setItem("readaloud:practice", JSON.stringify({ state: { band: "6-8", points: 0, streak: { days: 0, lastDay: null }, history: [], words: {} }, version: 1 }));
     }
   });
 }
 
-type Requests = { body: { model: string; questions: Record<string, unknown>; state: unknown[] } }[];
+interface Calls { decide: { model: string; questions: Record<string, unknown>; state: unknown[] }[]; transcribe: string[] }
 
-/** A judge that marks word 2 mispronounced, 5 a different word, 7 skipped, and is unsure about 9. */
-async function mockJudge(page: Page, { status = 200, offScript = 0.02 } = {}): Promise<Requests> {
-  const requests: Requests = [];
-  await page.route("**/api/decide/v1/systemone", async (route) => {
-    const body = route.request().postDataJSON();
-    requests.push({ body });
-    if (status !== 200) return route.fulfill({ status, json: { error: { message: "Add a Gemini API key in Settings → Practice to check readings." } } });
-    const answers: Record<string, unknown> = {};
-    for (const key of Object.keys(body.questions)) {
-      if (key.startsWith("w")) answers[key] = { type: "choice", choice: "correct", confidence: 0.96 };
-    }
-    Object.assign(answers, {
-      w_2: { choice: "mispronounced", confidence: 0.88 },
-      w_5: { choice: "substituted", confidence: 0.91 },
-      w_7: { choice: "skipped", confidence: 0.83 },
-      w_9: { choice: "skipped", confidence: 0.52 },
-      phrasing: { type: "score", score: 2.1 },
-      expression: { type: "score", score: 1 },
-      pace: { type: "score", score: 2 },
-      off_script: { type: "noul", noul: offScript },
-    });
-    await route.fulfill({ json: { model: "gemini-decision-1", answers } });
+/** The two halves of the judge: the speech server's transcript, and Gemini's levels for how it was read. */
+async function mockJudge(page: Page, { decideStatus = 200, transcript = TRANSCRIPT, transcribeStatus = 200 } = {}): Promise<Calls> {
+  const calls: Calls = { decide: [], transcribe: [] };
+  await page.route("**/api/vs/transcribe", async (route) => {
+    calls.transcribe.push(route.request().postData()?.match(/name="mode"\r\n\r\n(\w+)/)?.[1] ?? "");
+    if (transcribeStatus !== 200) return route.fulfill({ status: transcribeStatus, json: { detail: "The recognizer isn't installed." } });
+    await route.fulfill({ json: { text: transcript, segments: [], language: "en" } });
   });
-  return requests;
+  await page.route("**/api/decide/v1/systemone", async (route) => {
+    calls.decide.push(route.request().postDataJSON());
+    if (decideStatus !== 200) return route.fulfill({ status: decideStatus, json: { error: { message: "Add a Gemini API key in Settings → Practice to check readings." } } });
+    await route.fulfill({ json: { answers: { phrasing: { type: "score", score: 2.1 }, expression: { type: "score", score: 1 }, pace: { type: "score", score: 2 } } } });
+  });
+  return calls;
 }
 
 async function readAndStop(page: Page) {
   await page.getByRole("button", { name: "Start reading" }).click();
   const card = page.getByRole("region", { name: "Passage" });
   await expect(card.getByText("Public domain ·")).toBeVisible();
+  await expect(card.getByText("All children, except one, grow up.")).toBeVisible();
   await page.getByRole("button", { name: "Record", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Recording ·" })).toBeVisible();
   await page.waitForTimeout(1200);
@@ -54,7 +51,7 @@ async function readAndStop(page: Page) {
 
 test("a round: read, get judged, see marked words, keep missed words", async ({ page }) => {
   await seed(page);
-  const requests = await mockJudge(page);
+  const calls = await mockJudge(page);
   await page.goto("/practice");
   await expect(page.getByRole("heading", { name: "Practice" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Practice" })).toHaveAttribute("aria-current", "page");
@@ -62,34 +59,36 @@ test("a round: read, get judged, see marked words, keep missed words", async ({ 
   await expect(page.getByText("Words to practise")).toHaveCount(0);
 
   await readAndStop(page);
-  await expect(page.getByText(/Listening to your reading|Clear|Mostly|good attempt/).first()).toBeVisible();
 
-  // Results: three marked words plus one unclear word.
+  // Results: three marked words plus one unclear word (a name the transcript spelled its own way).
   await expect(page.getByText(/\+\d+ points · day 1 of your streak/)).toBeVisible();
   const marked = page.getByRole("region", { name: "Passage" }).locator("button[aria-expanded]");
   await expect(marked).toHaveCount(4);
-  await expect(marked.nth(0)).toHaveAttribute("aria-label", /: mispronounced$/);
-  await expect(marked.nth(1)).toHaveAttribute("aria-label", /: different word$/);
-  await expect(marked.nth(3)).toHaveAttribute("aria-label", /: unclear$/);
+  await expect(marked.nth(0)).toHaveAttribute("aria-label", "except: mispronounced");
+  await expect(marked.nth(1)).toHaveAttribute("aria-label", "Wendy: unclear");
+  await expect(marked.nth(2)).toHaveAttribute("aria-label", "garden: different word");
+  await expect(marked.nth(3)).toHaveAttribute("aria-label", "another: skipped");
   const score = page.getByRole("region", { name: "Score" });
+  await expect(score.getByText(`${WORDS - 4} of ${WORDS - 1} words`)).toBeVisible();
   await expect(score.getByRole("img", { name: "3 of 4" })).toBeVisible();
   await expect(score.getByText("One word was unclear in the recording")).toBeVisible();
   await expect(page.getByRole("button", { name: "Practise 3 words" })).toBeVisible();
 
-  // The judge got the audio and one question per word plus the four passage-wide ones.
-  const sent = requests[0].body;
-  expect(sent.model).toBe("gemini-decision-1");
-  expect(sent.state[1]).toMatchObject({ type: "input_audio", input_audio: { format: "wav" } });
-  const wordQuestions = Object.keys(sent.questions).filter((k) => k.startsWith("w_")).length;
-  await expect(score.getByText(`${wordQuestions - 4} of ${wordQuestions - 1} words`)).toBeVisible();
+  // The words came from one fast transcript; Gemini was only asked how the passage was read.
+  expect(calls.transcribe).toEqual(["fast"]);
+  expect(calls.decide).toHaveLength(1);
+  expect(calls.decide[0].model).toBe("gemini-decision-1");
+  expect(calls.decide[0].state[1]).toMatchObject({ type: "input_audio", input_audio: { format: "wav" } });
+  expect(Object.keys(calls.decide[0].questions)).toEqual(["phrasing", "expression", "pace"]);
 
-  // A marked word opens its popover; Esc closes it.
-  await marked.nth(1).click();
+  // A marked word opens its popover, which says what was heard; Esc closes it.
+  await marked.nth(2).click();
   const popover = page.getByRole("dialog");
   await expect(popover.getByText("Different word", { exact: true })).toBeVisible();
+  await expect(popover.getByText("It sounded like “house” here.")).toBeVisible();
   await expect(popover.getByRole("button", { name: "Hear it" })).toBeVisible();
   await expect(popover.getByRole("button", { name: "Try this word" })).toBeVisible();
-  await expect(marked.nth(1)).toHaveAttribute("aria-expanded", "true");
+  await expect(marked.nth(2)).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("Escape");
   await expect(popover).toHaveCount(0);
 
@@ -101,19 +100,31 @@ test("a round: read, get judged, see marked words, keep missed words", async ({ 
   await expect(bank.getByText("Missed once")).toHaveCount(3);
 });
 
-test("a missing judge key points to Settings and keeps the passage", async ({ page }) => {
+test("without a Gemini key the words are still scored, and Settings is linked for the rest", async ({ page }) => {
   await seed(page);
-  await mockJudge(page, { status: 503 });
+  await mockJudge(page, { decideStatus: 503 });
   await page.goto("/practice");
   await readAndStop(page);
-  await expect(page.getByRole("alert")).toContainText("Add a Gemini API key in Settings");
-  await expect(page.getByRole("alert").getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
+  const score = page.getByRole("region", { name: "Score" });
+  await expect(score.getByText(`${WORDS - 4} of ${WORDS - 1} words`)).toBeVisible();
+  await expect(score.getByText("Phrasing, expression and pace weren't checked this time.")).toBeVisible();
+  await expect(score.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
+  await expect(score.getByRole("img", { name: "3 of 4" })).toHaveCount(0);
+});
+
+test("a speech server that can't transcribe says so and keeps the passage", async ({ page }) => {
+  await seed(page);
+  await mockJudge(page, { transcribeStatus: 409 });
+  await page.goto("/practice");
+  await readAndStop(page);
+  await expect(page.getByRole("alert")).toContainText("The speech server couldn't check the reading: The recognizer isn't installed.");
   await expect(page.getByRole("button", { name: "Record", exact: true })).toBeEnabled();
+  await expect(page.getByRole("region", { name: "Score" })).toHaveCount(0);
 });
 
 test("an off-script take isn't scored", async ({ page }) => {
   await seed(page);
-  await mockJudge(page, { offScript: 0.9 });
+  await mockJudge(page, { transcript: "Thank you for watching." });
   await page.goto("/practice");
   await readAndStop(page);
   await expect(page.getByText("didn't match the passage")).toBeVisible();

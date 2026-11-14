@@ -5,11 +5,11 @@ import { useMicRecorder } from "../hooks/useMicRecorder";
 import { nextPassage, type Passage } from "../lib/practice/passages";
 import type { Band } from "../lib/practice/bands";
 import { prepareTake } from "../lib/practice/audio";
-import { askJudge, interpretJudgement, judgeRequest, JudgeNotConfigured, type Judgement } from "../lib/practice/judge";
+import { judgeReading, type Judgement } from "../lib/practice/judge";
 import { feedback, scoreReading, dayOf, type Score } from "../lib/practice/score";
 import { displayText } from "../lib/practice/words";
 import { currentStreak, usePractice } from "../state/practice";
-import { ArrowBox, KeyNotice, LevelChip, LevelPicker, StreakChip, TitleRow } from "../components/practice/parts";
+import { ArrowBox, LevelChip, LevelPicker, StreakChip, TitleRow } from "../components/practice/parts";
 import { PassageCard } from "../components/practice/PassageCard";
 import { RecorderControls } from "../components/practice/RecorderControls";
 import { JudgingPanel } from "../components/practice/JudgingPanel";
@@ -18,7 +18,7 @@ import { ScorePanel } from "../components/practice/ScorePanel";
 import { WordBank } from "../components/practice/WordBank";
 import { ReaderPicker } from "../components/practice/ReaderPicker";
 import { WordDrill, type DrillWord } from "../components/practice/WordDrill";
-import { MARK } from "../components/practice/verdicts";
+import { MARK, markLine } from "../components/practice/verdicts";
 import { toGo } from "../state/practice";
 import { ErrorNotice } from "../components/studio/shared";
 
@@ -37,7 +37,6 @@ export function PracticePage() {
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState("");
-  const [needsKey, setNeedsKey] = useState(false);
   const [notice, setNotice] = useState("");
   const [takeSeconds, setTakeSeconds] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
@@ -58,7 +57,7 @@ export function PracticePage() {
     upcoming.current = { band: forBand, promise, ac };
   };
 
-  const clearMessages = () => { setError(""); setNeedsKey(false); setNotice(""); };
+  const clearMessages = () => { setError(""); setNotice(""); };
 
   const load = async () => {
     loader.current?.abort();
@@ -86,7 +85,7 @@ export function PracticePage() {
       const take = await prepareTake(file);
       if (ac.signal.aborted) return;
       setTakeSeconds(Math.round(take.duration));
-      const judgement = interpretJudgement(passage.text, await askJudge(judgeRequest(passage.text, take.audio), ac.signal));
+      const judgement = await judgeReading(passage.text, take, ac.signal);
       if (ac.signal.aborted) return;
       if (judgement.offScript) {
         setNotice("That recording didn't match the passage, so it wasn't scored. Read the passage aloud, then stop.");
@@ -96,16 +95,15 @@ export function PracticePage() {
       const score = scoreReading(judgement, take.speech);
       const words = judgement.words;
       usePractice.getState().finishRound({
-        passageId: passage.id, accuracy: score.accuracy, wcpm: score.wcpm, phrasing: judgement.phrasing, points: score.points,
+        passageId: passage.id, accuracy: score.accuracy, wcpm: score.wcpm, phrasing: judgement.prosody?.phrasing ?? 0, points: score.points,
         missed: score.missed.map((w) => w.word), clean: words.filter((w) => w.verdict === "correct").map((w) => w.word),
       });
-      setResult({ judgement, score, speech: take.speech, phrase: feedback(score, judgement.pace), points: score.points, streakDay: usePractice.getState().streak.days });
+      setResult({ judgement, score, speech: take.speech, phrase: feedback(score, judgement.prosody?.pace ?? 3), points: score.points, streakDay: usePractice.getState().streak.days });
       setOpenWord(null);
       setPhase("results");
     } catch (e) {
       if (ac.signal.aborted) return;
-      if (e instanceof JudgeNotConfigured) setNeedsKey(true);
-      else setError(e instanceof Error ? e.message : "Checking the reading failed. Please retry.");
+      setError(e instanceof Error ? e.message : "Checking the reading failed. Please retry.");
       setPhase("reading");
     }
   };
@@ -124,8 +122,8 @@ export function PracticePage() {
     word: w.word, label: w.missed === 1 ? "Missed once" : `Missed ${w.missed} times`, line: "Listen to it, then try just this word.",
   })), "start");
   const drillMissed = () => result && startDrill(result.score.missed.map((w) => {
-    const mark = MARK[w.verdict as keyof typeof MARK];
-    return { word: w.word, label: mark.label, labelClass: mark.labelClass, line: mark.line };
+    const verdict = w.verdict as keyof typeof MARK;
+    return { word: w.word, label: MARK[verdict].label, labelClass: MARK[verdict].labelClass, line: markLine(verdict, w.heard) };
   }), "results");
 
   return <section data-screen="practice" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 pb-40 sm:px-10 sm:pt-10 animate-fadein">
@@ -159,7 +157,6 @@ export function PracticePage() {
             : <p role="status" className="m-0 text-sm text-fg2">{loadFailed ? "Couldn't load a passage. Try another." : "Finding a passage…"}</p>}
         </PassageCard>
         {notice && <p role="status" className="m-0 rounded-control border border-line bg-bg2 p-3 text-sm text-fg2">{notice}</p>}
-        {needsKey && <KeyNotice />}
         <ErrorNotice error={error || mic.error} />
         <RecorderControls recording={mic.recording} starting={mic.starting} seconds={mic.seconds} levels={mic.levels}
           disabled={!passage || loading} onStart={() => { clearMessages(); void mic.start(); }} onStop={mic.stop} />

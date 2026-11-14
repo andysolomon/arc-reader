@@ -30,9 +30,9 @@
 <body>
 <div class="container">
   <header>
-    <p class="eyebrow">Phases 1–2 built · judge calls Google directly</p>
+    <p class="eyebrow">Phases 1–2 built · words from a transcript, delivery from Gemini</p>
     <h1>Reading Practice — system design</h1>
-    <p class="subtitle">A read-aloud game inside ReadAloud for grade 6 through advanced readers. Gemini Decision 1 listens to the recording and judges every word; Jev screens passages; everything runs through the existing web server in the kind cluster.</p>
+    <p class="subtitle">A read-aloud game inside ReadAloud for grade 6 through advanced readers. The speech server’s Whisper transcript is lined up against the passage to judge every word; Gemini Decision 1 listens to the recording for phrasing, expression and pace; Jev screens passages; everything runs through the existing web server in the kind cluster.</p>
   </header>
 
   <section>
@@ -64,10 +64,10 @@
   <rect x="478.0" y="212" width="68" height="12" rx="2" fill="#f5f2ec"/><text x="512" y="221" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">HTTPS /API</text>
   <rect x="372" y="360" width="92" height="12" rx="2" fill="#f5f2ec"/><text x="418.0" y="369" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SAVES PROGRESS</text>
   <rect x="668" y="360" width="68" height="12" rx="2" fill="#f5f2ec"/><text x="702.0" y="369" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">READS KEYS</text>
-  <rect x="814.0" y="188" width="92" height="12" rx="2" fill="#f5f2ec"/><text x="860" y="197" fill="#9a5522" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">AUDIO + ~150 Q</text>
+  <rect x="814.0" y="188" width="92" height="12" rx="2" fill="#f5f2ec"/><text x="860" y="197" fill="#9a5522" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">AUDIO + 3 Q</text>
   <rect x="858.0" y="300" width="92" height="12" rx="2" fill="#f5f2ec"/><text x="904" y="309" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">LEVEL · SAFETY</text>
   <rect x="856.0" y="412" width="72" height="12" rx="2" fill="#f5f2ec"/><text x="892" y="421" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">FETCH STORY</text>
-  <rect x="840.0" y="524" width="80" height="12" rx="2" fill="#f5f2ec"/><text x="880" y="533" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SPEAK A WORD</text>
+  <rect x="840.0" y="524" width="80" height="12" rx="2" fill="#f5f2ec"/><text x="880" y="533" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">TRANSCRIBE</text>
   <circle cx="112" cy="172" r="12" fill="#f5f2ec"/><circle cx="112" cy="172" r="12" fill="rgba(93,86,78,0.1)" stroke="#6d665d" stroke-width="1"/>
   <rect x="40" y="196" width="144" height="72" rx="6" fill="#f5f2ec"/>
     <rect x="40" y="196" width="144" height="72" rx="6" fill="rgba(93,86,78,0.1)" stroke="#6d665d" stroke-width="1"/>
@@ -103,7 +103,7 @@
     <rect x="960" y="172" width="240" height="72" rx="6" fill="rgba(154,85,34,0.08)" stroke="#9a5522" stroke-width="1"/>
     <rect x="968" y="180" width="52" height="12" rx="2" fill="none" stroke="rgba(154,85,34,0.45)" stroke-width="0.8"/>
     <text x="994.0" y="189" fill="#9a5522" font-size="7" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">EXTERNAL</text>
-    <text x="1080.0" y="216.0" fill="#1f1b17" font-size="12" font-weight="600" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Gemini Decision 1</text>
+    <text x="1080.0" y="216.0" fill="#1f1b17" font-size="12" font-weight="600" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Whisper + Gemini</text>
     <text x="1080.0" y="231.0" fill="#5d564e" font-size="9" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle">Google Decisions API</text>
   <rect x="960" y="284" width="240" height="72" rx="6" fill="#f5f2ec"/>
     <rect x="960" y="284" width="240" height="72" rx="6" fill="rgba(31,27,23,0.03)" stroke="rgba(31,27,23,0.3)" stroke-width="1"/>
@@ -148,7 +148,7 @@
   <section>
     <p class="eyebrow">BPMN · process</p>
     <h2>One round of play</h2>
-    <p>Passages loop through Jev until one fits the band and is safe. The recording is the only handoff to the judge. Words Gemini is less than 70% sure about become “unsure” in Score &amp; save and are offered for a retry rather than counted wrong.</p>
+    <p>Passages loop through Jev until one fits the band and is safe. The recording is the only handoff to the judge: the speech server transcribes it for the words while Gemini rates how it was read. Words a transcript can’t be trusted on (a misheard name, one short word for another) become “unclear” in Score &amp; save and are offered for a retry rather than counted wrong.</p>
     <div class="diagram-container">
 <svg viewBox="0 0 1280 600" style="min-width:1280px" role="img" aria-labelledby="rp-bpmn-title rp-bpmn-desc" xmlns="http://www.w3.org/2000/svg">
   <title id="rp-bpmn-title">Reading Practice — one round (BPMN)</title>
@@ -245,11 +245,11 @@
   <section>
     <p class="eyebrow">Sequence · messages</p>
     <h2>Screening, then judging</h2>
-    <p>Two System One calls per round: a small text request to Jev per candidate passage, then one audio request to Gemini Decision 1 that asks a choice question for every word plus phrasing, expression and pace. Tap-to-hear (VoiceStudio through <code>/api/vs</code>) is left out to keep the diagram readable.</p>
+    <p>Two System One calls per round: a small text request to Jev per candidate passage, then one audio request to Gemini Decision 1 with three questions: phrasing, expression and pace. The words are judged from a Whisper transcript made by VoiceStudio through <code>/api/vs/transcribe</code> at the same time; that call and tap-to-hear (VoiceStudio through <code>/api/vs</code>) are left out to keep the diagram readable.</p>
     <div class="diagram-container">
 <svg viewBox="0 0 1280 784" style="min-width:1280px" role="img" aria-labelledby="rp-seq-title rp-seq-desc" xmlns="http://www.w3.org/2000/svg">
   <title id="rp-seq-title">Reading Practice — passage and judging sequence</title>
-  <desc id="rp-seq-desc">Sequence of one round: the Practice UI fetches NPR stories and has Jev screen them through the web server until one fits, records the reading, sends it through /api/decide to Gemini Decision 1, gets per-word probabilities back, then scores and saves progress.</desc>
+  <desc id="rp-seq-desc">Sequence of one round: the Practice UI fetches NPR stories and has Jev screen them through the web server until one fits, records the reading, sends it through /api/decide to Gemini Decision 1 for phrasing, expression and pace while a transcript judges the words, then scores and saves progress.</desc>
   <defs>
     <marker id="rp-seq-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5d564e"/></marker>
     <marker id="rp-seq-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#9a5522"/></marker>
@@ -287,7 +287,7 @@
   <path d="M196,512 H476" fill="none" stroke="#2f5f86" stroke-width="1.2" marker-end="url(#rp-seq-arrow-link)"/>
   <rect x="300.0" y="492" width="72" height="12" rx="2" fill="#f5f2ec"/><text x="336" y="501" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">/API/DECIDE</text>
   <path d="M484,552 H1052" fill="none" stroke="#2f5f86" stroke-width="1.2" marker-end="url(#rp-seq-arrow-link)"/>
-  <rect x="578.0" y="532" width="92" height="12" rx="2" fill="#f5f2ec"/><text x="624" y="541" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">AUDIO + ~150 Q</text>
+  <rect x="578.0" y="532" width="92" height="12" rx="2" fill="#f5f2ec"/><text x="624" y="541" fill="#6d665d" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">AUDIO + 3 Q</text>
   <path d="M1052,592 H484" fill="none" stroke="#9a5522" stroke-width="1.6" marker-end="url(#rp-seq-arrow-accent)"/>
   <rect x="870.0" y="572" width="84" height="12" rx="2" fill="#f5f2ec"/><text x="912" y="581" fill="#9a5522" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">PROBABILITIES</text>
   <path d="M476,632 H196" fill="none" stroke="#5d564e" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#rp-seq-arrow)"/>
