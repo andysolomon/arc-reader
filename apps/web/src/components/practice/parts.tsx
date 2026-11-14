@@ -58,9 +58,9 @@ export function PaceDots({ pace }: { pace: number }) {
   </span>;
 }
 
-/** Shown when /api/decide has no OpenCode key. */
+/** Shown when /api/decide has no key for the judge. */
 export function KeyNotice() {
   return <p role="alert" className="rounded-control border border-line bg-bg3 p-3 text-sm text-danger">
-    Add your OpenCode key in <Link to="/settings" className="underline">Settings</Link> to check readings.
+    Add a Gemini API key in <Link to="/settings" className="underline">Settings</Link> to check readings.
   </p>;
 }

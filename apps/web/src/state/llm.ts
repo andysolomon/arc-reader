@@ -33,3 +33,5 @@ function keyStore(path: string) {
 export const useLlm = keyStore("/api/llm/config");
 /** TypeSafe, for Jev categories */
 export const useJev = keyStore("/api/jev/config");
+/** The Gemini key for Reading Practice's judge. */
+export const useGemini = keyStore("/api/decide/config");

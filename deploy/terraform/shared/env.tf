@@ -59,6 +59,12 @@ variable "typesafe_api_key" {
   default   = null
 }
 
+variable "gemini_api_key" {
+  type      = string
+  sensitive = true
+  default   = null
+}
+
 variable "readaloud_access_token" {
   type      = string
   sensitive = true
@@ -80,6 +86,7 @@ locals {
     fish_api_key                     = var.fish_api_key
     llm_api_key                      = var.llm_api_key
     typesafe_api_key                 = var.typesafe_api_key
+    gemini_api_key                   = var.gemini_api_key
     access_token                     = var.readaloud_access_token
   }
 }

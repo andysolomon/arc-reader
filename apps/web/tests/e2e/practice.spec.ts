@@ -22,7 +22,7 @@ async function mockJudge(page: Page, { status = 200, offScript = 0.02 } = {}): P
   await page.route("**/api/decide/v1/systemone", async (route) => {
     const body = route.request().postDataJSON();
     requests.push({ body });
-    if (status !== 200) return route.fulfill({ status, json: { error: { message: "Add your OpenCode key in Settings → Summaries to check readings." } } });
+    if (status !== 200) return route.fulfill({ status, json: { error: { message: "Add a Gemini API key in Settings → Practice to check readings." } } });
     const answers: Record<string, unknown> = {};
     for (const key of Object.keys(body.questions)) {
       if (key.startsWith("w")) answers[key] = { type: "choice", choice: "correct", confidence: 0.96 };
@@ -101,12 +101,12 @@ test("a round: read, get judged, see marked words, keep missed words", async ({ 
   await expect(bank.getByText("Missed once")).toHaveCount(3);
 });
 
-test("a missing OpenCode key points to Settings and keeps the passage", async ({ page }) => {
+test("a missing judge key points to Settings and keeps the passage", async ({ page }) => {
   await seed(page);
   await mockJudge(page, { status: 503 });
   await page.goto("/practice");
   await readAndStop(page);
-  await expect(page.getByRole("alert")).toContainText("Add your OpenCode key in Settings");
+  await expect(page.getByRole("alert")).toContainText("Add a Gemini API key in Settings");
   await expect(page.getByRole("alert").getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
   await expect(page.getByRole("button", { name: "Record", exact: true })).toBeEnabled();
 });

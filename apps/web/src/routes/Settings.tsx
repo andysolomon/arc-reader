@@ -17,7 +17,7 @@ import { isBundledApp } from "../lib/native";
 import { normalizeSpeechServer } from "../lib/speechServer";
 import { LOCAL_ENGINE } from "../engine/types";
 import { SUMMARY_MODELS } from "../lib/summary";
-import { useJev, useLlm } from "../state/llm";
+import { useGemini, useJev, useLlm } from "../state/llm";
 import { CATEGORIES } from "../lib/category";
 import { LlmKeyField } from "../components/LlmKeyField";
 import { DOC_LINKS, docUrl } from "../lib/docs";
@@ -68,7 +68,8 @@ export function SettingsPage() {
   // Hidden on static hosting, where the server has no /api/llm.
   const llmAvailable = useLlm((st) => st.config !== null);
   const jevAvailable = useJev((st) => st.config !== null);
-  useEffect(() => { void useLlm.getState().load(); void useJev.getState().load(); }, []);
+  const geminiAvailable = useGemini((st) => st.config !== null);
+  useEffect(() => { void useLlm.getState().load(); void useJev.getState().load(); void useGemini.getState().load(); }, []);
 
   const copyKey = async () => {
     try {
@@ -169,6 +170,17 @@ export function SettingsPage() {
             </p>
             <div className="flex flex-col rounded-panel border border-line bg-bg2">
               <LlmKeyField store={useJev} name="TypeSafe" envName="TYPESAFE_API_KEY" help="From the TypeSafe console (console.typesafe.ai/keys)." last />
+            </div>
+          </Section>
+        )}
+
+        {geminiAvailable && (
+          <Section title="Practice">
+            <p className="m-0 text-[13px] text-fg2">
+              Practice checks a reading with Gemini Decision 1, Google’s model that listens to the recording itself. The recording and the passage are sent to Google. On Google’s free tier, what you send may be used to improve its products; a paid key isn’t.
+            </p>
+            <div className="flex flex-col rounded-panel border border-line bg-bg2">
+              <LlmKeyField store={useGemini} name="Gemini" envName="GEMINI_API_KEY" help="From Google AI Studio (aistudio.google.com/apikey)." last />
             </div>
           </Section>
         )}

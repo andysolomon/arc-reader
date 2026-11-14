@@ -126,7 +126,7 @@ export function interpretJudgement(passage: string, data: { answers?: Record<str
   };
 }
 
-/** Thrown when /api/decide has no OpenCode key, so the page can link to Settings. */
+/** Thrown when /api/decide has no key for the judge, so the page can link to Settings. */
 export class JudgeNotConfigured extends Error {}
 
 /** POST a request to /api/decide and return its parsed answers. */
@@ -140,9 +140,10 @@ export async function askJudge(request: unknown, signal?: AbortSignal): Promise<
   const data = await response.json().catch(() => null) as { answers?: Record<string, Answer>; error?: { message?: string } | string; detail?: unknown } | null;
   if (!response.ok) {
     const message = typeof data?.error === "object" ? data.error?.message : typeof data?.error === "string" ? data.error : typeof data?.detail === "string" ? data.detail : null;
-    if (response.status === 503) throw new JudgeNotConfigured(message || "Add your OpenCode key in Settings to check readings.");
-    // OpenCode Go covers its own models only; Gemini Decision is billed to pay-as-you-go credits.
-    if (response.status === 402) throw new Error("Checking readings needs OpenCode pay-as-you-go credits. An OpenCode Go plan doesn't cover the reading judge; add credits in the OpenCode console.");
+    if (response.status === 503) throw new JudgeNotConfigured(message || "Add a Gemini API key in Settings to check readings.");
+    // Without a Gemini key the judge goes through OpenCode, where it needs pay-as-you-go credits (Go doesn't cover it).
+    if (response.status === 402) throw new Error("OpenCode has no pay-as-you-go credits for the reading judge. Add a Gemini API key in Settings → Practice instead.");
+    if (response.status === 429) throw new Error("Google's limit for the reading judge was reached. Try again in a minute.");
     throw new Error(message || `Checking the reading failed (HTTP ${response.status}). Please retry.`);
   }
   return data ?? {};

@@ -34,7 +34,7 @@ export function WordPractice({ word, label, labelClass, line }: { word: string; 
       setAttempt(verdict === "unsure" ? { state: "error", message: "That wasn't clear enough to check. Try once more." } : { state: "done", ok });
     } catch (e) {
       if (ac.signal.aborted) return;
-      setAttempt({ state: "error", message: e instanceof JudgeNotConfigured ? "Add your OpenCode key in Settings to check readings." : e instanceof Error ? e.message : "Checking failed. Please try again." });
+      setAttempt({ state: "error", message: e instanceof JudgeNotConfigured ? "Add a Gemini API key in Settings to check readings." : e instanceof Error ? e.message : "Checking failed. Please try again." });
     }
   };
   const mic = useMicRecorder({ onRecorded: (file) => void check(file) });
