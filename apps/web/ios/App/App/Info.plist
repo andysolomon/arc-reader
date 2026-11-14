@@ -70,6 +70,8 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ReadAloud records your voice for reading practice, transcription and voice cloning.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
