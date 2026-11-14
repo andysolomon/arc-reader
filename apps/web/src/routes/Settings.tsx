@@ -274,8 +274,8 @@ export function SettingsPage() {
               {copied ? "Copied" : "Copy"}
             </Button>
           </div>
-          {/* Phones have no Linux client tab; the rail links it on wider screens. */}
-          <Link to="/linux" className="flex items-center justify-between gap-4 rounded-panel border border-line bg-bg2 px-4 py-3.5 text-fg no-underline hover:bg-bg3 sm:hidden">
+          {/* The Linux client has no tab of its own; its setup page is reached from here. */}
+          <Link to="/linux" className="flex items-center justify-between gap-4 rounded-panel border border-line bg-bg2 px-4 py-3.5 text-fg no-underline hover:bg-bg3">
             <span>Set up the Linux client</span>
             <ChevronRight size={16} strokeWidth={1.5} className="text-fg2" aria-hidden />
           </Link>

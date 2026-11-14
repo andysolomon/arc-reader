@@ -69,7 +69,9 @@ test("desktop: the sidebar is the library, and a document opens beside it", asyn
   const entry = documents.getByRole("link", { name: /quick brown fox/ });
   await expect(entry).toHaveAttribute("aria-current", "page");
   // Every other screen is an icon on the sidebar's foot.
-  for (const name of ["Voices", "Studio", "Settings", "Linux client"]) await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
+  for (const name of ["Voices", "Studio", "Practice", "Settings"]) await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
+  // The Linux client has no tab; Settings links its setup page.
+  await expect(nav.getByRole("link", { name: "Linux client" })).toHaveCount(0);
 
   // The front door is Compose here: the documents are already alongside it.
   await nav.getByRole("link", { name: "Compose", exact: true }).click();

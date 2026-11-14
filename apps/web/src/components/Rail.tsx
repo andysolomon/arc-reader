@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { SquarePen, Library, Mic, SlidersHorizontal, Terminal, PanelLeft, AudioLines, BookOpenCheck, type LucideIcon } from "lucide-react";
+import { SquarePen, Library, Mic, SlidersHorizontal, PanelLeft, AudioLines, BookOpenCheck, type LucideIcon } from "lucide-react";
 import { THEMES, getTheme } from "@readaloud/tokens";
 import { ThemeIcon, cn } from "@readaloud/ui";
 import { useSettings, useThemeId } from "../state/settings";
@@ -23,7 +23,6 @@ export const SCREENS: Screen[] = [
   { to: "/studio", label: "Studio", Icon: AudioLines },
   { to: "/practice", label: "Practice", Icon: BookOpenCheck },
   { to: "/settings", label: "Settings", Icon: SlidersHorizontal },
-  { to: "/linux", label: "Linux client", Icon: Terminal },
 ];
 
 /** The front door is Compose on a screen wide enough to show the sidebar, and the Library on a phone. */
