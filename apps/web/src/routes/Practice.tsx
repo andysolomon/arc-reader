@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, RotateCcw } from "lucide-react";
 import { Button, SectionLabel } from "@readaloud/ui";
 import { useMicRecorder } from "../hooks/useMicRecorder";
+import { useLiveCoach } from "../hooks/useLiveCoach";
 import { nextPassage, type Passage } from "../lib/practice/passages";
 import type { Band } from "../lib/practice/bands";
 import { prepareTake } from "../lib/practice/audio";
@@ -11,6 +12,7 @@ import { displayText } from "../lib/practice/words";
 import { currentStreak, usePractice } from "../state/practice";
 import { ArrowBox, LevelChip, LevelPicker, StreakChip, TitleRow } from "../components/practice/parts";
 import { PassageCard } from "../components/practice/PassageCard";
+import { LivePassage } from "../components/practice/LivePassage";
 import { RecorderControls } from "../components/practice/RecorderControls";
 import { JudgingPanel } from "../components/practice/JudgingPanel";
 import { MarkKey, MarkedPassage } from "../components/practice/MarkedPassage";
@@ -109,7 +111,8 @@ export function PracticePage() {
   };
 
   const secondsRef = useRef(0);
-  const mic = useMicRecorder({ meterBars: METER_BARS, onRecorded: (file) => void check(file, secondsRef.current) });
+  const mic = useMicRecorder({ meterBars: METER_BARS, capture: true, onRecorded: (file) => void check(file, secondsRef.current) });
+  const live = useLiveCoach(phase === "reading" && passage ? passage.text : null, mic.recording, mic.samplesSince);
   secondsRef.current = mic.seconds;
 
   const startReading = () => { clearMessages(); setResult(null); setPhase("reading"); void load(); };
@@ -153,7 +156,7 @@ export function PracticePage() {
           action={<Button size="sm" variant="ghost" loading={loading} disabled={mic.recording} onClick={() => { clearMessages(); void load(); }}>Another passage</Button>}
         >
           {passage && !loading
-            ? <p className="m-0 font-serif text-lg leading-relaxed">{displayText(passage.text)}</p>
+            ? mic.recording ? <LivePassage text={passage.text} live={live} /> : <p className="m-0 font-serif text-lg leading-relaxed">{displayText(passage.text)}</p>
             : <p role="status" className="m-0 text-sm text-fg2">{loadFailed ? "Couldn't load a passage. Try another." : "Finding a passage…"}</p>}
         </PassageCard>
         {notice && <p role="status" className="m-0 rounded-control border border-line bg-bg2 p-3 text-sm text-fg2">{notice}</p>}

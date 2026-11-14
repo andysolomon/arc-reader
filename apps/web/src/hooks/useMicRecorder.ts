@@ -4,13 +4,18 @@ export interface MicRecorderOptions {
   onRecorded: (file: File) => void;
   /** Keep a rolling list of this many input levels (0–1) for a meter; 0 skips the analyser. */
   meterBars?: number;
+  /** Also keep the take's raw samples as it is recorded, for `samplesSince`. */
+  capture?: boolean;
 }
+
+/** Raw samples of the take in progress. */
+export interface Samples { samples: Float32Array; sampleRate: number }
 
 /**
  * A complete, playable recording per take. Tracks always close on stop, error and unmount, and a
  * take that finishes after the component moved on is dropped.
  */
-export function useMicRecorder({ onRecorded, meterBars = 0 }: MicRecorderOptions) {
+export function useMicRecorder({ onRecorded, meterBars = 0, capture = false }: MicRecorderOptions) {
   const [recording, setRecording] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
@@ -19,6 +24,7 @@ export function useMicRecorder({ onRecorded, meterBars = 0 }: MicRecorderOptions
   const recorder = useRef<MediaRecorder>();
   const stream = useRef<MediaStream>();
   const meter = useRef<{ context: AudioContext; frame: number } | null>(null);
+  const pcm = useRef<{ chunks: Float32Array[]; length: number; sampleRate: number }>({ chunks: [], length: 0, sampleRate: 0 });
   const mounted = useRef(true);
   const take = useRef(0);
   const report = useRef(onRecorded);
@@ -46,18 +52,33 @@ export function useMicRecorder({ onRecorded, meterBars = 0 }: MicRecorderOptions
 
   const startMeter = (media: MediaStream) => {
     const Context = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!meterBars || !Context) return;
+    pcm.current = { chunks: [], length: 0, sampleRate: 0 };
+    if ((!meterBars && !capture) || !Context) return;
     try {
       const context = new Context();
       const analyser = context.createAnalyser();
       analyser.fftSize = 512;
-      context.createMediaStreamSource(media).connect(analyser);
+      const source = context.createMediaStreamSource(media);
+      source.connect(analyser);
+      if (capture) {
+        // A script processor only runs while it leads to the output; the gain keeps it silent.
+        const tap = context.createScriptProcessor(4096, 1, 1);
+        const mute = context.createGain();
+        mute.gain.value = 0;
+        pcm.current.sampleRate = context.sampleRate;
+        tap.onaudioprocess = (event) => {
+          const block = new Float32Array(event.inputBuffer.getChannelData(0));
+          pcm.current.chunks.push(block);
+          pcm.current.length += block.length;
+        };
+        source.connect(tap); tap.connect(mute); mute.connect(context.destination);
+      }
       const data = new Uint8Array(analyser.fftSize);
       let last = 0;
       const tick = (time: number) => {
         if (!meter.current) return;
         meter.current.frame = requestAnimationFrame(tick);
-        if (time - last < 70) return;
+        if (!meterBars || time - last < 70) return;
         last = time;
         analyser.getByteTimeDomainData(data);
         let sum = 0;
@@ -101,5 +122,19 @@ export function useMicRecorder({ onRecorded, meterBars = 0 }: MicRecorderOptions
   const stop = () => recorder.current?.stop();
   /** Throw the current take away without reporting it. */
   const discard = () => { take.current++; if (recorder.current?.state === "recording") recorder.current.stop(); stream.current?.getTracks().forEach((t) => t.stop()); stopMeter(); setRecording(false); };
-  return { recording, starting, error, seconds, levels, start, stop, discard };
+  /** The take so far from `seconds` in, or null when nothing has been captured. */
+  const samplesSince = useCallback((seconds: number): Samples | null => {
+    const { chunks, length, sampleRate } = pcm.current;
+    if (!sampleRate || !length) return null;
+    const from = Math.min(length, Math.max(0, Math.round(seconds * sampleRate)));
+    const samples = new Float32Array(length - from);
+    let at = 0;
+    for (const chunk of chunks) {
+      const start = Math.max(0, from - at), end = chunk.length;
+      if (start < end) samples.set(start ? chunk.subarray(start) : chunk, Math.max(0, at - from));
+      at += chunk.length;
+    }
+    return { samples, sampleRate };
+  }, []);
+  return { recording, starting, error, seconds, levels, start, stop, discard, samplesSince };
 }

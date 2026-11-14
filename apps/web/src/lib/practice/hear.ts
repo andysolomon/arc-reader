@@ -39,6 +39,11 @@ function verdict(all: Token[], index: number, heard: Alignment["words"][number])
   return { verdict: "substituted", heard: said };
 }
 
+/** Verdicts for the words of `all` from `base` on that an alignment covers. */
+export function verdictsOf(all: Token[], base: number, heard: Alignment["words"]): WordResult[] {
+  return heard.map((h, i) => ({ ...all[base + i], ...verdict(all, base + i, h) }));
+}
+
 export interface Hearing {
   words: WordResult[];
   /** Share of the passage read correctly, 0–1, before any benefit of the doubt. */

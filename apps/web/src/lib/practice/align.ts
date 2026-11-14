@@ -104,16 +104,26 @@ export const CLOSE = 0.5;
 
 type Op = "match" | "swap" | "skip" | "add";
 
-/** Edit-distance alignment of two word lists; a swap between alike words costs less than between unlike ones. */
-function alignPieces(want: string[], got: string[]): Op[] {
+/** A swap between alike words costs less than between unlike ones. */
+const swapCost = (want: string, got: string) => (want === got ? 0 : similarity(want, got) >= CLOSE ? 0.7 : 1.2);
+
+/** The edit-distance table for two word lists: cost[i][j] aligns the first i wanted with the first j heard. */
+function costs(want: string[], got: string[]): Float32Array[] {
   const n = want.length, m = got.length;
   const cost = Array.from({ length: n + 1 }, () => new Float32Array(m + 1));
   for (let i = 1; i <= n; i++) cost[i][0] = i;
   for (let j = 1; j <= m; j++) cost[0][j] = j;
-  const swap = (i: number, j: number) => (want[i] === got[j] ? 0 : similarity(want[i], got[j]) >= CLOSE ? 0.7 : 1.2);
   for (let i = 1; i <= n; i++) {
-    for (let j = 1; j <= m; j++) cost[i][j] = Math.min(cost[i - 1][j - 1] + swap(i - 1, j - 1), cost[i - 1][j] + 1, cost[i][j - 1] + 1);
+    for (let j = 1; j <= m; j++) cost[i][j] = Math.min(cost[i - 1][j - 1] + swapCost(want[i - 1], got[j - 1]), cost[i - 1][j] + 1, cost[i][j - 1] + 1);
   }
+  return cost;
+}
+
+/** Edit-distance alignment of two word lists. */
+function alignPieces(want: string[], got: string[]): Op[] {
+  const n = want.length, m = got.length;
+  const cost = costs(want, got);
+  const swap = (i: number, j: number) => swapCost(want[i], got[j]);
   const ops: Op[] = [];
   for (let i = n, j = m; i > 0 || j > 0;) {
     if (i > 0 && j > 0 && Math.abs(cost[i][j] - (cost[i - 1][j - 1] + swap(i - 1, j - 1))) < 1e-6) { ops.push(want[i - 1] === got[j - 1] ? "match" : "swap"); i--; j--; }
@@ -121,6 +131,31 @@ function alignPieces(want: string[], got: string[]): Op[] {
     else { ops.push("add"); j--; }
   }
   return ops.reverse();
+}
+
+/** How much each passage word reached is worth when choosing where a partial reading stops. */
+const REACH_BONUS = 0.25;
+
+/**
+ * A transcript of a reading still in progress, lined up against the start of what is left of the
+ * passage. `reach` is how many of the passage's words the transcript got to; the words after it
+ * are simply not read yet, not skipped. The stopping point is the cheapest one, leaning toward
+ * the earlier of two equally good places (a trailing "the" belongs to the nearest "the") but
+ * toward taking a misread last word as that word rather than as an aside.
+ */
+export function alignPrefix(passage: Token[], transcript: string): Alignment & { reach: number } {
+  const want: string[] = [], owner: number[] = [];
+  passage.forEach((t, index) => { for (const key of normal(t.word)) { want.push(key); owner.push(index); } });
+  const got = normal(transcript);
+  if (!got.length) return { words: [], added: 0, matched: 0, reach: 0 };
+  const cost = costs(want, got);
+  let end = 0;
+  for (let i = 1; i <= want.length; i++) {
+    if (cost[i][got.length] - REACH_BONUS * i < cost[end][got.length] - REACH_BONUS * end - 1e-6) end = i;
+  }
+  // A word only partly reached ("sun-" of "sun-kissed") waits for the next transcript.
+  const reach = end === want.length ? passage.length : owner[end];
+  return { ...alignTranscript(passage.slice(0, reach), transcript), reach };
 }
 
 export function alignTranscript(passage: Token[], transcript: string): Alignment {
