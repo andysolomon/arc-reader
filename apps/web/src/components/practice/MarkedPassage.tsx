@@ -1,7 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Popover, cn } from "@readaloud/ui";
 import type { WordResult } from "../../lib/practice/judge";
-import { MARK, isMarked, openTint } from "./verdicts";
+import { MARK, isMarked, markLine, openTint } from "./verdicts";
 import { WordPractice } from "./WordPractice";
 
 /**
@@ -40,7 +40,7 @@ export function MarkedPassage({ words, open, onOpen }: { words: WordResult[]; op
     </p>
     <Popover open={!!mark} onClose={() => onOpen(null)} side="bottom" align="start" offset={top} role="dialog" aria-label={current ? `Practise “${current.word}”` : undefined}
       className="left-0 right-0 translate-x-0" style={{ top }}>
-      {current && mark && <WordPractice key={current.index} word={current.word} label={mark.label} labelClass={mark.labelClass} line={mark.line} />}
+      {current && mark && <WordPractice key={current.index} word={current.word} label={mark.label} labelClass={mark.labelClass} line={isMarked(current.verdict) ? markLine(current.verdict, current.heard) : mark.line} />}
     </Popover>
   </div>;
 }

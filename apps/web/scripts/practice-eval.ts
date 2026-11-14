@@ -1,28 +1,33 @@
 /**
- * Phase 0 of Reading Practice: does Gemini Decision 1 catch misreadings in audio?
+ * How well does Reading Practice's judge find misreadings? (Phase 0 of the plan.)
  *
- *   pnpm --filter @readaloud/web practice:eval [--per-band 2] [--recordings DIR]
+ *   pnpm --filter @readaloud/web practice:eval [--per-band 2] [--recordings DIR] [--dump FILE]
  *
  * For a few bundled passages per band it makes readings with known mistakes — two words swapped
  * for others, one skipped, one inserted, one long word respelled so the voice mispronounces it —
  * plus a clean read. Each reading is spoken by Phonon through the app (PRACTICE_EVAL_URL, default
- * the deployed app), converted to 16 kHz mono WAV with ffmpeg, and judged through /api/decide
- * with the ORIGINAL passage's questions. It prints, per variant and overall, how many planted
- * mistakes were caught and how many untouched words were wrongly flagged.
+ * the deployed app), converted to 16 kHz mono WAV with ffmpeg, and judged the way the app judges
+ * it: the speech server's transcript lined up against the ORIGINAL passage (hearTake), and
+ * Gemini Decision 1 for phrasing, expression and pace through /api/decide. It prints, per reading
+ * and overall, how many planted mistakes were caught and how many untouched words were flagged.
  *
- * --dump FILE also writes every word's answer and probabilities as JSON.
+ * --dump FILE also writes every reading's verdicts as JSON.
  * --recordings DIR adds real takes: for each NAME.json ({ "passageId": "...", "mistakes":
  * { "<word index>": "mispronounced" | "substituted" | "skipped" } }) it judges NAME.wav, .m4a or .webm.
  *
  * Pass: under 3% of clean words flagged and at least 80% of planted mistakes caught.
+ *
+ * 2026-11-14, 40 synthetic readings with 32 planted mistakes: asking Gemini Decision about every
+ * word in the audio caught 31–44% (9–13% with confidence) and never a skipped word, so the words
+ * are judged from a transcript instead.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PRACTICE_PASSAGES } from "../src/data/practicePassages";
-import { interpretJudgement, judgeRequest, type Verdict } from "../src/lib/practice/judge";
 import { tokens } from "../src/lib/practice/words";
+import { hearTake, interpretProsody, prosodyRequest, type Verdict } from "../src/lib/practice/judge";
 
 const BASE = (process.env.PRACTICE_EVAL_URL ?? "https://omarchy.tail1b9428.ts.net:8449").replace(/\/$/, "");
 const VOICE = process.env.PRACTICE_EVAL_VOICE ?? "Easton";
@@ -51,6 +56,19 @@ async function speak(text: string, file: string): Promise<string> {
   const mp3 = join(work, `${file}.mp3`);
   writeFileSync(mp3, Buffer.from(await r.arrayBuffer()));
   return toWavBase64(mp3);
+}
+
+/** The reading as Whisper hears it, through the app's VoiceStudio proxy (no vocabulary hint, no clean-up). */
+async function transcribe(wav: Blob, mode: "fast" | "accurate"): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    const form = new FormData();
+    form.set("audio", wav, "reading.wav");
+    form.set("mode", mode);
+    const r = await fetch(`${BASE}/api/vs/transcribe`, { method: "POST", body: form });
+    if (r.status === 429 && attempt < 5) { await new Promise((done) => setTimeout(done, 5000)); continue; }
+    if (!r.ok) throw new Error(`Transcription failed (HTTP ${r.status}): ${(await r.text()).slice(0, 200)}`);
+    return ((await r.json()) as { text?: string }).text ?? "";
+  }
 }
 
 function toWavBase64(input: string): string {
@@ -104,33 +122,39 @@ const cases = [
   ...(recordings ? realCases(recordings) : []),
 ];
 
-let cleanWords = 0, falseFlags = 0, planted = 0, caught = 0, sure = 0, rightKind = 0, unsure = 0;
-console.log(`Judging ${cases.length} readings through ${BASE}/api/decide …\n`);
+let cleanWords = 0, falseFlags = 0, cleanUnsure = 0, planted = 0, caught = 0, sure = 0, rightKind = 0, secondPasses = 0;
+console.log(`Judging ${cases.length} readings through ${BASE} …\n`);
 for (const c of cases) {
   const started = Date.now();
-  const response = await fetch(`${BASE}/api/decide/v1/systemone`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify(judgeRequest(c.passage, { data: await c.audio(), format: "wav" })),
-  });
-  const data = await response.json().catch(() => null) as { answers?: Record<string, unknown>; error?: { message?: string } } | null;
-  if (!response.ok) { console.error(`${c.name}: HTTP ${response.status} ${data?.error?.message ?? ""}`); process.exit(1); }
-  const j = interpretJudgement(c.passage, data as never);
-  if (dump) dumped.push({ name: c.name, expected: c.expected, words: j.words.map((w) => ({ i: w.index, word: w.word, ...(data!.answers![`w_${w.index}`] as object) })) });
-  const flagged = j.words.filter((w) => w.verdict !== "correct" && w.verdict !== "unsure" && !(w.index in c.expected));
-  const hits = Object.entries(c.expected).filter(([i]) => j.words[Number(i)].verdict !== "correct");
-  cleanWords += j.words.length - Object.keys(c.expected).length;
+  const data = await c.audio();
+  const wav = new Blob([Buffer.from(data, "base64")], { type: "audio/wav" });
+  const modes: string[] = [];
+  const [hearing, prosody] = await Promise.all([
+    hearTake(c.passage, wav, undefined, (blob, mode) => { modes.push(mode); return transcribe(blob, mode); }),
+    fetch(`${BASE}/api/decide/v1/systemone`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(prosodyRequest(c.passage, { data, format: "wav" })) })
+      .then(async (r) => (r.ok ? interpretProsody(await r.json()) : `HTTP ${r.status}`)).catch((e: Error) => e.message),
+  ]);
+  if (modes.length > 1) secondPasses++;
+  const words = hearing.words;
+  const marked = (v: Verdict) => v !== "correct" && v !== "unsure";
+  const flagged = words.filter((w) => marked(w.verdict) && !(w.index in c.expected));
+  const doubted = words.filter((w) => w.verdict === "unsure" && !(w.index in c.expected));
+  const hits = Object.entries(c.expected).filter(([i]) => words[Number(i)].verdict !== "correct");
+  cleanWords += words.length - Object.keys(c.expected).length;
   falseFlags += flagged.length;
+  cleanUnsure += doubted.length;
   planted += Object.keys(c.expected).length;
   caught += hits.length;
-  sure += hits.filter(([i]) => j.words[Number(i)].verdict !== "unsure").length;
-  rightKind += hits.filter(([i, kind]) => j.words[Number(i)].verdict === kind).length;
-  unsure += j.words.filter((w) => w.verdict === "unsure").length;
-  console.log(`${c.name.padEnd(48)} caught ${hits.length}/${Object.keys(c.expected).length}  false flags ${flagged.length}${flagged.length ? ` (${flagged.map((w) => `${w.word}:${w.verdict}`).join(", ")})` : ""}  off-script ${j.offScript}  ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  sure += hits.filter(([i]) => marked(words[Number(i)].verdict)).length;
+  rightKind += hits.filter(([i, kind]) => words[Number(i)].verdict === kind).length;
+  if (dump) dumped.push({ name: c.name, expected: c.expected, matched: hearing.matched, added: hearing.added, modes, prosody, words: words.filter((w) => w.verdict !== "correct").map((w) => ({ i: w.index, word: w.word, verdict: w.verdict, heard: w.heard })) });
+  const show = (list: typeof words) => list.map((w) => `${w.word}:${w.verdict}${w.heard ? `←${w.heard}` : ""}`).join(", ");
+  console.log(`${c.name.padEnd(48)} caught ${hits.filter(([i]) => marked(words[Number(i)].verdict)).length}/${Object.keys(c.expected).length}  false flags ${flagged.length}${flagged.length ? ` (${show(flagged)})` : ""}${doubted.length ? `  unclear ${doubted.length} (${show(doubted)})` : ""}  read ${(hearing.matched * 100).toFixed(0)}%${modes.length > 1 ? "  2 passes" : ""}  ${typeof prosody === "string" ? `prosody: ${prosody}` : `pace ${prosody.pace}`}  ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
 if (dump) writeFileSync(dump, JSON.stringify(dumped));
 const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(1)}%` : "n/a");
-console.log(`\nPlanted mistakes caught: ${caught}/${planted} (${pct(caught, planted)}); caught with confidence ≥ 0.7: ${pct(sure, planted)}; right kind: ${pct(rightKind, planted)}`);
-console.log(`Untouched words wrongly flagged: ${falseFlags}/${cleanWords} (${pct(falseFlags, cleanWords)}); words marked unclear: ${unsure}`);
+console.log(`\nPlanted mistakes caught: ${sure}/${planted} (${pct(sure, planted)}); marked unclear instead: ${caught - sure}; missed: ${planted - caught}; right kind: ${pct(rightKind, planted)}`);
+console.log(`Untouched words wrongly flagged: ${falseFlags}/${cleanWords} (${pct(falseFlags, cleanWords)}); untouched words marked unclear (not counted): ${cleanUnsure} (${pct(cleanUnsure, cleanWords)}); readings that needed a second transcript: ${secondPasses}/${cases.length}`);
 const pass = planted > 0 && sure / planted >= 0.8 && falseFlags / cleanWords < 0.03;
-console.log(pass ? "PASS: the audio judge meets the Phase 0 bar." : "FAIL: below the Phase 0 bar (≥ 80% caught with confidence, < 3% false flags).");
+console.log(pass ? "PASS: the judge meets the Phase 0 bar." : "FAIL: below the Phase 0 bar (≥ 80% caught, < 3% false flags).");
 process.exit(pass ? 0 : 2);

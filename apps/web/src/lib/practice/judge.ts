@@ -1,49 +1,44 @@
-import { displayText, tokens, type Token } from "./words";
+import { studioUrl, errorMessage } from "../studio";
+import { withSpeechAuth } from "../speechServer";
+import type { PreparedTake } from "./audio";
+import { alignTranscript } from "./align";
+import { hearReading, hearWord, looksDropped, OFF_SCRIPT, type Hearing, type WordResult } from "./hear";
+import { displayText, tokens } from "./words";
+
+export type { Verdict, WordResult } from "./hear";
 
 /**
- * Reading Practice's judge: one Gemini Decision 1 request (through /api/decide) that hears the
- * recording and answers a choice question for every word, plus phrasing, expression and pace.
+ * Reading Practice's judge, in two parts that run side by side:
+ *
+ * - Words come from a transcript. The speech server's Whisper writes down what it hears, with no
+ *   hint of the passage, and the transcript is lined up against the passage (align.ts, hear.ts).
+ *   Measured with scripts/practice-eval.ts, this finds skipped and misread words far better than
+ *   asking a model about each word in the audio.
+ * - Phrasing, expression and pace come from Gemini Decision 1 (through /api/decide), which hears
+ *   the recording itself. A reading can be scored without it.
  */
 export const JUDGE_MODEL = "gemini-decision-1";
-/** Below this, a word the judge would mark wrong is "unsure": not counted, offered for a retry. */
-export const SURE = 0.7;
-/** At or above this, the take is treated as off-script or silent and not scored. */
-export const OFF_SCRIPT = 0.6;
 
-export type Verdict = "correct" | "mispronounced" | "substituted" | "skipped" | "unsure";
-type Heard = Exclude<Verdict, "unsure">;
-
-const WORD_CRITERIA: Record<Heard, string> = {
-  correct: "Said this word recognisably, even with an accent, a regional pronunciation or a quick self-correction",
-  mispronounced: "Tried to say this word but it came out wrong",
-  substituted: "Said a different word in its place",
-  skipped: "Left this word out",
-};
 export const PHRASING = ["word by word", "mostly two-word phrases", "mostly phrase groups", "meaningful phrases that follow the punctuation"];
 export const EXPRESSION = ["flat, little expression", "some expression", "expressive, suits the meaning"];
 export const PACE = ["much too slow", "a little slow", "steady, neither rushed nor slow", "a little fast", "much too fast"];
 
-export interface WordResult extends Token {
-  verdict: Verdict;
-  /** The judge's probability for the verdict it picked. */
-  confidence: number;
-}
-
-export interface Judgement {
-  words: WordResult[];
+export interface Prosody {
   /** 1–4 on the NAEP oral reading fluency scale. */
   phrasing: number;
   /** 1–3. */
   expression: number;
   /** 1–5; 3 is steady. */
   pace: number;
-  offScript: boolean;
 }
 
-/** Words either side of `index`, so a repeated word's question says which one is meant. */
-function context(all: Token[], index: number) {
-  const from = Math.max(0, index - 4), to = Math.min(all.length, index + 5);
-  return all.slice(from, to).map((t, i) => `${i && t.space ? " " : ""}${t.index === index ? `[${t.word}]` : `${t.pre}${t.word}${t.post}`}`).join("");
+export interface Judgement {
+  words: WordResult[];
+  /** Null when Gemini couldn't be asked; `prosodyIssue` says why. */
+  prosody: Prosody | null;
+  prosodyIssue?: "no-key" | string;
+  /** The take was silent or mostly not this passage, so it isn't scored. */
+  offScript: boolean;
 }
 
 export interface AudioInput {
@@ -52,78 +47,33 @@ export interface AudioInput {
   format: "wav";
 }
 
-/**
- * What the judge hears and reads. OpenCode's System One takes media as chat-style parts in
- * `state`; the passage goes in the text part so every question can refer to it.
- */
-function judgeState(intro: string, audio: AudioInput) {
-  return [
-    { type: "text", text: intro },
-    { type: "input_audio", input_audio: audio },
-  ];
-}
-
-export function judgeRequest(passage: string, audio: AudioInput) {
-  const all = tokens(passage);
-  const questions: Record<string, unknown> = {};
-  for (const t of all) {
-    questions[`w_${t.index}`] = {
-      type: "choice",
-      instructions: `Word ${t.index + 1} of ${all.length} in the passage is "${t.word}", here in brackets: "${context(all, t.index)}". In the recording, how did the reader say this word?`,
-      criteria: WORD_CRITERIA,
-    };
-  }
-  questions.phrasing = { type: "score", instructions: "How does the reader group words into phrases while reading the passage aloud?", criteria: PHRASING };
-  questions.expression = { type: "score", instructions: "How much expression does the reader's voice carry while reading the passage?", criteria: EXPRESSION };
-  questions.pace = { type: "score", instructions: "How is the reader's pace for reading this passage aloud?", criteria: PACE };
-  questions.off_script = { type: "noul", instructions: "Is the recording silent, or does the speaker read something other than this passage?" };
+/** The three questions about how the passage was read; media goes in `state` as chat-style parts. */
+export function prosodyRequest(passage: string, audio: AudioInput) {
   return {
     model: JUDGE_MODEL,
-    state: judgeState(`A student is reading this passage aloud. The recording is attached.\n\nPassage: ${displayText(passage)}`, audio),
-    questions,
+    state: [
+      { type: "text", text: `A student is reading this passage aloud. The recording is attached.\n\nPassage: ${displayText(passage)}` },
+      { type: "input_audio", input_audio: audio },
+    ],
+    questions: {
+      phrasing: { type: "score", instructions: "How does the reader group words into phrases while reading the passage aloud?", criteria: PHRASING },
+      expression: { type: "score", instructions: "How much expression does the reader's voice carry while reading the passage?", criteria: EXPRESSION },
+      pace: { type: "score", instructions: "How is the reader's pace for reading this passage aloud?", criteria: PACE },
+    },
   };
 }
 
-/** One word on its own, for "Try this word". */
-export function wordRequest(word: string, audio: AudioInput) {
-  return {
-    model: JUDGE_MODEL,
-    state: judgeState(`A student was asked to say the single word "${word}". The recording is attached.`, audio),
-    questions: { w: { type: "choice", instructions: `In the recording, how did the student say "${word}"?`, criteria: WORD_CRITERIA } },
-  };
-}
-
-interface Answer { choice?: unknown; confidence?: unknown; score?: unknown; noul?: unknown; probabilities?: unknown }
-const probability = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
-const isHeard = (v: unknown): v is Heard => typeof v === "string" && Object.hasOwn(WORD_CRITERIA, v);
-
-/** A word's verdict. A low-confidence "wrong" becomes unsure; a low-confidence "correct" stays correct. */
-export function verdictOf(answer: Answer | undefined): { verdict: Verdict; confidence: number } {
-  if (!answer || !isHeard(answer.choice)) return { verdict: "unsure", confidence: 0 };
-  const confidence = probability(answer.confidence) ? answer.confidence : 0;
-  if (answer.choice !== "correct" && confidence < SURE) return { verdict: "unsure", confidence };
-  return { verdict: answer.choice, confidence };
-}
+interface Answer { score?: unknown }
 
 /** A 1-based level from a score answer (`score` is a probability-weighted 0-based index). */
-function level(answer: Answer | undefined, levels: number) {
-  const s = typeof answer?.score === "number" && Number.isFinite(answer.score) ? answer.score : (levels - 1) / 2;
-  return Math.min(levels, Math.max(1, Math.round(s) + 1));
+function level(answer: Answer | undefined, levels: number): number {
+  if (typeof answer?.score !== "number" || !Number.isFinite(answer.score)) throw new Error("The judge sent no answer about how the passage was read.");
+  return Math.min(levels, Math.max(1, Math.round(answer.score) + 1));
 }
 
-export function interpretJudgement(passage: string, data: { answers?: Record<string, Answer> } | null): Judgement {
-  const answers = data?.answers;
-  if (!answers || typeof answers !== "object") throw new Error("The judge sent no answers. Please try again.");
-  const words = tokens(passage).map((t) => ({ ...t, ...verdictOf(answers[`w_${t.index}`]) }));
-  if (words.length && words.every((w) => w.confidence === 0)) throw new Error("The judge's answers didn't match the passage. Please try again.");
-  const off = answers.off_script?.noul;
-  return {
-    words,
-    phrasing: level(answers.phrasing, PHRASING.length),
-    expression: level(answers.expression, EXPRESSION.length),
-    pace: level(answers.pace, PACE.length),
-    offScript: probability(off) && off >= OFF_SCRIPT,
-  };
+export function interpretProsody(data: { answers?: Record<string, Answer> } | null): Prosody {
+  const answers = data?.answers ?? {};
+  return { phrasing: level(answers.phrasing, PHRASING.length), expression: level(answers.expression, EXPRESSION.length), pace: level(answers.pace, PACE.length) };
 }
 
 /** Thrown when /api/decide has no key for the judge, so the page can link to Settings. */
@@ -147,4 +97,73 @@ export async function askJudge(request: unknown, signal?: AbortSignal): Promise<
     throw new Error(message || `Checking the reading failed (HTTP ${response.status}). Please retry.`);
   }
   return data ?? {};
+}
+
+const BUSY_RETRIES = 3;
+const BUSY_WAIT_MS = 3000;
+
+/**
+ * What the speech server hears in a take. "fast" is Whisper Turbo; "accurate" is the server's
+ * selected recognizer, slower and less likely to drop a sentence. No vocabulary hint and no
+ * clean-up, so the words are the reader's.
+ */
+export async function transcribeTake(wav: Blob, mode: "fast" | "accurate", signal?: AbortSignal): Promise<string> {
+  const url = studioUrl("/transcribe");
+  for (let attempt = 0; ; attempt++) {
+    const body = new FormData();
+    body.set("audio", new File([wav], "reading.wav", { type: "audio/wav" }));
+    body.set("mode", mode);
+    const response = await fetch(url, withSpeechAuth(url, { method: "POST", body, signal })).catch((error: unknown) => {
+      if (signal?.aborted) throw error;
+      throw new Error("Couldn't reach the speech server to check the reading. Please try again.");
+    });
+    if (response.status === 429 && attempt < BUSY_RETRIES) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, BUSY_WAIT_MS);
+        signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      });
+      continue;
+    }
+    if (response.status === 429) throw new Error("The speech server is busy with other speech. Try again in a moment.");
+    const data = await response.json().catch(() => null) as { text?: unknown } | null;
+    if (!response.ok) throw new Error(`The speech server couldn't check the reading: ${data ? errorMessage(data) : `HTTP ${response.status}`}`);
+    return typeof data?.text === "string" ? data.text : "";
+  }
+}
+
+export type Transcriber = (wav: Blob, mode: "fast" | "accurate", signal?: AbortSignal) => Promise<string>;
+
+/** The passage's words as heard: a fast transcript, and a slower second one when the first looks like it dropped a stretch. */
+export async function hearTake(passage: string, wav: Blob, signal?: AbortSignal, transcribe: Transcriber = transcribeTake): Promise<Hearing> {
+  const all = tokens(passage);
+  const fast = await transcribe(wav, "fast", signal);
+  if (!looksDropped(alignTranscript(all, fast))) return hearReading(all, [fast]);
+  // If the second pass fails, the first still stands.
+  const slow = await transcribe(wav, "accurate", signal).catch((error: unknown) => { if (signal?.aborted) throw error; return null; });
+  return hearReading(all, slow === null ? [fast] : [fast, slow]);
+}
+
+/** Judge one take: its words from the transcript, and how it was read from Gemini, at the same time. */
+export async function judgeReading(passage: string, take: PreparedTake, signal?: AbortSignal): Promise<Judgement> {
+  const prosody = askJudge(prosodyRequest(passage, take.audio), signal).then(interpretProsody)
+    .then((value) => ({ value, issue: undefined as Judgement["prosodyIssue"] }))
+    .catch((error: unknown) => {
+      if (signal?.aborted) throw error;
+      return { value: null, issue: error instanceof JudgeNotConfigured ? "no-key" as const : error instanceof Error ? error.message : "The judge couldn't be reached." };
+    });
+  // An unhandled rejection if the transcript fails first.
+  prosody.catch(() => undefined);
+  const hearing = await hearTake(passage, take.wav, signal);
+  const read = await prosody;
+  return { words: hearing.words, prosody: read.value, prosodyIssue: read.issue, offScript: hearing.matched < OFF_SCRIPT };
+}
+
+/**
+ * "Try this word": the word on its own, checked against a transcript of the clip. A lone word
+ * gives a transcript no context ("hallow" comes back as "hollow"), so anything but a match is
+ * reported with what was heard and never counted against the reader.
+ */
+export async function judgeWord(word: string, take: PreparedTake, signal?: AbortSignal): Promise<{ result: "correct" | "wrong" | "unsure"; heard: string }> {
+  const transcript = await transcribeTake(take.wav, "fast", signal);
+  return { result: hearWord(word, transcript), heard: transcript.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").toLowerCase() };
 }

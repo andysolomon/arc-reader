@@ -28,6 +28,9 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export interface PreparedTake {
+  /** 16 kHz mono WAV, for the transcript. */
+  wav: Blob;
+  /** The same WAV as base64, for the judge. */
   audio: AudioInput;
   /** The take's length, in seconds. */
   duration: number;
@@ -41,5 +44,5 @@ export async function prepareTake(file: Blob): Promise<PreparedTake> {
   if (!pcm) throw new Error("This browser couldn't read the recording. Please try again.");
   const { duration, lead, tail } = analyzePcm(pcm.samples, pcm.sampleRate, [1]);
   const wav = encodeWav(resample(pcm.samples, pcm.sampleRate, JUDGE_SAMPLE_RATE), JUDGE_SAMPLE_RATE);
-  return { audio: { data: await blobToBase64(wav), format: "wav" }, duration, speech: Math.max(0, duration - lead - tail) };
+  return { wav, audio: { data: await blobToBase64(wav), format: "wav" }, duration, speech: Math.max(0, duration - lead - tail) };
 }

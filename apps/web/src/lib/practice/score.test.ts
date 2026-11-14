@@ -3,8 +3,8 @@ import { daysBetween, feedback, scoreReading } from "./score";
 import type { Judgement, Verdict } from "./judge";
 
 const judgement = (verdicts: Verdict[], pace = 3): Judgement => ({
-  words: verdicts.map((verdict, index) => ({ index, pre: "", word: `w${index}`, post: "", space: true, verdict, confidence: 0.9 })),
-  phrasing: 3, expression: 2, pace, offScript: false,
+  words: verdicts.map((verdict, index) => ({ index, pre: "", word: `w${index}`, post: "", space: true, verdict })),
+  prosody: { phrasing: 3, expression: 2, pace }, offScript: false,
 });
 
 describe("scoreReading", () => {

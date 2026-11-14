@@ -3,15 +3,15 @@ import { Mic, Square, Volume2 } from "lucide-react";
 import { Button, cn } from "@readaloud/ui";
 import { useMicRecorder } from "../../hooks/useMicRecorder";
 import { prepareTake } from "../../lib/practice/audio";
-import { askJudge, JudgeNotConfigured, verdictOf, wordRequest } from "../../lib/practice/judge";
+import { judgeWord } from "../../lib/practice/judge";
 import { speakWord } from "../../lib/practice/speak";
 import { usePractice } from "../../state/practice";
 
-type Attempt = { state: "idle" } | { state: "checking" } | { state: "done"; ok: boolean } | { state: "error"; message: string };
+type Attempt = { state: "idle" } | { state: "checking" } | { state: "done"; ok: boolean; heard?: string } | { state: "error"; message: string };
 
 /**
  * A word's popover body: the word, a label, one line of help, then Hear it and Try this word.
- * Trying records just the word and asks the judge one question about it.
+ * Trying records just the word and checks it against a transcript of the clip.
  */
 export function WordPractice({ word, label, labelClass, line }: { word: string; label: ReactNode; labelClass?: string; line: string }) {
   const [attempt, setAttempt] = useState<Attempt>({ state: "idle" });
@@ -26,15 +26,14 @@ export function WordPractice({ word, label, labelClass, line }: { word: string; 
     setAttempt({ state: "checking" });
     try {
       const take = await prepareTake(file);
-      const data = await askJudge(wordRequest(word, take.audio), ac.signal);
+      const { result, heard } = await judgeWord(word, take, ac.signal);
       if (ac.signal.aborted) return;
-      const { verdict } = verdictOf(data.answers?.w);
-      const ok = verdict === "correct";
-      if (verdict !== "unsure") tryWord(word, ok);
-      setAttempt(verdict === "unsure" ? { state: "error", message: "That wasn't clear enough to check. Try once more." } : { state: "done", ok });
+      // Only a clean read counts: a lone word is too easily misheard to hold a miss against the reader.
+      if (result === "correct") tryWord(word, true);
+      setAttempt(result === "unsure" ? { state: "error", message: "Nothing was heard clearly. Try once more." } : { state: "done", ok: result === "correct", heard });
     } catch (e) {
       if (ac.signal.aborted) return;
-      setAttempt({ state: "error", message: e instanceof JudgeNotConfigured ? "Add a Gemini API key in Settings to check readings." : e instanceof Error ? e.message : "Checking failed. Please try again." });
+      setAttempt({ state: "error", message: e instanceof Error ? e.message : "Checking failed. Please try again." });
     }
   };
   const mic = useMicRecorder({ onRecorded: (file) => void check(file) });
@@ -48,7 +47,7 @@ export function WordPractice({ word, label, labelClass, line }: { word: string; 
 
   const status = mic.recording ? `Recording · ${mic.seconds}s. Say just “${word}”, then stop.`
     : attempt.state === "checking" ? "Checking…"
-    : attempt.state === "done" ? (attempt.ok ? "That's it. Counted as a clean read." : "Not quite yet. Listen once more and try again.")
+    : attempt.state === "done" ? (attempt.ok ? "That's it. Counted as a clean read." : `It sounded like “${attempt.heard}”. Listen once more and try again.`)
     : attempt.state === "error" ? attempt.message
     : mic.error || line;
 

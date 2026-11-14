@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { ArrowRight, ChevronDown, Flame } from "lucide-react";
 import { cn } from "@readaloud/ui";
 import { BANDS, bandInfo, type Band } from "../../lib/practice/bands";
@@ -56,11 +55,4 @@ export function PaceDots({ pace }: { pace: number }) {
   return <span role="img" aria-label={`Pace: ${PACE_LABEL[pace - 1] ?? "steady"}`} className="flex shrink-0 items-center gap-1.5">
     {Array.from({ length: 5 }, (_, i) => <span key={i} className={cn("rounded-full", i === pace - 1 ? "size-3 bg-accent" : "size-1.5 bg-line")} />)}
   </span>;
-}
-
-/** Shown when /api/decide has no key for the judge. */
-export function KeyNotice() {
-  return <p role="alert" className="rounded-control border border-line bg-bg3 p-3 text-sm text-danger">
-    Add a Gemini API key in <Link to="/settings" className="underline">Settings</Link> to check readings.
-  </p>;
 }
