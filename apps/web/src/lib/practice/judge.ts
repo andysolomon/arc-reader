@@ -141,6 +141,8 @@ export async function askJudge(request: unknown, signal?: AbortSignal): Promise<
   if (!response.ok) {
     const message = typeof data?.error === "object" ? data.error?.message : typeof data?.error === "string" ? data.error : typeof data?.detail === "string" ? data.detail : null;
     if (response.status === 503) throw new JudgeNotConfigured(message || "Add your OpenCode key in Settings to check readings.");
+    // OpenCode Go covers its own models only; Gemini Decision is billed to pay-as-you-go credits.
+    if (response.status === 402) throw new Error("Checking readings needs OpenCode pay-as-you-go credits. An OpenCode Go plan doesn't cover the reading judge; add credits in the OpenCode console.");
     throw new Error(message || `Checking the reading failed (HTTP ${response.status}). Please retry.`);
   }
   return data ?? {};

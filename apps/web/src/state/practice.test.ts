@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY, applyRound, applyWordAttempt, currentStreak, mastered, toGo } from "./practice";
+import { DEFAULT_READER, EMPTY, addReader, applyRound, applyWordAttempt, currentStreak, mastered, readerList, removeReader, switchTo, toGo } from "./practice";
 
 const at = (day: string) => new Date(`${day}T12:00:00`).getTime();
 const round = (missed: string[] = [], clean: string[] = []) => ({ passageId: "p", accuracy: 95, wcpm: 140, phrasing: 3, points: 60, missed, clean });
@@ -32,5 +32,27 @@ describe("practice progress", () => {
     expect(toGo(d.words).map((w) => w.word)).toEqual(["authentic"]);
     d = applyWordAttempt(d, "authentic", false, at("2026-11-14"));
     expect(d.words.authentic).toMatchObject({ missed: 3, clean: 0 });
+  });
+});
+
+describe("readers", () => {
+  it("keeps each reader's progress apart and swaps it on switching", () => {
+    let s = { ...applyRound(EMPTY, round(["consecrate"]), at("2026-11-14")), ...DEFAULT_READER };
+    s = addReader(s, "  Maya   Lee ", "maya");
+    expect([s.readerId, s.readerName, s.points, Object.keys(s.words)]).toEqual(["maya", "Maya Lee", 0, []]);
+    expect(s.band).toBe(EMPTY.band);
+    s = { ...s, ...applyRound(s, round(["acquiesce"]), at("2026-11-14")) };
+    s = switchTo(s, "reader-1");
+    expect([s.readerName, Object.keys(s.words)]).toEqual(["Reader", ["consecrate"]]);
+    expect(Object.keys(s.others.maya.words)).toEqual(["acquiesce"]);
+    expect(readerList(s).map((r) => r.name)).toEqual(["Maya Lee", "Reader"]);
+    expect(addReader(s, "   ", "x")).toBe(s);
+  });
+
+  it("removes readers but never the last one", () => {
+    let s = addReader({ ...EMPTY, ...DEFAULT_READER }, "Maya", "maya");
+    s = removeReader(s, "maya");
+    expect([s.readerId, Object.keys(s.others)]).toEqual(["reader-1", []]);
+    expect(removeReader(s, "reader-1")).toBe(s);
   });
 });

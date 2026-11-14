@@ -146,3 +146,85 @@ test("on a wide screen the rail has Practice and no Linux client, which Settings
   await page.getByRole("link", { name: "Set up the Linux client" }).click();
   await expect(page).toHaveURL(/\/linux$/);
 });
+
+test("practising words: the missed words after a round, then the word bank", async ({ page }) => {
+  await seed(page);
+  await mockJudge(page);
+  await page.goto("/practice");
+  await readAndStop(page);
+  await page.getByRole("button", { name: "Practise 3 words" }).click();
+  await expect(page.getByText("Word 1 of 3 · listen, then say just the word")).toBeVisible();
+  const card = page.getByRole("region", { name: "Word to practise" });
+  await expect(card.getByText("Mispronounced", { exact: true })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Try this word" })).toBeVisible();
+  await page.getByRole("button", { name: "Next word" }).click();
+  await expect(card.getByText("Different word", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Previous word" }).click();
+  await expect(page.getByText("Word 1 of 3")).toBeVisible();
+  await page.getByRole("button", { name: "Next word" }).click();
+  await page.getByRole("button", { name: "Next word" }).click();
+  await page.getByRole("button", { name: "Finish" }).click();
+  await expect(page.getByRole("region", { name: "Score" })).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Practise my words" }).click();
+  await expect(page.getByText("Word 1 of 3")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Word to practise" }).getByText("Missed once")).toBeVisible();
+  await page.getByRole("button", { name: "Stop practising" }).click();
+  await expect(page.getByRole("button", { name: "Start reading" })).toBeVisible();
+});
+
+test("readers keep separate progress", async ({ page }) => {
+  await seed(page);
+  await mockJudge(page);
+  await page.goto("/practice");
+  await readAndStop(page);
+  await expect(page.getByRole("region", { name: "Score" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Reading as Reader")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Words to practise" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Change reader" }).click();
+  const dialog = page.getByRole("dialog", { name: "Readers" });
+  await dialog.getByLabel("New reader's name").fill("Maya");
+  await dialog.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByText("Reading as Maya")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Words to practise" })).toHaveCount(0);
+  await expect(page.getByText("1-day streak")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Change reader" }).click();
+  await expect(dialog.getByRole("radio", { name: /Maya/ })).toHaveAttribute("aria-checked", "true");
+  await dialog.getByRole("radio", { name: /Reader/ }).click();
+  await expect(page.getByText("Reading as Reader")).toBeVisible();
+  await expect(page.getByText("1-day streak")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Words to practise" })).toBeVisible();
+});
+
+test("Grades 6–8 can get an NPR passage rewritten for the level", async ({ page }) => {
+  const ORIGINAL = "Federal regulators on Thursday proposed sweeping restrictions on chemicals in consumer packaging, a move that industry groups warned could raise costs for manufacturers already contending with inflation. The proposal would phase out the substances over five years, following mounting evidence linking long-term exposure to elevated risks of certain cancers. Officials will take public comments until March.";
+  const REWRITE = "On Thursday, officials proposed new rules for packaging. The rules target some chemicals in boxes and wrappers. The chemicals would be removed over five years. Long-term contact may raise the risk of some cancers. Some industry groups say the change could raise costs. Many companies already face rising prices. People can comment on the plan until March.";
+  await seed(page);
+  await page.addInitScript(() => { Math.random = () => 0.1; });
+  await page.route("**/api/fetch?**", async (route) => {
+    const url = new URL(route.request().url()).searchParams.get("url");
+    if (url === "https://text.npr.org/1001") return route.fulfill({ body: '<a class="topic-title" href="/nx-s1-9">Packaging rules</a>' });
+    return route.fulfill({ body: `<h1 class="story-title">EPA proposes packaging rules</h1><div class="paragraphs-container"><p>${ORIGINAL}</p></div>` });
+  });
+  await page.route("**/api/jev/v1/systemone", async (route) => {
+    const passage = route.request().postDataJSON().state.passage as string;
+    const level = passage.startsWith("On Thursday") ? "6-8" : "9-12";
+    await route.fulfill({ json: { answers: { level: { choice: level, confidence: 0.9 }, unsuitable: { noul: 0.02 } } } });
+  });
+  const rewrites: unknown[] = [];
+  await page.route("**/api/llm/v1/chat/completions", async (route) => {
+    rewrites.push(route.request().postDataJSON());
+    await route.fulfill({ json: { choices: [{ finish_reason: "stop", message: { content: REWRITE } }] } });
+  });
+  await page.goto("/practice");
+  await page.getByRole("button", { name: "Start reading" }).click();
+  const card = page.getByRole("region", { name: "Passage" });
+  await expect(card.getByText("Adapted from NPR ·")).toBeVisible();
+  await expect(card.getByText(REWRITE)).toBeVisible();
+  await expect(card.getByRole("link", { name: "EPA proposes packaging rules" })).toHaveAttribute("href", "https://www.npr.org/nx-s1-9");
+  expect(rewrites).toHaveLength(1);
+});

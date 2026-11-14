@@ -3,6 +3,7 @@ import { Mic, RotateCcw } from "lucide-react";
 import { Button, SectionLabel } from "@readaloud/ui";
 import { useMicRecorder } from "../hooks/useMicRecorder";
 import { nextPassage, type Passage } from "../lib/practice/passages";
+import type { Band } from "../lib/practice/bands";
 import { prepareTake } from "../lib/practice/audio";
 import { askJudge, interpretJudgement, judgeRequest, JudgeNotConfigured, type Judgement } from "../lib/practice/judge";
 import { feedback, scoreReading, dayOf, type Score } from "../lib/practice/score";
@@ -15,13 +16,17 @@ import { JudgingPanel } from "../components/practice/JudgingPanel";
 import { MarkKey, MarkedPassage } from "../components/practice/MarkedPassage";
 import { ScorePanel } from "../components/practice/ScorePanel";
 import { WordBank } from "../components/practice/WordBank";
+import { ReaderPicker } from "../components/practice/ReaderPicker";
+import { WordDrill, type DrillWord } from "../components/practice/WordDrill";
+import { MARK } from "../components/practice/verdicts";
+import { toGo } from "../state/practice";
 import { ErrorNotice } from "../components/studio/shared";
 
 const METER_BARS = 20;
 const RECENT = 12;
 
 interface Result { judgement: Judgement; score: Score; speech: number; phrase: string; points: number; streakDay: number }
-type Phase = "start" | "reading" | "judging" | "results";
+type Phase = "start" | "reading" | "judging" | "results" | "drill";
 
 export function PracticePage() {
   const band = usePractice((s) => s.band);
@@ -37,22 +42,37 @@ export function PracticePage() {
   const [takeSeconds, setTakeSeconds] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
   const [openWord, setOpenWord] = useState<number | null>(null);
+  const [drill, setDrill] = useState<{ words: DrillWord[]; back: Phase } | null>(null);
   const recent = useRef<string[]>([]);
   const loader = useRef<AbortController>();
   const judge = useRef<AbortController>();
-  useEffect(() => () => { loader.current?.abort(); judge.current?.abort(); }, []);
+  /** The next passage, fetched while this one is read: finding an NPR passage can take a while. */
+  const upcoming = useRef<{ band: Band; promise: Promise<Passage>; ac: AbortController } | null>(null);
+  useEffect(() => () => { loader.current?.abort(); judge.current?.abort(); upcoming.current?.ac.abort(); }, []);
+
+  const prefetch = (forBand: Band) => {
+    upcoming.current?.ac.abort();
+    const ac = new AbortController();
+    const promise = nextPassage(forBand, { avoid: recent.current, signal: ac.signal });
+    promise.catch(() => undefined);
+    upcoming.current = { band: forBand, promise, ac };
+  };
 
   const clearMessages = () => { setError(""); setNeedsKey(false); setNotice(""); };
 
   const load = async () => {
     loader.current?.abort();
-    const ac = new AbortController(); loader.current = ac;
+    const ready = upcoming.current?.band === band ? upcoming.current : null;
+    if (!ready) upcoming.current?.ac.abort();
+    upcoming.current = null;
+    const ac = ready?.ac ?? new AbortController(); loader.current = ac;
     setLoading(true); setLoadFailed(false);
     try {
-      const next = await nextPassage(band, { avoid: recent.current, signal: ac.signal });
+      const next = await (ready?.promise ?? nextPassage(band, { avoid: recent.current, signal: ac.signal }));
       if (ac.signal.aborted) return;
       recent.current = [...recent.current.filter((id) => id !== next.id), next.id].slice(-RECENT);
       setPassage(next);
+      prefetch(band);
     } catch { if (!ac.signal.aborted) setLoadFailed(true); }
     finally { if (!ac.signal.aborted) setLoading(false); }
   };
@@ -99,18 +119,32 @@ export function PracticePage() {
   const cancelJudging = () => { judge.current?.abort(); setPhase("reading"); };
   const readAgain = () => { clearMessages(); setResult(null); setPhase("reading"); };
   const nextOne = () => { clearMessages(); setResult(null); setPhase("reading"); void load(); };
+  const startDrill = (words: DrillWord[], back: Phase) => { if (!words.length) return; setOpenWord(null); setDrill({ words, back }); setPhase("drill"); };
+  const drillBank = () => startDrill(toGo(usePractice.getState().words).map((w) => ({
+    word: w.word, label: w.missed === 1 ? "Missed once" : `Missed ${w.missed} times`, line: "Listen to it, then try just this word.",
+  })), "start");
+  const drillMissed = () => result && startDrill(result.score.missed.map((w) => {
+    const mark = MARK[w.verdict as keyof typeof MARK];
+    return { word: w.word, label: mark.label, labelClass: mark.labelClass, line: mark.line };
+  }), "results");
 
   return <section data-screen="practice" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 pb-40 sm:px-10 sm:pt-10 animate-fadein">
     <div className="mx-auto flex max-w-[720px] flex-col gap-4">
       {phase === "start" && <>
         <TitleRow chip={<StreakChip days={streak} />} />
         <p className="m-0 text-fg2">Read a passage aloud. Each word is checked, along with your pace, phrasing and expression.</p>
+        <ReaderPicker />
         <div className="flex flex-col gap-2">
           <SectionLabel id="practice-level">Level</SectionLabel>
           <LevelPicker band={band} onChange={setBand} />
         </div>
         <Button variant="primary" size="xl" className="w-full justify-between" trailing={<ArrowBox />} onClick={startReading}>Start reading</Button>
-        <WordBank />
+        <WordBank onPractise={drillBank} />
+      </>}
+
+      {phase === "drill" && drill && <>
+        <TitleRow chip={<LevelChip band={band} />} />
+        <WordDrill words={drill.words} onDone={() => { setPhase(drill.back); setDrill(null); }} />
       </>}
 
       {phase === "reading" && <>
@@ -153,7 +187,7 @@ export function PracticePage() {
           <Button variant="primary" size="xl" className="w-full justify-between" trailing={<ArrowBox />} onClick={nextOne}>Next passage</Button>
           <div className="grid grid-cols-2 gap-2.5">
             <Button variant="secondary" size="lg" leading={<RotateCcw size={16} aria-hidden />} onClick={readAgain}>Read again</Button>
-            {result.score.missed.length > 0 && <Button variant="secondary" size="lg" leading={<Mic size={16} aria-hidden />} onClick={() => setOpenWord(result.score.missed[0].index)}>
+            {result.score.missed.length > 0 && <Button variant="secondary" size="lg" leading={<Mic size={16} aria-hidden />} onClick={drillMissed}>
               Practise {result.score.missed.length} word{result.score.missed.length === 1 ? "" : "s"}
             </Button>}
           </div>

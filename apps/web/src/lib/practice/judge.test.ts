@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { interpretJudgement, judgeRequest, verdictOf, wordRequest } from "./judge";
 import { tokens } from "./words";
 
@@ -60,5 +60,17 @@ describe("verdicts", () => {
   it("refuses answers that don't match the passage", () => {
     expect(() => interpretJudgement(PASSAGE, {})).toThrow(/no answers/);
     expect(() => interpretJudgement(PASSAGE, { answers: { phrasing: { score: 1 } } })).toThrow(/didn't match/);
+  });
+});
+
+describe("askJudge", () => {
+  it("explains OpenCode's billing refusal and a missing key", async () => {
+    const { askJudge, JudgeNotConfigured } = await import("./judge");
+    const reply = (status: number) => vi.fn(async () => Response.json({ error: { message: "raw" } }, { status }));
+    vi.stubGlobal("fetch", reply(402));
+    await expect(askJudge({})).rejects.toThrow(/pay-as-you-go credits/);
+    vi.stubGlobal("fetch", reply(503));
+    await expect(askJudge({})).rejects.toBeInstanceOf(JudgeNotConfigured);
+    vi.unstubAllGlobals();
   });
 });
