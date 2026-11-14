@@ -16,7 +16,7 @@ export function PassageCard({ head, action, children, passage, footer }: { head:
 
 export function Attribution({ passage }: { passage: Passage }) {
   return <p className="m-0 text-xs text-fg2">
-    {passage.source === "npr" ? (passage.adapted ? "Adapted from NPR · " : "From NPR · ") : "Public domain · "}
+    {passage.source === "npr" ? "From NPR · " : "Public domain · "}
     <a className="underline" href={passage.url} target="_blank" rel="noreferrer">{passage.title}</a>
   </p>;
 }

@@ -12,6 +12,8 @@
  * and overall, how many planted mistakes were caught and how many untouched words were flagged.
  *
  * --dump FILE also writes every reading's verdicts as JSON.
+ * --live also plays each reading to the live coach a few seconds at a time, as the app hears it
+ * while recording, and reports what it had marked by the end.
  * --recordings DIR adds real takes: for each NAME.json ({ "passageId": "...", "mistakes":
  * { "<word index>": "mispronounced" | "substituted" | "skipped" } }) it judges NAME.wav, .m4a or .webm.
  *
@@ -28,6 +30,7 @@ import { join } from "node:path";
 import { PRACTICE_PASSAGES } from "../src/data/practicePassages";
 import { tokens } from "../src/lib/practice/words";
 import { hearTake, interpretProsody, prosodyRequest, type Verdict } from "../src/lib/practice/judge";
+import { LIVE_START, advanceLive, type Segment } from "../src/lib/practice/live";
 
 const BASE = (process.env.PRACTICE_EVAL_URL ?? "https://omarchy.tail1b9428.ts.net:8449").replace(/\/$/, "");
 const VOICE = process.env.PRACTICE_EVAL_VOICE ?? "Easton";
@@ -38,6 +41,9 @@ const recordings = flag("--recordings");
 /** --dump FILE writes every word's probabilities, to study thresholds. */
 const dump = flag("--dump");
 const dumped: unknown[] = [];
+const liveMode = args.includes("--live");
+/** Seconds of reading between two live transcripts, about what the app manages. */
+const LIVE_STEP = 2.6;
 const work = mkdtempSync(join(tmpdir(), "practice-eval-"));
 
 type Expected = Record<number, Exclude<Verdict, "correct" | "unsure">>;
@@ -59,7 +65,7 @@ async function speak(text: string, file: string): Promise<string> {
 }
 
 /** The reading as Whisper hears it, through the app's VoiceStudio proxy (no vocabulary hint, no clean-up). */
-async function transcribe(wav: Blob, mode: "fast" | "accurate"): Promise<string> {
+async function transcribeFull(wav: Blob, mode: "fast" | "accurate"): Promise<{ text: string; segments: Segment[] }> {
   for (let attempt = 0; ; attempt++) {
     const form = new FormData();
     form.set("audio", wav, "reading.wav");
@@ -67,8 +73,44 @@ async function transcribe(wav: Blob, mode: "fast" | "accurate"): Promise<string>
     const r = await fetch(`${BASE}/api/vs/transcribe`, { method: "POST", body: form });
     if (r.status === 429 && attempt < 5) { await new Promise((done) => setTimeout(done, 5000)); continue; }
     if (!r.ok) throw new Error(`Transcription failed (HTTP ${r.status}): ${(await r.text()).slice(0, 200)}`);
-    return ((await r.json()) as { text?: string }).text ?? "";
+    const data = (await r.json()) as { text?: string; segments?: Segment[] };
+    return { text: data.text ?? "", segments: data.segments ?? [] };
   }
+}
+const transcribe = async (wav: Blob, mode: "fast" | "accurate") => (await transcribeFull(wav, mode)).text;
+
+/** The samples of a 16-bit mono WAV, and a WAV of a stretch of them. */
+function pcmOf(wav: Buffer): { samples: Int16Array; rate: number } {
+  const at = wav.indexOf("data", 12, "latin1");
+  const bytes = wav.subarray(at + 8, at + 8 + wav.readUInt32LE(at + 4));
+  return { samples: new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.length / 2)), rate: wav.readUInt32LE(24) };
+}
+function wavOf(samples: Int16Array, rate: number): Blob {
+  const head = Buffer.alloc(44);
+  head.write("RIFF", 0); head.writeUInt32LE(36 + samples.length * 2, 4); head.write("WAVEfmt ", 8);
+  head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22); head.writeUInt32LE(rate, 24);
+  head.writeUInt32LE(rate * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34); head.write("data", 36); head.writeUInt32LE(samples.length * 2, 40);
+  return new Blob([head, Buffer.from(samples.buffer, samples.byteOffset, samples.length * 2)], { type: "audio/wav" });
+}
+
+/** The live coach's state after hearing a take the way the app does: the unsettled audio every few seconds. */
+async function liveRun(passage: string, wav: Buffer) {
+  const all = tokens(passage);
+  const { samples, rate } = pcmOf(wav);
+  const duration = samples.length / rate;
+  let state = LIVE_START, asks = 0;
+  for (let t = LIVE_STEP; ; t += LIVE_STEP) {
+    const until = Math.min(t, duration);
+    if (until - state.audioFrom >= 2) {
+      const window = samples.subarray(Math.round(state.audioFrom * rate), Math.round(until * rate));
+      const segments = (await transcribeFull(wavOf(window, rate), "fast")).segments;
+      state = advanceLive(state, all, segments);
+      asks++;
+      if (process.env.LIVE_DEBUG) console.log(`      ${state.audioFrom.toFixed(1)}–${until.toFixed(1)}s settled ${state.words.length} cursor ${state.cursor} | ${segments.map((g) => `[${g.start.toFixed(1)}-${g.end.toFixed(1)}]${g.text}`).join(" ")}`.slice(0, 420));
+    }
+    if (until >= duration) break;
+  }
+  return { state, asks, duration, total: all.length };
 }
 
 function toWavBase64(input: string): string {
@@ -117,12 +159,15 @@ function realCases(dir: string): Case[] {
 }
 
 const bands = ["6-8", "9-12", "college", "advanced"] as const;
+/** --only TEXT keeps the readings whose name contains it. */
+const only = flag("--only");
 const cases = [
   ...bands.flatMap((band) => PRACTICE_PASSAGES.filter((p) => p.band === band).slice(0, perBand).flatMap((p) => variants(p.id, p.text))),
   ...(recordings ? realCases(recordings) : []),
-];
+].filter((c) => !only || c.name.includes(only));
 
 let cleanWords = 0, falseFlags = 0, cleanUnsure = 0, planted = 0, caught = 0, sure = 0, rightKind = 0, secondPasses = 0;
+const liveTotals = { planted: 0, caught: 0, flags: 0, settled: 0, cursor: 0, words: 0, asks: 0 };
 console.log(`Judging ${cases.length} readings through ${BASE} …\n`);
 for (const c of cases) {
   const started = Date.now();
@@ -147,14 +192,24 @@ for (const c of cases) {
   caught += hits.length;
   sure += hits.filter(([i]) => marked(words[Number(i)].verdict)).length;
   rightKind += hits.filter(([i, kind]) => words[Number(i)].verdict === kind).length;
+  let liveNote = "";
+  if (liveMode) {
+    const run = await liveRun(c.passage, Buffer.from(data, "base64"));
+    const liveMarks = run.state.words.filter((w) => marked(w.verdict));
+    const liveHits = liveMarks.filter((w) => w.index in c.expected);
+    liveTotals.planted += Object.keys(c.expected).length; liveTotals.caught += liveHits.length; liveTotals.flags += liveMarks.length - liveHits.length;
+    liveTotals.settled += run.state.words.length; liveTotals.cursor += run.state.cursor; liveTotals.words += run.total; liveTotals.asks += run.asks;
+    liveNote = `\n    live: marked ${liveHits.length}/${Object.keys(c.expected).length}${liveMarks.length > liveHits.length ? `, wrongly ${liveMarks.filter((w) => !(w.index in c.expected)).map((w) => `${w.word}←${w.heard ?? "∅"}`).join(", ")}` : ""}; settled ${run.state.words.length}/${run.total} words, cursor ${run.state.cursor}, ${run.asks} transcripts over ${run.duration.toFixed(0)}s`;
+  }
   if (dump) dumped.push({ name: c.name, expected: c.expected, matched: hearing.matched, added: hearing.added, modes, prosody, words: words.filter((w) => w.verdict !== "correct").map((w) => ({ i: w.index, word: w.word, verdict: w.verdict, heard: w.heard })) });
   const show = (list: typeof words) => list.map((w) => `${w.word}:${w.verdict}${w.heard ? `←${w.heard}` : ""}`).join(", ");
-  console.log(`${c.name.padEnd(48)} caught ${hits.filter(([i]) => marked(words[Number(i)].verdict)).length}/${Object.keys(c.expected).length}  false flags ${flagged.length}${flagged.length ? ` (${show(flagged)})` : ""}${doubted.length ? `  unclear ${doubted.length} (${show(doubted)})` : ""}  read ${(hearing.matched * 100).toFixed(0)}%${modes.length > 1 ? "  2 passes" : ""}  ${typeof prosody === "string" ? `prosody: ${prosody}` : `pace ${prosody.pace}`}  ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  console.log(`${c.name.padEnd(48)} caught ${hits.filter(([i]) => marked(words[Number(i)].verdict)).length}/${Object.keys(c.expected).length}  false flags ${flagged.length}${flagged.length ? ` (${show(flagged)})` : ""}${doubted.length ? `  unclear ${doubted.length} (${show(doubted)})` : ""}  read ${(hearing.matched * 100).toFixed(0)}%${modes.length > 1 ? "  2 passes" : ""}  ${typeof prosody === "string" ? `prosody: ${prosody}` : `pace ${prosody.pace}`}  ${((Date.now() - started) / 1000).toFixed(1)}s${liveNote}`);
 }
 if (dump) writeFileSync(dump, JSON.stringify(dumped));
 const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(1)}%` : "n/a");
 console.log(`\nPlanted mistakes caught: ${sure}/${planted} (${pct(sure, planted)}); marked unclear instead: ${caught - sure}; missed: ${planted - caught}; right kind: ${pct(rightKind, planted)}`);
 console.log(`Untouched words wrongly flagged: ${falseFlags}/${cleanWords} (${pct(falseFlags, cleanWords)}); untouched words marked unclear (not counted): ${cleanUnsure} (${pct(cleanUnsure, cleanWords)}); readings that needed a second transcript: ${secondPasses}/${cases.length}`);
+if (liveMode) console.log(`Live coach, by the end of each take: marked ${liveTotals.caught}/${liveTotals.planted} planted mistakes (${pct(liveTotals.caught, liveTotals.planted)}); wrongly marked ${liveTotals.flags} words (${pct(liveTotals.flags, liveTotals.words)}); settled ${pct(liveTotals.settled, liveTotals.words)} of the words, cursor at ${pct(liveTotals.cursor, liveTotals.words)}; ${liveTotals.asks} transcripts`);
 const pass = planted > 0 && sure / planted >= 0.8 && falseFlags / cleanWords < 0.03;
 console.log(pass ? "PASS: the judge meets the Phase 0 bar." : "FAIL: below the Phase 0 bar (≥ 80% caught, < 3% false flags).");
 process.exit(pass ? 0 : 2);

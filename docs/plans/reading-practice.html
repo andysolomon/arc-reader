@@ -30,7 +30,7 @@
 <body>
 <div class="container">
   <header>
-    <p class="eyebrow">Phases 1–2 built · words from a transcript, delivery from Gemini</p>
+    <p class="eyebrow">Phases 1–3 built · words from a transcript, delivery from Gemini, live follow-along in the browser</p>
     <h1>Reading Practice — system design</h1>
     <p class="subtitle">A read-aloud game inside ReadAloud for grade 6 through advanced readers. The speech server’s Whisper transcript is lined up against the passage to judge every word; Gemini Decision 1 listens to the recording for phrasing, expression and pace; Jev screens passages; everything runs through the existing web server in the kind cluster.</p>
   </header>
@@ -148,7 +148,7 @@
   <section>
     <p class="eyebrow">BPMN · process</p>
     <h2>One round of play</h2>
-    <p>Passages loop through Jev until one fits the band and is safe. The recording is the only handoff to the judge: the speech server transcribes it for the words while Gemini rates how it was read. Words a transcript can’t be trusted on (a misheard name, one short word for another) become “unclear” in Score &amp; save and are offered for a retry rather than counted wrong.</p>
+    <p>Passages loop through Jev until one fits the band and is safe, and are shown exactly as written. While the reader records, the browser sends the unsettled audio to the speech server every couple of seconds and marks the passage as it is read (not drawn). The recording is the only handoff to the judge: the speech server transcribes it for the words while Gemini rates how it was read. Words a transcript can’t be trusted on (a misheard name, one short word for another) become “unclear” in Score &amp; save and are offered for a retry rather than counted wrong.</p>
     <div class="diagram-container">
 <svg viewBox="0 0 1280 600" style="min-width:1280px" role="img" aria-labelledby="rp-bpmn-title rp-bpmn-desc" xmlns="http://www.w3.org/2000/svg">
   <title id="rp-bpmn-title">Reading Practice — one round (BPMN)</title>
