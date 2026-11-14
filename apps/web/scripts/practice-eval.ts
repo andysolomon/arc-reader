@@ -10,6 +10,7 @@
  * with the ORIGINAL passage's questions. It prints, per variant and overall, how many planted
  * mistakes were caught and how many untouched words were wrongly flagged.
  *
+ * --dump FILE also writes every word's answer and probabilities as JSON.
  * --recordings DIR adds real takes: for each NAME.json ({ "passageId": "...", "mistakes":
  * { "<word index>": "mispronounced" | "substituted" | "skipped" } }) it judges NAME.wav, .m4a or .webm.
  *
@@ -29,6 +30,9 @@ const args = process.argv.slice(2);
 const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const perBand = Number(flag("--per-band") ?? 2);
 const recordings = flag("--recordings");
+/** --dump FILE writes every word's probabilities, to study thresholds. */
+const dump = flag("--dump");
+const dumped: unknown[] = [];
 const work = mkdtempSync(join(tmpdir(), "practice-eval-"));
 
 type Expected = Record<number, Exclude<Verdict, "correct" | "unsure">>;
@@ -111,6 +115,7 @@ for (const c of cases) {
   const data = await response.json().catch(() => null) as { answers?: Record<string, unknown>; error?: { message?: string } } | null;
   if (!response.ok) { console.error(`${c.name}: HTTP ${response.status} ${data?.error?.message ?? ""}`); process.exit(1); }
   const j = interpretJudgement(c.passage, data as never);
+  if (dump) dumped.push({ name: c.name, expected: c.expected, words: j.words.map((w) => ({ i: w.index, word: w.word, ...(data!.answers![`w_${w.index}`] as object) })) });
   const flagged = j.words.filter((w) => w.verdict !== "correct" && w.verdict !== "unsure" && !(w.index in c.expected));
   const hits = Object.entries(c.expected).filter(([i]) => j.words[Number(i)].verdict !== "correct");
   cleanWords += j.words.length - Object.keys(c.expected).length;
@@ -122,6 +127,7 @@ for (const c of cases) {
   unsure += j.words.filter((w) => w.verdict === "unsure").length;
   console.log(`${c.name.padEnd(48)} caught ${hits.length}/${Object.keys(c.expected).length}  false flags ${flagged.length}${flagged.length ? ` (${flagged.map((w) => `${w.word}:${w.verdict}`).join(", ")})` : ""}  off-script ${j.offScript}  ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
+if (dump) writeFileSync(dump, JSON.stringify(dumped));
 const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(1)}%` : "n/a");
 console.log(`\nPlanted mistakes caught: ${caught}/${planted} (${pct(caught, planted)}); caught with confidence ≥ 0.7: ${pct(sure, planted)}; right kind: ${pct(rightKind, planted)}`);
 console.log(`Untouched words wrongly flagged: ${falseFlags}/${cleanWords} (${pct(falseFlags, cleanWords)}); words marked unclear: ${unsure}`);
