@@ -120,6 +120,14 @@ variable "typesafe_api_key" {
   default   = ""
 }
 
+# Reading Practice's judge: Gemini Decision 1, called directly at Google.
+variable "gemini_api_key" {
+  type      = string
+  sensitive = true
+  nullable  = false
+  default   = ""
+}
+
 variable "access_token" {
   type        = string
   sensitive   = true

@@ -68,7 +68,7 @@ describe("askJudge", () => {
     const { askJudge, JudgeNotConfigured } = await import("./judge");
     const reply = (status: number) => vi.fn(async () => Response.json({ error: { message: "raw" } }, { status }));
     vi.stubGlobal("fetch", reply(402));
-    await expect(askJudge({})).rejects.toThrow(/pay-as-you-go credits/);
+    await expect(askJudge({})).rejects.toThrow(/Gemini API key in Settings → Practice/);
     vi.stubGlobal("fetch", reply(503));
     await expect(askJudge({})).rejects.toBeInstanceOf(JudgeNotConfigured);
     vi.unstubAllGlobals();

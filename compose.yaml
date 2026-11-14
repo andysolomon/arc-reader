@@ -72,6 +72,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_URL: ${LLM_URL:-https://opencode.ai/zen/go}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       PREPARATION_DATA_DIR: /app/preparations
       PREPARATION_YIELD_MS: ${PREPARATION_YIELD_MS:-}
       LIBRARY_DATA_DIR: /app/library

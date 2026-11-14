@@ -30,7 +30,7 @@
 <body>
 <div class="container">
   <header>
-    <p class="eyebrow">Plan · Phase 1 · not built yet</p>
+    <p class="eyebrow">Phases 1–2 built · judge calls Google directly</p>
     <h1>Reading Practice — system design</h1>
     <p class="subtitle">A read-aloud game inside ReadAloud for grade 6 through advanced readers. Gemini Decision 1 listens to the recording and judges every word; Jev screens passages; everything runs through the existing web server in the kind cluster.</p>
   </header>
@@ -38,11 +38,11 @@
   <section>
     <p class="eyebrow">C4 · container view</p>
     <h2>What talks to what</h2>
-    <p>The browser never holds a key. The web server pod forwards to OpenCode (Gemini Decision 1) and TypeSafe (Jev) with keys from the library volume, so phase 1 adds one route, <code>/api/decide</code>, and no new Terraform resources. VoiceStudio stays on the Mac mini, outside k8s.</p>
+    <p>The browser never holds a key. The web server pod forwards to Google (Gemini Decision 1) and TypeSafe (Jev) with keys from the library volume or the <code>readaloud-secrets</code> Secret, so the game adds one route, <code>/api/decide</code>, and no new Terraform resources. VoiceStudio stays on the Mac mini, outside k8s.</p>
     <div class="diagram-container">
 <svg viewBox="0 112 1280 552" style="min-width:1280px" role="img" aria-labelledby="rp-c4-title rp-c4-desc" xmlns="http://www.w3.org/2000/svg">
   <title id="rp-c4-title">Reading Practice — C4 container view</title>
-  <desc id="rp-c4-desc">C4 container view: a reader uses the Practice UI, which calls the ReadAloud web server; the server holds the API keys and calls Gemini Decision 1 through OpenCode to judge the audio, Jev to screen passages, NPR for stories and VoiceStudio to speak words.</desc>
+  <desc id="rp-c4-desc">C4 container view: a reader uses the Practice UI, which calls the ReadAloud web server; the server holds the API keys and calls Gemini Decision 1 at Google to judge the audio, Jev to screen passages, NPR for stories and VoiceStudio to speak words.</desc>
   <defs>
     <marker id="rp-c4-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5d564e"/></marker>
     <marker id="rp-c4-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#9a5522"/></marker>
@@ -104,7 +104,7 @@
     <rect x="968" y="180" width="52" height="12" rx="2" fill="none" stroke="rgba(154,85,34,0.45)" stroke-width="0.8"/>
     <text x="994.0" y="189" fill="#9a5522" font-size="7" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">EXTERNAL</text>
     <text x="1080.0" y="216.0" fill="#1f1b17" font-size="12" font-weight="600" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Gemini Decision 1</text>
-    <text x="1080.0" y="231.0" fill="#5d564e" font-size="9" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle">via OpenCode System One</text>
+    <text x="1080.0" y="231.0" fill="#5d564e" font-size="9" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle">Google Decisions API</text>
   <rect x="960" y="284" width="240" height="72" rx="6" fill="#f5f2ec"/>
     <rect x="960" y="284" width="240" height="72" rx="6" fill="rgba(31,27,23,0.03)" stroke="rgba(31,27,23,0.3)" stroke-width="1"/>
     <rect x="968" y="292" width="52" height="12" rx="2" fill="none" stroke="rgba(31,27,23,0.3)" stroke-width="0.8"/>
@@ -317,7 +317,7 @@
     <rect x="964" y="48" width="52" height="12" rx="2" fill="none" stroke="rgba(154,85,34,0.45)" stroke-width="0.8"/>
     <text x="990.0" y="57" fill="#9a5522" font-size="7" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">EXTERNAL</text>
     <text x="1056.0" y="76.0" fill="#1f1b17" font-size="12" font-weight="600" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Gemini Decision 1</text>
-    <text x="1056.0" y="91.0" fill="#5d564e" font-size="9" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle">via OpenCode</text>
+    <text x="1056.0" y="91.0" fill="#5d564e" font-size="9" font-family="ui-monospace, Menlo, Consolas, monospace" text-anchor="middle">Google API</text>
   <line x1="40" y1="736" x2="1240" y2="736" stroke="rgba(31,27,23,0.1)" stroke-width="0.8"/>
     <text x="40" y="756" fill="#5d564e" font-size="8" font-family="ui-monospace, Menlo, Consolas, monospace" letter-spacing="0.14em">LEGEND</text>
     <line x1="120" y1="753" x2="136" y2="753" stroke="#2f5f86" stroke-width="1.2"/>

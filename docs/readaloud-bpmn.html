@@ -716,7 +716,7 @@ const DIAGRAMS = {
         d: "The scheduler runs again when any job finishes, and every 5 s while work waits on a machine that was unreachable.", code: ["apps/web/vite.prepare.ts:217"] },
       { id: "I_idle", t: "catch", ev: "conditional", n: "Live speech idle for 15 s", lp: "l", x: 760, y: 640, lane: "L_sched",
         d: "Playback comes first. Before each passage it still has to render, the job waits until no live speech request is going through the proxy, then 15 s more (PREPARATION_YIELD_MS), so a listener never queues behind preparation.",
-        code: ["apps/web/vite.prepare.ts:323", "apps/web/vite.speech-activity.ts:9", "compose.yaml:76"] },
+        code: ["apps/web/vite.prepare.ts:323", "apps/web/vite.speech-activity.ts:9", "compose.yaml:77"] },
       { id: "T_render", t: "task", k: "service", m: "seq", n: "Render the next passage from the listener’s spot", x: 760, y: 755, lane: "L_render",
         d: "From `start`, wrapping round: skips passages the device already has or that are done; POST /v1/audio/speech (16 steps for OmniVoice; a 429 waits for Retry-After, up to 4 times). Each take is decoded and checked: under 20 % voiced speech counts as breathy noise and is asked again, up to 2 times. Identical concurrent requests share one render; clips already on disk never wait behind inference for another voice.",
         code: ["apps/web/vite.prepare.ts:308", "apps/web/vite.prepare.ts:397", "apps/web/vite.voicing.ts:8", "apps/web/vite.prepare.ts:444"] },
@@ -727,7 +727,7 @@ const DIAGRAMS = {
         d: "<key>.bin and <key>.json written atomically; the job’s completed list and done count are persisted after every passage.", code: ["apps/web/vite.prepare.ts:430"] },
       { id: "G_moreP", t: "gw", g: "x", n: "More passages?", lp: "b", x: 1040, y: 755, lane: "L_render", d: "" },
       { id: "E_job", t: "end", n: "Job done", x: 1150, y: 755, lane: "L_render", d: "state = done; the scheduler gives the machine to the next waiting reading." },
-      { id: "DS_disk", t: "store", pool: "P_srv", n: "Disk · job files and clips (7 days)", x: 910, y: 850, d: "PREPARATION_DATA_DIR (/app/preparations in Docker).", code: ["compose.yaml:75", "apps/web/vite.prepare.ts:29"] },
+      { id: "DS_disk", t: "store", pool: "P_srv", n: "Disk · job files and clips (7 days)", x: 910, y: 850, d: "PREPARATION_DATA_DIR (/app/preparations in Docker).", code: ["compose.yaml:76", "apps/web/vite.prepare.ts:29"] },
       { id: "DS_audio", t: "store", pool: "P_br", n: "IndexedDB · audio cache", lp: "t", x: 930, y: -75, d: "The browser’s clip cache.", code: [SRC + "lib/db.ts:237"] },
     ],
     flows: [
@@ -882,7 +882,7 @@ const DIAGRAMS = {
       { id: "T_saveLib", t: "task", n: "Write library.json", x: 1010, y: 555, pool: "P_lsrv", d: "To a temporary file, then renamed over the old one.", code: ["apps/web/vite.library.ts:191"] },
       { id: "E_reply", t: "end", ev: "message", n: "Answer with the library", lp: "b", x: 1110, y: 555, pool: "P_lsrv", d: "Every document’s id and version (not its text), all positions and deletions. Older clients that omit view: manifest get every document in full. Document bodies come from POST /api/library/docs." },
       { id: "DS_outbox", t: "store", pool: "P_dev", n: "IndexedDB · outbox", x: 470, y: -75, d: "Pending changes {key, token, change}.", code: [SRC + "lib/db.ts:149"] },
-      { id: "DS_lib", t: "store", pool: "P_lsrv", n: "Disk · library.json", x: 1010, y: 720, d: "LIBRARY_DATA_DIR (default .readaloud-library), on a volume.", code: ["compose.yaml:77", "apps/web/vite.library.ts:228"] },
+      { id: "DS_lib", t: "store", pool: "P_lsrv", n: "Disk · library.json", x: 1010, y: 720, d: "LIBRARY_DATA_DIR (default .readaloud-library), on a volume.", code: ["compose.yaml:78", "apps/web/vite.library.ts:228"] },
     ],
     flows: [
       { f: "S_write", to: "T_outbox" },
