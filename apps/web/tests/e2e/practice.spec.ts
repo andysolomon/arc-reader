@@ -122,6 +122,43 @@ test("a speech server that can't transcribe says so and keeps the passage", asyn
   await expect(page.getByRole("region", { name: "Score" })).toHaveCount(0);
 });
 
+test("the passage follows the reader while recording: words dim, and a misread word is marked", async ({ page }) => {
+  await seed(page);
+  let recording = true;
+  const live: string[] = [];
+  await page.route("**/api/vs/transcribe", async (route) => {
+    if (!recording) return route.fulfill({ json: { text: TRANSCRIPT, segments: [], language: "en" } });
+    live.push("live");
+    // The reading so far: one finished sentence with a slip, and the start of the next.
+    await route.fulfill({ json: { text: "All children, accept one, grow up. They soon know that they", language: "en", segments: [
+      { start: 0, end: 3.1, text: " All children, accept one, grow up." },
+      { start: 3.4, end: 5, text: " They soon know that they" },
+    ] } });
+  });
+  await page.route("**/api/decide/v1/systemone", (route) => route.fulfill({ json: { answers: { phrasing: { score: 2 }, expression: { score: 1 }, pace: { score: 2 } } } }));
+  await page.goto("/practice");
+  await page.getByRole("button", { name: "Start reading" }).click();
+  const card = page.getByRole("region", { name: "Passage" });
+  await expect(card.getByText("All children, except one, grow up.")).toBeVisible();
+  await expect(card.locator("[data-live-mark]")).toHaveCount(0);
+  await page.getByRole("button", { name: "Record", exact: true }).click();
+
+  // A few seconds in, the finished sentence is settled and the cursor is a little into the next.
+  const mark = card.locator("[data-live-mark]");
+  await expect(mark).toHaveCount(1, { timeout: 15_000 });
+  await expect(mark).toHaveText("except");
+  await expect(mark).toHaveAttribute("data-live-mark", "mispronounced");
+  await expect(card.locator("[data-read]").first()).toHaveText("All");
+  await expect(card.locator("p[data-live-cursor]")).toHaveAttribute("data-live-cursor", "9");
+  expect(live.length).toBeGreaterThan(0);
+
+  // Stopping still runs the full check, whose results replace the live marks.
+  recording = false;
+  await page.getByRole("button", { name: "Stop recording" }).click();
+  await expect(page.getByRole("region", { name: "Score" })).toBeVisible();
+  await expect(card.locator("button[aria-expanded]")).toHaveCount(4);
+});
+
 test("an off-script take isn't scored", async ({ page }) => {
   await seed(page);
   await mockJudge(page, { transcript: "Thank you for watching." });
@@ -211,31 +248,28 @@ test("readers keep separate progress", async ({ page }) => {
   await expect(page.getByRole("region", { name: "Words to practise" })).toBeVisible();
 });
 
-test("Grades 6–8 can get an NPR passage rewritten for the level", async ({ page }) => {
-  const ORIGINAL = "Federal regulators on Thursday proposed sweeping restrictions on chemicals in consumer packaging, a move that industry groups warned could raise costs for manufacturers already contending with inflation. The proposal would phase out the substances over five years, following mounting evidence linking long-term exposure to elevated risks of certain cancers. Officials will take public comments until March.";
-  const REWRITE = "On Thursday, officials proposed new rules for packaging. The rules target some chemicals in boxes and wrappers. The chemicals would be removed over five years. Long-term contact may raise the risk of some cancers. Some industry groups say the change could raise costs. Many companies already face rising prices. People can comment on the plan until March.";
+test("an NPR passage is shown exactly as written when Jev says it fits the level", async ({ page }) => {
+  const STORY = "The city council met on Tuesday night to talk about a plan for new bike lanes. The lanes would go on three busy streets in the middle of town. People who ride bikes said the lanes would keep them safe. Some shop owners said they were worried about losing places to park. The council will vote on the plan next month.";
   await seed(page);
   await page.addInitScript(() => { Math.random = () => 0.1; });
   await page.route("**/api/fetch?**", async (route) => {
     const url = new URL(route.request().url()).searchParams.get("url");
-    if (url === "https://text.npr.org/1001") return route.fulfill({ body: '<a class="topic-title" href="/nx-s1-9">Packaging rules</a>' });
-    return route.fulfill({ body: `<h1 class="story-title">EPA proposes packaging rules</h1><div class="paragraphs-container"><p>${ORIGINAL}</p></div>` });
+    if (url === "https://text.npr.org/1001") return route.fulfill({ body: '<a class="topic-title" href="/nx-s1-9">Bike lanes</a>' });
+    return route.fulfill({ body: `<h1 class="story-title">Council weighs new bike lanes</h1><div class="paragraphs-container"><p>${STORY}</p></div>` });
   });
-  await page.route("**/api/jev/v1/systemone", async (route) => {
-    const passage = route.request().postDataJSON().state.passage as string;
-    const level = passage.startsWith("On Thursday") ? "6-8" : "9-12";
-    await route.fulfill({ json: { answers: { level: { choice: level, confidence: 0.9 }, unsuitable: { noul: 0.02 } } } });
-  });
-  const rewrites: unknown[] = [];
-  await page.route("**/api/llm/v1/chat/completions", async (route) => {
-    rewrites.push(route.request().postDataJSON());
-    await route.fulfill({ json: { choices: [{ finish_reason: "stop", message: { content: REWRITE } }] } });
-  });
+  await page.route("**/api/jev/v1/systemone", (route) => route.fulfill({ json: { answers: { level: { choice: "6-8", confidence: 0.9 }, unsuitable: { noul: 0.02 } } } }));
+  let rewrites = 0;
+  await page.route("**/api/llm/v1/chat/completions", async (route) => { rewrites++; await route.fulfill({ status: 500, body: "" }); });
   await page.goto("/practice");
   await page.getByRole("button", { name: "Start reading" }).click();
   const card = page.getByRole("region", { name: "Passage" });
-  await expect(card.getByText("Adapted from NPR ·")).toBeVisible();
-  await expect(card.getByText(REWRITE)).toBeVisible();
-  await expect(card.getByRole("link", { name: "EPA proposes packaging rules" })).toHaveAttribute("href", "https://www.npr.org/nx-s1-9");
-  expect(rewrites).toHaveLength(1);
+  await expect(card.getByText("From NPR ·")).toBeVisible();
+  // The passage is whole sentences from the story, word for word.
+  const shown = (await card.locator("p").first().textContent()) ?? "";
+  expect(shown.startsWith("The city council met on Tuesday night")).toBe(true);
+  expect(STORY).toContain(shown);
+  expect(shown.split(/\s+/).length).toBeGreaterThanOrEqual(50);
+  await expect(card.getByRole("link", { name: "Council weighs new bike lanes" })).toHaveAttribute("href", "https://www.npr.org/nx-s1-9");
+  // Passages are never rewritten: no model is asked.
+  expect(rewrites).toBe(0);
 });

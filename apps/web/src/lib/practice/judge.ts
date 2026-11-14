@@ -102,12 +102,18 @@ export async function askJudge(request: unknown, signal?: AbortSignal): Promise<
 const BUSY_RETRIES = 3;
 const BUSY_WAIT_MS = 3000;
 
+export interface Transcript {
+  text: string;
+  /** Stretches of the transcript with their times in the audio, in seconds. */
+  segments: { start: number; end: number; text: string }[];
+}
+
 /**
- * What the speech server hears in a take. "fast" is Whisper Turbo; "accurate" is the server's
+ * What the speech server hears in some audio. "fast" is Whisper Turbo; "accurate" is the server's
  * selected recognizer, slower and less likely to drop a sentence. No vocabulary hint and no
- * clean-up, so the words are the reader's.
+ * clean-up, so the words are the reader's. A busy server is waited for `retries` times.
  */
-export async function transcribeTake(wav: Blob, mode: "fast" | "accurate", signal?: AbortSignal): Promise<string> {
+export async function transcribeAudio(wav: Blob, mode: "fast" | "accurate", signal?: AbortSignal, retries = BUSY_RETRIES): Promise<Transcript> {
   const url = studioUrl("/transcribe");
   for (let attempt = 0; ; attempt++) {
     const body = new FormData();
@@ -117,7 +123,7 @@ export async function transcribeTake(wav: Blob, mode: "fast" | "accurate", signa
       if (signal?.aborted) throw error;
       throw new Error("Couldn't reach the speech server to check the reading. Please try again.");
     });
-    if (response.status === 429 && attempt < BUSY_RETRIES) {
+    if (response.status === 429 && attempt < retries) {
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(resolve, BUSY_WAIT_MS);
         signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
@@ -125,11 +131,16 @@ export async function transcribeTake(wav: Blob, mode: "fast" | "accurate", signa
       continue;
     }
     if (response.status === 429) throw new Error("The speech server is busy with other speech. Try again in a moment.");
-    const data = await response.json().catch(() => null) as { text?: unknown } | null;
+    const data = await response.json().catch(() => null) as { text?: unknown; segments?: unknown } | null;
     if (!response.ok) throw new Error(`The speech server couldn't check the reading: ${data ? errorMessage(data) : `HTTP ${response.status}`}`);
-    return typeof data?.text === "string" ? data.text : "";
+    const segments = Array.isArray(data?.segments) ? data.segments.filter((s): s is Transcript["segments"][number] =>
+      !!s && typeof s.text === "string" && Number.isFinite(s.start) && Number.isFinite(s.end)) : [];
+    return { text: typeof data?.text === "string" ? data.text : "", segments };
   }
 }
+
+/** The words of a take, as text. */
+export const transcribeTake = async (wav: Blob, mode: "fast" | "accurate", signal?: AbortSignal): Promise<string> => (await transcribeAudio(wav, mode, signal)).text;
 
 export type Transcriber = (wav: Blob, mode: "fast" | "accurate", signal?: AbortSignal) => Promise<string>;
 

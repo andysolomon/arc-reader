@@ -9,7 +9,6 @@ const screen = (level: Screening["level"], unsuitable = 0.02, confidence = 0.9):
 const deps = (over: Partial<PassageDeps>): PassageDeps => ({
   npr: vi.fn(async () => story(easy)),
   screen: vi.fn(async () => screen("6-8")),
-  rewrite: vi.fn(async () => null),
   ...over,
 });
 const always = (v: number) => () => v;
@@ -26,24 +25,14 @@ describe("nextPassage", () => {
     const d = deps({ screen: vi.fn(async () => screen("6-8")) });
     const p = await nextPassage("6-8", { random: always(0.1), deps: d });
     expect(p).toMatchObject({ source: "npr", text: easy, url: "https://www.npr.org/nx-1" });
-    expect(p.adapted).toBeUndefined();
-    expect(d.rewrite).not.toHaveBeenCalled();
   });
 
-  it("rewrites a 9–12 passage for Grades 6–8 and keeps it when Jev agrees", async () => {
-    const rewritten = "The council met on Tuesday. ".repeat(10).trim();
-    const d = deps({
-      screen: vi.fn(async (text: string) => text === rewritten ? screen("6-8") : screen("9-12")),
-      rewrite: vi.fn(async () => rewritten),
-    });
-    const p = await nextPassage("6-8", { random: always(0.1), deps: d });
-    expect(p).toMatchObject({ source: "npr", text: rewritten, adapted: true });
-  });
-
-  it("never rewrites unsuitable passages, and falls back when nothing fits or a service fails", async () => {
-    const unsuitable = deps({ screen: vi.fn(async () => screen("9-12", 0.8)) });
+  it("falls back to a bundled passage when NPR's is unsuitable, too hard, or a service fails", async () => {
+    const unsuitable = deps({ screen: vi.fn(async () => screen("6-8", 0.8)) });
     expect((await nextPassage("6-8", { random: always(0.1), deps: unsuitable })).source).toBe("public-domain");
-    expect(unsuitable.rewrite).not.toHaveBeenCalled();
+    // A passage Jev rates above the level is passed over, never rewritten down to it.
+    const harder = deps({ screen: vi.fn(async () => screen("9-12")) });
+    expect((await nextPassage("6-8", { random: always(0.1), deps: harder })).source).toBe("public-domain");
     const failing = deps({ screen: vi.fn(async () => { throw new Error("no key"); }) });
     expect((await nextPassage("9-12", { random: always(0.1), deps: failing })).source).toBe("public-domain");
     const rejected = deps({ screen: vi.fn(async () => screen("college")) });
