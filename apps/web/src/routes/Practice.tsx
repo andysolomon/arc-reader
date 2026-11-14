@@ -10,7 +10,10 @@ import { judgeReading, type Judgement } from "../lib/practice/judge";
 import { feedback, scoreReading, dayOf, type Score } from "../lib/practice/score";
 import { displayText } from "../lib/practice/words";
 import { currentStreak, usePractice } from "../state/practice";
-import { ArrowBox, LevelChip, LevelPicker, StreakChip, TitleRow } from "../components/practice/parts";
+import { ArrowBox, LevelChip, LevelMenu, LevelPicker, StreakChip, TitleRow } from "../components/practice/parts";
+import { HearPassageButton, ListenPanel } from "../components/practice/Listen";
+import { stopPlayback } from "../lib/practice/speak";
+import { sentenceAround } from "../lib/practice/wordInfo";
 import { PassageCard } from "../components/practice/PassageCard";
 import { LivePassage } from "../components/practice/LivePassage";
 import { RecorderControls } from "../components/practice/RecorderControls";
@@ -27,7 +30,7 @@ import { ErrorNotice } from "../components/studio/shared";
 const METER_BARS = 20;
 const RECENT = 12;
 
-interface Result { judgement: Judgement; score: Score; speech: number; phrase: string; points: number; streakDay: number }
+interface Result { judgement: Judgement; score: Score; speech: number; phrase: string; points: number; streakDay: number; recording: File }
 type Phase = "start" | "reading" | "judging" | "results" | "drill";
 
 export function PracticePage() {
@@ -49,7 +52,7 @@ export function PracticePage() {
   const judge = useRef<AbortController>();
   /** The next passage, fetched while this one is read: finding an NPR passage can take a while. */
   const upcoming = useRef<{ band: Band; promise: Promise<Passage>; ac: AbortController } | null>(null);
-  useEffect(() => () => { loader.current?.abort(); judge.current?.abort(); upcoming.current?.ac.abort(); }, []);
+  useEffect(() => () => { loader.current?.abort(); judge.current?.abort(); upcoming.current?.ac.abort(); stopPlayback(); }, []);
 
   const prefetch = (forBand: Band) => {
     upcoming.current?.ac.abort();
@@ -61,19 +64,20 @@ export function PracticePage() {
 
   const clearMessages = () => { setError(""); setNotice(""); };
 
-  const load = async () => {
+  /** A new passage at `forBand`, which is passed when the level has just changed and `band` is still the old one. */
+  const load = async (forBand: Band = band) => {
     loader.current?.abort();
-    const ready = upcoming.current?.band === band ? upcoming.current : null;
+    const ready = upcoming.current?.band === forBand ? upcoming.current : null;
     if (!ready) upcoming.current?.ac.abort();
     upcoming.current = null;
     const ac = ready?.ac ?? new AbortController(); loader.current = ac;
     setLoading(true); setLoadFailed(false);
     try {
-      const next = await (ready?.promise ?? nextPassage(band, { avoid: recent.current, signal: ac.signal }));
+      const next = await (ready?.promise ?? nextPassage(forBand, { avoid: recent.current, signal: ac.signal }));
       if (ac.signal.aborted) return;
       recent.current = [...recent.current.filter((id) => id !== next.id), next.id].slice(-RECENT);
       setPassage(next);
-      prefetch(band);
+      prefetch(forBand);
     } catch { if (!ac.signal.aborted) setLoadFailed(true); }
     finally { if (!ac.signal.aborted) setLoading(false); }
   };
@@ -100,7 +104,7 @@ export function PracticePage() {
         passageId: passage.id, accuracy: score.accuracy, wcpm: score.wcpm, phrasing: judgement.prosody?.phrasing ?? 0, points: score.points,
         missed: score.missed.map((w) => w.word), clean: words.filter((w) => w.verdict === "correct").map((w) => w.word),
       });
-      setResult({ judgement, score, speech: take.speech, phrase: feedback(score, judgement.prosody?.pace ?? 3), points: score.points, streakDay: usePractice.getState().streak.days });
+      setResult({ judgement, score, speech: take.speech, phrase: feedback(score, judgement.prosody?.pace ?? 3), points: score.points, streakDay: usePractice.getState().streak.days, recording: file });
       setOpenWord(null);
       setPhase("results");
     } catch (e) {
@@ -116,17 +120,24 @@ export function PracticePage() {
   secondsRef.current = mic.seconds;
 
   const startReading = () => { clearMessages(); setResult(null); setPhase("reading"); void load(); };
-  const backToStart = () => { mic.discard(); loader.current?.abort(); setLoading(false); clearMessages(); setPhase("start"); };
+  const backToStart = () => {
+    mic.discard(); loader.current?.abort(); judge.current?.abort(); stopPlayback();
+    setLoading(false); clearMessages(); setResult(null); setDrill(null); setPhase("start");
+  };
+  /** From the level pill while reading or on the results: a passage at the new level, straight away. */
+  const changeLevel = (next: Band) => {
+    mic.discard(); stopPlayback(); clearMessages(); setResult(null); setBand(next); setPhase("reading"); void load(next);
+  };
   const cancelJudging = () => { judge.current?.abort(); setPhase("reading"); };
-  const readAgain = () => { clearMessages(); setResult(null); setPhase("reading"); };
-  const nextOne = () => { clearMessages(); setResult(null); setPhase("reading"); void load(); };
+  const readAgain = () => { stopPlayback(); clearMessages(); setResult(null); setPhase("reading"); };
+  const nextOne = () => { stopPlayback(); clearMessages(); setResult(null); setPhase("reading"); void load(); };
   const startDrill = (words: DrillWord[], back: Phase) => { if (!words.length) return; setOpenWord(null); setDrill({ words, back }); setPhase("drill"); };
   const drillBank = () => startDrill(toGo(usePractice.getState().words).map((w) => ({
     word: w.word, label: w.missed === 1 ? "Missed once" : `Missed ${w.missed} times`, line: "Listen to it, then try just this word.",
   })), "start");
   const drillMissed = () => result && startDrill(result.score.missed.map((w) => {
     const verdict = w.verdict as keyof typeof MARK;
-    return { word: w.word, label: MARK[verdict].label, labelClass: MARK[verdict].labelClass, line: markLine(verdict, w.heard) };
+    return { word: w.word, label: MARK[verdict].label, labelClass: MARK[verdict].labelClass, line: markLine(verdict, w.heard), sentence: sentenceAround(result.judgement.words, w.index) };
   }), "results");
 
   return <section data-screen="practice" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 pb-40 sm:px-10 sm:pt-10 animate-fadein">
@@ -144,16 +155,19 @@ export function PracticePage() {
       </>}
 
       {phase === "drill" && drill && <>
-        <TitleRow chip={<LevelChip band={band} />} />
+        <TitleRow chip={<LevelChip band={band} />} onBack={backToStart} />
         <WordDrill words={drill.words} onDone={() => { setPhase(drill.back); setDrill(null); }} />
       </>}
 
       {phase === "reading" && <>
-        <TitleRow chip={<LevelChip band={band} onClick={backToStart} />} />
+        <TitleRow chip={<LevelMenu band={band} onChange={changeLevel} />} onBack={backToStart} />
         <PassageCard
           head="Read this aloud"
           passage={passage && !loading ? passage : null}
-          action={<Button size="sm" variant="ghost" loading={loading} disabled={mic.recording} onClick={() => { clearMessages(); void load(); }}>Another passage</Button>}
+          action={<div className="flex items-center gap-1">
+            {passage && !loading && <HearPassageButton key={passage.id} text={passage.text} disabled={mic.recording || mic.starting} onError={setError} />}
+            <Button size="sm" variant="ghost" loading={loading} disabled={mic.recording} onClick={() => { clearMessages(); void load(); }}>Another passage</Button>
+          </div>}
         >
           {passage && !loading
             ? mic.recording ? <LivePassage text={passage.text} live={live} /> : <p className="m-0 font-serif text-lg leading-relaxed">{displayText(passage.text)}</p>
@@ -162,11 +176,11 @@ export function PracticePage() {
         {notice && <p role="status" className="m-0 rounded-control border border-line bg-bg2 p-3 text-sm text-fg2">{notice}</p>}
         <ErrorNotice error={error || mic.error} />
         <RecorderControls recording={mic.recording} starting={mic.starting} seconds={mic.seconds} levels={mic.levels}
-          disabled={!passage || loading} onStart={() => { clearMessages(); void mic.start(); }} onStop={mic.stop} />
+          disabled={!passage || loading} onStart={() => { clearMessages(); stopPlayback(); void mic.start(); }} onStop={mic.stop} />
       </>}
 
       {phase === "judging" && passage && <>
-        <TitleRow chip={<LevelChip band={band} />} />
+        <TitleRow chip={<LevelChip band={band} />} onBack={backToStart} />
         <PassageCard head={`Your reading · ${takeSeconds} second${takeSeconds === 1 ? "" : "s"}`} passage={passage}>
           <p className="m-0 font-serif text-lg leading-relaxed text-fg2">{displayText(passage.text)}</p>
         </PassageCard>
@@ -174,7 +188,7 @@ export function PracticePage() {
       </>}
 
       {phase === "results" && passage && result && <>
-        <TitleRow chip={<LevelChip band={band} />} />
+        <TitleRow chip={<LevelMenu band={band} onChange={changeLevel} />} onBack={backToStart} />
         <div>
           <p className="m-0 font-serif text-[19px] leading-[1.4]">{result.phrase}</p>
           <p className="m-0 text-[13px] text-fg2">+{result.points} points · day {result.streakDay} of your streak</p>
@@ -182,6 +196,7 @@ export function PracticePage() {
         <PassageCard head="Your reading · tap a marked word" passage={passage} footer={<MarkKey />}>
           <MarkedPassage words={result.judgement.words} open={openWord} onOpen={setOpenWord} />
         </PassageCard>
+        <ListenPanel text={passage.text} recording={result.recording} />
         <ScorePanel score={result.score} judgement={result.judgement} speech={result.speech} />
         <div className="flex flex-col gap-2.5">
           <Button variant="primary" size="xl" className="w-full justify-between" trailing={<ArrowBox />} onClick={nextOne}>Next passage</Button>

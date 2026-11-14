@@ -38,6 +38,20 @@ async function mockJudge(page: Page, { decideStatus = 200, transcript = TRANSCRI
   return calls;
 }
 
+/** The word lookup: what a missed word means, how to say it, and where it comes from. */
+async function mockWordInfo(page: Page) {
+  const asked: { model: string; user: string }[] = [];
+  await page.route("**/api/llm/v1/chat/completions", async (route) => {
+    const body = route.request().postDataJSON() as { model: string; messages: { role: string; content: string }[] };
+    asked.push({ model: body.model, user: body.messages.at(-1)?.content ?? "" });
+    await route.fulfill({ json: { choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+      respelling: "GAHR-dn", ipa: "/ˈɡɑrdn/", partOfSpeech: "noun", meaning: "A piece of ground where flowers or vegetables are grown.",
+      root: "Old North French gardin", rootMeaning: "enclosed ground", etymology: "English took it from Norman French in the 1300s.",
+    }) } }] } });
+  });
+  return asked;
+}
+
 async function readAndStop(page: Page) {
   await page.getByRole("button", { name: "Start reading" }).click();
   const card = page.getByRole("region", { name: "Passage" });
@@ -52,6 +66,7 @@ async function readAndStop(page: Page) {
 test("a round: read, get judged, see marked words, keep missed words", async ({ page }) => {
   await seed(page);
   const calls = await mockJudge(page);
+  const asked = await mockWordInfo(page);
   await page.goto("/practice");
   await expect(page.getByRole("heading", { name: "Practice" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Practice" })).toHaveAttribute("aria-current", "page");
@@ -89,8 +104,31 @@ test("a round: read, get judged, see marked words, keep missed words", async ({ 
   await expect(popover.getByRole("button", { name: "Hear it" })).toBeVisible();
   await expect(popover.getByRole("button", { name: "Try this word" })).toBeVisible();
   await expect(marked.nth(2)).toHaveAttribute("aria-expanded", "true");
+  // It says how to say the word, what it means in its sentence, and where it comes from.
+  await expect(popover.getByText("Say it: GAHR-dn")).toBeAttached();
+  await expect(popover.getByText("/ˈɡɑrdn/")).toBeVisible();
+  await expect(popover.getByText("A piece of ground where flowers or vegetables are grown.")).toBeVisible();
+  await expect(popover.getByText("Old North French gardin")).toBeVisible();
+  expect(asked).toEqual([{ model: "glm-5.3", user: "Word: garden\nSentence: One day when she was two years old she was playing in a garden, and she plucked another flower and ran with it to her mother." }]);
   await page.keyboard.press("Escape");
   await expect(popover).toHaveCount(0);
+
+  // A tap on the passage's plain text closes it too, as does a tap outside the card.
+  await marked.nth(2).click();
+  await expect(popover).toBeVisible();
+  await page.getByRole("region", { name: "Passage" }).getByText(/All children,/).click({ position: { x: 4, y: 6 } });
+  await expect(popover).toHaveCount(0);
+  await marked.nth(2).click();
+  await expect(popover).toBeVisible();
+  await page.getByText(/\+\d+ points · day 1 of your streak/).click();
+  await expect(popover).toHaveCount(0);
+  // The second lookup of the word came from this device.
+  expect(asked).toHaveLength(1);
+
+  // The take and the passage in the chosen voice can be heard.
+  const listen = page.getByRole("region", { name: "Listen" });
+  await expect(listen.getByRole("button", { name: "Your reading" })).toBeVisible();
+  await expect(listen.getByRole("button", { name: "Hear it read" })).toBeVisible();
 
   // Progress survives a reload: streak, and the three missed words (not the unclear one).
   await page.reload();
@@ -272,4 +310,34 @@ test("an NPR passage is shown exactly as written when Jev says it fits the level
   await expect(card.getByRole("link", { name: "Council weighs new bike lanes" })).toHaveAttribute("href", "https://www.npr.org/nx-s1-9");
   // Passages are never rewritten: no model is asked.
   expect(rewrites).toBe(0);
+});
+
+test("the level pill changes level from a passage or the results, and Back returns to Practice home", async ({ page }) => {
+  await seed(page);
+  await mockJudge(page);
+  await page.goto("/practice");
+  await readAndStop(page);
+  await expect(page.getByRole("region", { name: "Score" })).toBeVisible();
+
+  // From the results: a new passage at the chosen level.
+  await page.getByRole("button", { name: "Level: Grades 6–8. Change level" }).click();
+  const menu = page.getByRole("menu", { name: "Level" });
+  await expect(menu.getByRole("menuitemradio", { name: /Grades 6–8/ })).toHaveAttribute("aria-checked", "true");
+  await menu.getByRole("menuitemradio", { name: /Grades 9–12/ }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Level: Grades 9–12. Change level" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Read this aloud" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Passage" }).getByText(/Public domain ·/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Listen" })).toBeVisible();
+
+  // A tap outside the open menu closes it without changing anything.
+  await page.getByRole("button", { name: "Level: Grades 9–12. Change level" }).click();
+  await expect(menu).toBeVisible();
+  await page.getByRole("heading", { name: "Practice" }).click();
+  await expect(menu).toHaveCount(0);
+
+  // Back goes to Practice home, which keeps the level that was chosen.
+  await page.getByRole("button", { name: "Back to Practice home" }).click();
+  await expect(page.getByRole("button", { name: "Start reading" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /Grades 9–12/ })).toHaveAttribute("aria-checked", "true");
 });
