@@ -120,7 +120,7 @@ test("an off-script take isn't scored", async ({ page }) => {
   await expect(page.getByRole("region", { name: "Score" })).toHaveCount(0);
 });
 
-test("the phone tab bar keeps 44 px links on a 360 px phone, with the Linux client in Settings", async ({ page }) => {
+test("the phone tab bar keeps 44 px links on a 360 px phone, and Settings links the Linux client", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 780 });
   await page.goto("/practice");
   const nav = page.getByRole("navigation", { name: "Primary" });
@@ -131,6 +131,17 @@ test("the phone tab bar keeps 44 px links on a 360 px phone, with the Linux clie
   expect(await capsule.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await expect(nav.getByRole("link", { name: "Linux client" })).toHaveCount(0);
 
+  await nav.getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("link", { name: "Set up the Linux client" }).click();
+  await expect(page).toHaveURL(/\/linux$/);
+});
+
+test("on a wide screen the rail has Practice and no Linux client, which Settings links", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/practice");
+  const nav = page.getByRole("navigation", { name: "Primary" });
+  await expect(nav.getByRole("link", { name: "Practice" })).toHaveAttribute("aria-current", "page");
+  await expect(nav.getByRole("link", { name: "Linux client" })).toHaveCount(0);
   await nav.getByRole("link", { name: "Settings" }).click();
   await page.getByRole("link", { name: "Set up the Linux client" }).click();
   await expect(page).toHaveURL(/\/linux$/);
