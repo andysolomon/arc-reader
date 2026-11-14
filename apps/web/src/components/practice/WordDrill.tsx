@@ -8,6 +8,8 @@ export interface DrillWord {
   label: string;
   labelClass?: string;
   line: string;
+  /** The sentence it was read in, when it comes from a reading, for its meaning there. */
+  sentence?: string;
 }
 
 /** One word at a time, each with Hear it and Try this word, then back to where the drill began. */
@@ -22,7 +24,7 @@ export function WordDrill({ words, onDone }: { words: DrillWord[]; onDone: () =>
       <p role="status" className="m-0 text-[13px] text-fg2">Word {i + 1} of {words.length} · listen, then say just the word</p>
     </div>
     <section aria-label="Word to practise" className="rounded-panel border border-line bg-bg2">
-      <WordPractice key={`${i}-${current.word}`} word={current.word} label={current.label} labelClass={current.labelClass} line={current.line} />
+      <WordPractice key={`${i}-${current.word}`} word={current.word} label={current.label} labelClass={current.labelClass} line={current.line} sentence={current.sentence} />
     </section>
     <div className="flex flex-col gap-2.5">
       <Button variant="primary" size="xl" className="w-full justify-between" trailing={<ArrowBox />} onClick={() => last ? onDone() : setI(i + 1)}>
