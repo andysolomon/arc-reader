@@ -11,7 +11,7 @@ const SURFACE = "border border-line bg-bg2 shadow-[0_6px_20px_-12px_rgba(0,0,0,.
 export function TabBar() {
   const { pathname } = useLocation();
   return (
-    <nav aria-label="Primary" className="flex shrink-0 items-center gap-3 bg-bg px-4 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2">
+    <nav aria-label="Primary" className="flex shrink-0 items-center gap-3 bg-bg px-3 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2">
       <div className={cn("flex h-14 min-w-0 flex-1 items-center justify-between rounded-full px-1.5", SURFACE)}>
         {[LIBRARY, ...SCREENS].map((screen) => {
           const active = isCurrent(screen, pathname, true);

@@ -46,12 +46,12 @@ export class LlmKeyStore {
   remove = () => rm(this.file, { force: true });
 }
 
-export async function body(req: IncomingMessage): Promise<Buffer> {
+export async function body(req: IncomingMessage, limit = MAX_BODY, tooLarge = "The text is too large to send."): Promise<Buffer> {
   const buffers: Buffer[] = [];
   let length = 0;
   for await (const chunk of req) {
     length += Buffer.byteLength(chunk);
-    if (length > MAX_BODY) throw new HttpError(413, "The text is too large to send.");
+    if (length > limit) throw new HttpError(413, tooLarge);
     buffers.push(Buffer.from(chunk));
   }
   return Buffer.concat(buffers);

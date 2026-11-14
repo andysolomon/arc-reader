@@ -1,0 +1,164 @@
+import { useEffect, useRef, useState } from "react";
+import { Mic, RotateCcw } from "lucide-react";
+import { Button, SectionLabel } from "@readaloud/ui";
+import { useMicRecorder } from "../hooks/useMicRecorder";
+import { nextPassage, type Passage } from "../lib/practice/passages";
+import { prepareTake } from "../lib/practice/audio";
+import { askJudge, interpretJudgement, judgeRequest, JudgeNotConfigured, type Judgement } from "../lib/practice/judge";
+import { feedback, scoreReading, dayOf, type Score } from "../lib/practice/score";
+import { displayText } from "../lib/practice/words";
+import { currentStreak, usePractice } from "../state/practice";
+import { ArrowBox, KeyNotice, LevelChip, LevelPicker, StreakChip, TitleRow } from "../components/practice/parts";
+import { PassageCard } from "../components/practice/PassageCard";
+import { RecorderControls } from "../components/practice/RecorderControls";
+import { JudgingPanel } from "../components/practice/JudgingPanel";
+import { MarkKey, MarkedPassage } from "../components/practice/MarkedPassage";
+import { ScorePanel } from "../components/practice/ScorePanel";
+import { WordBank } from "../components/practice/WordBank";
+import { ErrorNotice } from "../components/studio/shared";
+
+const METER_BARS = 20;
+const RECENT = 12;
+
+interface Result { judgement: Judgement; score: Score; speech: number; phrase: string; points: number; streakDay: number }
+type Phase = "start" | "reading" | "judging" | "results";
+
+export function PracticePage() {
+  const band = usePractice((s) => s.band);
+  const setBand = usePractice((s) => s.setBand);
+  const streak = usePractice((s) => currentStreak(s, dayOf(Date.now())));
+  const [phase, setPhase] = useState<Phase>("start");
+  const [passage, setPassage] = useState<Passage | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [error, setError] = useState("");
+  const [needsKey, setNeedsKey] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [takeSeconds, setTakeSeconds] = useState(0);
+  const [result, setResult] = useState<Result | null>(null);
+  const [openWord, setOpenWord] = useState<number | null>(null);
+  const recent = useRef<string[]>([]);
+  const loader = useRef<AbortController>();
+  const judge = useRef<AbortController>();
+  useEffect(() => () => { loader.current?.abort(); judge.current?.abort(); }, []);
+
+  const clearMessages = () => { setError(""); setNeedsKey(false); setNotice(""); };
+
+  const load = async () => {
+    loader.current?.abort();
+    const ac = new AbortController(); loader.current = ac;
+    setLoading(true); setLoadFailed(false);
+    try {
+      const next = await nextPassage(band, { avoid: recent.current, signal: ac.signal });
+      if (ac.signal.aborted) return;
+      recent.current = [...recent.current.filter((id) => id !== next.id), next.id].slice(-RECENT);
+      setPassage(next);
+    } catch { if (!ac.signal.aborted) setLoadFailed(true); }
+    finally { if (!ac.signal.aborted) setLoading(false); }
+  };
+
+  const check = async (file: File, seconds: number) => {
+    if (!passage) return;
+    judge.current?.abort();
+    const ac = new AbortController(); judge.current = ac;
+    clearMessages(); setTakeSeconds(seconds); setPhase("judging");
+    try {
+      const take = await prepareTake(file);
+      if (ac.signal.aborted) return;
+      setTakeSeconds(Math.round(take.duration));
+      const judgement = interpretJudgement(passage.text, await askJudge(judgeRequest(passage.text, take.audio), ac.signal));
+      if (ac.signal.aborted) return;
+      if (judgement.offScript) {
+        setNotice("That recording didn't match the passage, so it wasn't scored. Read the passage aloud, then stop.");
+        setPhase("reading");
+        return;
+      }
+      const score = scoreReading(judgement, take.speech);
+      const words = judgement.words;
+      usePractice.getState().finishRound({
+        passageId: passage.id, accuracy: score.accuracy, wcpm: score.wcpm, phrasing: judgement.phrasing, points: score.points,
+        missed: score.missed.map((w) => w.word), clean: words.filter((w) => w.verdict === "correct").map((w) => w.word),
+      });
+      setResult({ judgement, score, speech: take.speech, phrase: feedback(score, judgement.pace), points: score.points, streakDay: usePractice.getState().streak.days });
+      setOpenWord(null);
+      setPhase("results");
+    } catch (e) {
+      if (ac.signal.aborted) return;
+      if (e instanceof JudgeNotConfigured) setNeedsKey(true);
+      else setError(e instanceof Error ? e.message : "Checking the reading failed. Please retry.");
+      setPhase("reading");
+    }
+  };
+
+  const secondsRef = useRef(0);
+  const mic = useMicRecorder({ meterBars: METER_BARS, onRecorded: (file) => void check(file, secondsRef.current) });
+  secondsRef.current = mic.seconds;
+
+  const startReading = () => { clearMessages(); setResult(null); setPhase("reading"); void load(); };
+  const backToStart = () => { mic.discard(); loader.current?.abort(); setLoading(false); clearMessages(); setPhase("start"); };
+  const cancelJudging = () => { judge.current?.abort(); setPhase("reading"); };
+  const readAgain = () => { clearMessages(); setResult(null); setPhase("reading"); };
+  const nextOne = () => { clearMessages(); setResult(null); setPhase("reading"); void load(); };
+
+  return <section data-screen="practice" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 pb-40 sm:px-10 sm:pt-10 animate-fadein">
+    <div className="mx-auto flex max-w-[720px] flex-col gap-4">
+      {phase === "start" && <>
+        <TitleRow chip={<StreakChip days={streak} />} />
+        <p className="m-0 text-fg2">Read a passage aloud. Each word is checked, along with your pace, phrasing and expression.</p>
+        <div className="flex flex-col gap-2">
+          <SectionLabel id="practice-level">Level</SectionLabel>
+          <LevelPicker band={band} onChange={setBand} />
+        </div>
+        <Button variant="primary" size="xl" className="w-full justify-between" trailing={<ArrowBox />} onClick={startReading}>Start reading</Button>
+        <WordBank />
+      </>}
+
+      {phase === "reading" && <>
+        <TitleRow chip={<LevelChip band={band} onClick={backToStart} />} />
+        <PassageCard
+          head="Read this aloud"
+          passage={passage && !loading ? passage : null}
+          action={<Button size="sm" variant="ghost" loading={loading} disabled={mic.recording} onClick={() => { clearMessages(); void load(); }}>Another passage</Button>}
+        >
+          {passage && !loading
+            ? <p className="m-0 font-serif text-lg leading-relaxed">{displayText(passage.text)}</p>
+            : <p role="status" className="m-0 text-sm text-fg2">{loadFailed ? "Couldn't load a passage. Try another." : "Finding a passage…"}</p>}
+        </PassageCard>
+        {notice && <p role="status" className="m-0 rounded-control border border-line bg-bg2 p-3 text-sm text-fg2">{notice}</p>}
+        {needsKey && <KeyNotice />}
+        <ErrorNotice error={error || mic.error} />
+        <RecorderControls recording={mic.recording} starting={mic.starting} seconds={mic.seconds} levels={mic.levels}
+          disabled={!passage || loading} onStart={() => { clearMessages(); void mic.start(); }} onStop={mic.stop} />
+      </>}
+
+      {phase === "judging" && passage && <>
+        <TitleRow chip={<LevelChip band={band} />} />
+        <PassageCard head={`Your reading · ${takeSeconds} second${takeSeconds === 1 ? "" : "s"}`} passage={passage}>
+          <p className="m-0 font-serif text-lg leading-relaxed text-fg2">{displayText(passage.text)}</p>
+        </PassageCard>
+        <JudgingPanel onCancel={cancelJudging} />
+      </>}
+
+      {phase === "results" && passage && result && <>
+        <TitleRow chip={<LevelChip band={band} />} />
+        <div>
+          <p className="m-0 font-serif text-[19px] leading-[1.4]">{result.phrase}</p>
+          <p className="m-0 text-[13px] text-fg2">+{result.points} points · day {result.streakDay} of your streak</p>
+        </div>
+        <PassageCard head="Your reading · tap a marked word" passage={passage} footer={<MarkKey />}>
+          <MarkedPassage words={result.judgement.words} open={openWord} onOpen={setOpenWord} />
+        </PassageCard>
+        <ScorePanel score={result.score} judgement={result.judgement} speech={result.speech} />
+        <div className="flex flex-col gap-2.5">
+          <Button variant="primary" size="xl" className="w-full justify-between" trailing={<ArrowBox />} onClick={nextOne}>Next passage</Button>
+          <div className="grid grid-cols-2 gap-2.5">
+            <Button variant="secondary" size="lg" leading={<RotateCcw size={16} aria-hidden />} onClick={readAgain}>Read again</Button>
+            {result.score.missed.length > 0 && <Button variant="secondary" size="lg" leading={<Mic size={16} aria-hidden />} onClick={() => setOpenWord(result.score.missed[0].index)}>
+              Practise {result.score.missed.length} word{result.score.missed.length === 1 ? "" : "s"}
+            </Button>}
+          </div>
+        </div>
+      </>}
+    </div>
+  </section>;
+}

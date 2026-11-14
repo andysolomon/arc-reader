@@ -11,6 +11,7 @@ import { SpeechActivity } from "./vite.speech-activity";
 import { voiceAvatars } from "./vite.avatars";
 import { llm } from "./vite.llm";
 import { jev } from "./vite.jev";
+import { decide } from "./vite.decide";
 import { shellFallback } from "./vite.shell";
 import { publicAccess } from "./vite.gate";
 import { hostedDocs } from "./vite.docs";
@@ -34,6 +35,7 @@ export default defineConfig(({ mode }) => {
     voiceAvatars(env),
     llm(env),
     jev(env),
+    decide(env),
     hostedDocs(),
     shellFallback(serverUrl, UNREACHABLE_PAGE, startUrl),
     VitePWA({

@@ -42,8 +42,8 @@ test("phone: opens on the Library, with the other screens as icons and Compose o
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "Primary" });
-  await expect(nav.getByRole("link")).toHaveCount(6);
-  for (const name of ["Library", "Voices", "Studio", "Settings", "Linux client", "Compose"]) await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
+  await expect(nav.getByRole("link")).toHaveCount(7);
+  for (const name of ["Library", "Voices", "Studio", "Practice", "Settings", "Linux client", "Compose"]) await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
   // Icons only: the names are for assistive technology.
   await expect(nav).toHaveText("");
   await expect(nav.getByRole("link", { name: "Library", exact: true })).toHaveAttribute("aria-current", "page");
