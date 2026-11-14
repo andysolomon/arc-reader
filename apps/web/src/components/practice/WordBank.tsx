@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
-import { Popover, SectionLabel, cn } from "@readaloud/ui";
+import { ChevronRight, Mic } from "lucide-react";
+import { Button, Popover, SectionLabel, cn } from "@readaloud/ui";
 import { CLEAN_TO_MASTER, mastered, toGo, usePractice, type BankWord } from "../../state/practice";
 import { wordKey } from "../../lib/practice/words";
 import { WordPractice } from "./WordPractice";
@@ -8,7 +8,7 @@ import { WordPractice } from "./WordPractice";
 const missedLabel = (n: number) => n === 1 ? "Missed once" : `Missed ${n} times`;
 
 /** Words to practise, most-missed first, each opening the same popover as Results. */
-export function WordBank() {
+export function WordBank({ onPractise }: { onPractise: () => void }) {
   const words = usePractice((s) => s.words);
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -41,6 +41,9 @@ export function WordBank() {
         {openWord && <WordPractice key={open} word={openWord.word} label={missedLabel(openWord.missed)} line="Listen to it, then try just this word." />}
       </Popover>
     </div>
+    <Button variant="secondary" size="lg" className="w-full" leading={<Mic size={16} aria-hidden />} onClick={onPractise}>
+      Practise my words
+    </Button>
   </section>;
 }
 
