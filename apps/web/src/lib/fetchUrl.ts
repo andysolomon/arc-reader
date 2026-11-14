@@ -1,6 +1,7 @@
 import { fencedCode, readingBlocks } from "./codeBlocks";
 import { visualBlock, type ArticleVisual } from "./visuals";
 import { articleVisual } from "./articleVisuals";
+import { PageStyles } from "./svgStyles";
 import type { DocMeta } from "./db";
 
 import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
@@ -135,9 +136,34 @@ export function tableRows(table: Element): string[] {
   });
 }
 
-export function htmlToText(html: string, url: string): Fetched {
+/** Linked stylesheets a page's pictures may be styled by, as absolute addresses. */
+export function stylesheetLinks(doc: Document, url: string): string[] {
+  if (!doc.querySelector("svg")) return [];
+  return Array.from(doc.querySelectorAll('link[rel~="stylesheet" i][href]')).flatMap((link) => {
+    const media = link.getAttribute("media");
+    if (media && /\bprint\b|prefers-color-scheme\s*:\s*dark/i.test(media) && !/\bscreen\b|\ball\b/i.test(media)) return [];
+    const href = absoluteUrl(link.getAttribute("href") ?? "", url);
+    return href ? [href] : [];
+  }).slice(0, MAX_STYLESHEETS);
+}
+
+/** The page's styles in document order: its own <style> blocks and whatever linked sheets were fetched. */
+function pageCss(doc: Document, url: string, sheets: ReadonlyMap<string, string>): string[] {
+  return Array.from(doc.querySelectorAll('style, link[rel~="stylesheet" i][href]')).flatMap((el) => {
+    if (el.tagName === "STYLE") return el.closest("svg") ? [] : [el.textContent ?? ""];
+    const css = sheets.get(absoluteUrl(el.getAttribute("href") ?? "", url) ?? "");
+    return css ? [css] : [];
+  });
+}
+
+/**
+ * `sheets` holds the text of the page's linked stylesheets by address, so inline SVG pictures
+ * that take their colours from the page keep them.
+ */
+export function htmlToText(html: string, url: string, sheets: ReadonlyMap<string, string> = new Map()): Fetched {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const meta = pageMeta(doc, url);
+  const styles = doc.querySelector("svg") ? new PageStyles(pageCss(doc, url, sheets)) : undefined;
   // The chapter list usually sits in the navigation, which is dropped next.
   const book = bookContents(doc, url);
   doc.querySelectorAll("script,noscript,nav,footer,header,aside,form,iframe,[aria-hidden='true']").forEach((n) => {
@@ -159,7 +185,7 @@ export function htmlToText(html: string, url: string): Fetched {
   for (const el of root.querySelectorAll("img,svg")) {
     const captionEl = el.closest("figure")?.querySelector("figcaption");
     const caption = captionEl?.textContent?.replace(/\s+/g, " ").trim() || "";
-    const visual = articleVisual(el, base, caption);
+    const visual = articleVisual(el, base, caption, styles);
     if (!visual) continue;
     if (visual.src.startsWith("data:")) {
       embeddedBytes += visual.src.length;
@@ -224,7 +250,52 @@ export function markdownToText(md: string, base?: string): string {
     .trim()).filter(Boolean).join("\n\n");
 }
 
-async function readResponse(r: Response, url: string, domain: string): Promise<Fetched> {
+const MAX_STYLESHEETS = 8;
+const MAX_STYLESHEET_CHARS = 1_000_000;
+const STYLESHEET_TIMEOUT_MS = 6000;
+
+async function fetchStylesheet(href: string, signal?: AbortSignal): Promise<string> {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), STYLESHEET_TIMEOUT_MS);
+  const abort = () => stop.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) stop.abort();
+  try {
+    return await fetchStylesheetWith(href, stop.signal);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
+async function fetchStylesheetWith(href: string, either: AbortSignal): Promise<string> {
+  const read = async (r: Response) => {
+    if (!r.ok || /html|json/i.test(r.headers.get("content-type") ?? "")) throw new Error(`HTTP ${r.status}`);
+    const text = await r.text();
+    if (text.length > MAX_STYLESHEET_CHARS) throw new Error("too large");
+    return text;
+  };
+  try {
+    return await read(await fetch(href, { signal: either, mode: "cors", credentials: "omit" }));
+  } catch {
+    if (either.aborted) return "";
+  }
+  try {
+    return await read(await fetch(`/api/fetch?url=${encodeURIComponent(href)}`, { signal: either }));
+  } catch {
+    return "";
+  }
+}
+
+/** The linked stylesheets a page's inline pictures need, fetched side by side. A sheet that can't be read is left out. */
+async function pageStylesheets(html: string, url: string, signal?: AbortSignal): Promise<Map<string, string>> {
+  if (!url || !/<svg[\s>]/i.test(html)) return new Map();
+  const links = stylesheetLinks(new DOMParser().parseFromString(html, "text/html"), url);
+  const texts = await Promise.all(links.map((href) => fetchStylesheet(href, signal)));
+  return new Map(links.map((href, i) => [href, texts[i]] as const).filter(([, css]) => css));
+}
+
+async function readResponse(r: Response, url: string, domain: string, signal?: AbortSignal): Promise<Fetched> {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const ct = r.headers.get("content-type") ?? "";
   // A PDF is not text: only the server can read one, and it answers with a page of HTML.
@@ -235,7 +306,7 @@ async function readResponse(r: Response, url: string, domain: string): Promise<F
   const body = await r.text();
   if (body.startsWith("%PDF-")) throw new Error("PDF");
   if (ct.includes("html")) {
-    const f = htmlToText(body, url);
+    const f = htmlToText(body, url, await pageStylesheets(body, url, signal));
     if (f.text.length > 40) return f;
   } else if (body.trim().length > 40) {
     const text = ct.includes("markdown") ? markdownToText(body, url) : body;
@@ -267,12 +338,12 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
     if (e instanceof ReadError || signal?.aborted) throw e;
   }
   try {
-    return await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain);
+    return await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain, signal);
   } catch (e) {
     if (signal?.aborted) throw e;
   }
   try {
-    return await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain);
+    return await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain, signal);
   } catch (e) {
     if (!PROXY || signal?.aborted) throw e;
   }
