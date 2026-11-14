@@ -1,4 +1,5 @@
 import { SLIDE_SOURCE, imageSource, type ArticleVisual } from "./visuals";
+import type { PageStyles } from "./svgStyles";
 
 function srcset(value: string): string {
   if (value.startsWith("data:")) return "";
@@ -8,9 +9,15 @@ function srcset(value: string): string {
   }).sort((a, b) => b.size - a.size)[0]?.url ?? "";
 }
 
-/** Serialize SVG only for an inert <img>/canvas image, never insertion into the page DOM. */
-export function svgImage(el: Element): string {
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * Serialize SVG only for an inert <img>/canvas image, never insertion into the page DOM.
+ * The page's styles, when known, are baked in: an image cannot see the stylesheet it was drawn for.
+ */
+export function svgImage(el: Element, styles?: PageStyles): string {
   const svg = el.cloneNode(true) as Element;
+  const { background } = styles?.bake(el, svg) ?? {};
   svg.querySelectorAll("script,foreignObject,iframe,object,embed,image").forEach((node) => node.remove());
   svg.querySelectorAll("use").forEach((node) => { if (!(node.getAttribute("href") || node.getAttribute("xlink:href") || "").startsWith("#")) node.remove(); });
   for (const node of [svg, ...svg.querySelectorAll("*")]) {
@@ -28,13 +35,19 @@ export function svgImage(el: Element): string {
   const height = Number(svg.getAttribute("height")) || viewBox?.[3] || 500;
   const scale = Math.min(1, 1600 / Math.max(width, height));
   if (!viewBox) svg.setAttribute("viewBox", `0 0 ${Math.max(1, width)} ${Math.max(1, height)}`);
+  // Drawn for a page, not for the reader's dark card: keep the page's paper behind it, or white.
+  const [x = 0, y = 0, w = width, h = height] = viewBox?.length === 4 && viewBox.every(Number.isFinite) ? viewBox : [];
+  const paper = svg.ownerDocument.createElementNS(SVG_NS, "rect");
+  for (const [name, value] of [["x", x], ["y", y], ["width", w], ["height", h]] as const) paper.setAttribute(name, String(value));
+  paper.setAttribute("style", `fill:${background ?? "#fff"};stroke:none`);
+  svg.insertBefore(paper, svg.firstChild);
   svg.setAttribute("width", String(Math.max(1, width * scale)));
   svg.setAttribute("height", String(Math.max(1, height * scale)));
   const serialized = new XMLSerializer().serializeToString(svg);
   return imageSource(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`);
 }
 
-export function articleVisual(el: Element, base: string, caption: string): ArticleVisual | null {
+export function articleVisual(el: Element, base: string, caption: string, styles?: PageStyles): ArticleVisual | null {
   if (el.getAttribute("role") === "presentation" || el.getAttribute("role") === "none") return null;
   const width = Number(el.getAttribute("width"));
   const height = Number(el.getAttribute("height"));
@@ -46,7 +59,7 @@ export function articleVisual(el: Element, base: string, caption: string): Artic
     const dimensions = el.getAttribute("viewBox")?.trim().split(/[\s,]+/).map(Number);
     const large = (width > 64 && height > 64) || !!(dimensions && dimensions[2] > 64 && dimensions[3] > 64);
     if (!caption && !alt && !description && !el.closest("figure") && el.getAttribute("role") !== "img" && !large) return null;
-    return { kind: "diagram", src: svgImage(el), alt: alt.trim().slice(0, 1200), caption: (caption || description).trim().slice(0, 1600) };
+    return { kind: "diagram", src: svgImage(el, styles), alt: alt.trim().slice(0, 1200), caption: (caption || description).trim().slice(0, 1600) };
   }
   const alt = el.getAttribute("alt") || el.getAttribute("aria-label") || el.getAttribute("title") || "";
   if (el.hasAttribute("alt") && !alt.trim() && !caption) return null;

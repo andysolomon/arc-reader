@@ -51,6 +51,43 @@ describe("article images and diagrams", () => {
     expect(svg).not.toMatch(/onload|script|foreignObject/);
     expect(segment(result.text).sentences.map((s) => s.text).join(" ")).not.toMatch(/<svg|data:image|alert/);
   });
+  it("carries the page's colours, fonts and background into an inline SVG drawn with its CSS variables", () => {
+    const css = `:root{--font-ui:Inter, sans-serif}
+      .diagram{--dg-accent:#a8321b;--dg-ink:#16150f;--dg-paper:#fbfaf7}
+      :root[data-theme=dark] .diagram{--dg-accent:#ff8a63;--dg-ink:#f0eee8}
+      @media (prefers-color-scheme: dark){.diagram{--dg-accent:#000001}}
+      .frame{background:var(--dg-paper)}
+      .frame svg{color:var(--dg-ink);font-family:var(--font-ui)}
+      .frame svg .mono{font-family:monospace;fill:var(--dg-accent)}
+      .frame svg .dark-only{display:none}`;
+    const html = `<html><head><link rel="stylesheet" href="/site.css"></head><body><article><p>Before.</p>
+      <figure class="diagram"><div class="frame"><svg viewBox="0 0 200 100" role="img" aria-label="Request flow">
+        <rect width="80" height="40" fill="var(--dg-accent)"/><text class="mono" fill="var(--dg-ink)">GET</text>
+        <path d="M0 0" stroke="var(--dg-missing)" fill="var(--dg-missing, #123456)"/><g class="dark-only"><text>Dark</text></g>
+      </svg></div></figure><p>After.</p></article></body></html>`;
+    const result = htmlToText(html, "https://example.com/post/", new Map([["https://example.com/site.css", css]]));
+    const visual = segment(result.text).paragraphs.find((p) => p.visual)!.visual!;
+    const svg = new DOMParser().parseFromString(decodeURIComponent(visual.src.split(",").slice(1).join(",")), "text/html").querySelector("svg")!;
+    expect(decodeURIComponent(visual.src)).not.toContain("var(");
+    expect(svg.getAttribute("style")).toBe("color:#16150f;font-family:Inter, sans-serif");
+    const [paper, box] = Array.from(svg.querySelectorAll("rect"));
+    expect(paper.getAttribute("style")).toBe("fill:#fbfaf7;stroke:none");
+    expect(paper.getAttribute("width")).toBe("200");
+    expect(box.getAttribute("fill")).toBe("#a8321b");
+    // A class rule beats the attribute, as it would on the page.
+    expect(svg.querySelector("text")!.getAttribute("style")).toBe("font-family:monospace;fill:#a8321b");
+    const path = svg.querySelector("path")!;
+    expect(path.hasAttribute("stroke")).toBe(false);
+    expect(path.getAttribute("fill")).toBe("#123456");
+    expect(svg.querySelector("g")!.getAttribute("style")).toBe("display:none");
+  });
+  it("puts an SVG on white when the page's styles are unknown, so it never sits on the dark reader", () => {
+    const result = htmlToText(`<article><p>Before.</p><figure><svg viewBox="5 5 50 20" role="img" aria-label="Plain"><text fill="var(--ink)">Hi</text></svg></figure><p>After.</p></article>`, "https://example.com/");
+    const visual = segment(result.text).paragraphs.find((p) => p.visual)!.visual!;
+    const svg = decodeURIComponent(visual.src);
+    expect(svg).toContain('<rect x="5" y="5" width="50" height="20" style="fill:#fff;stroke:none"/>');
+    expect(svg).toContain("<text>Hi</text>");
+  });
   it("retains Markdown proxy images and resolves their relative locations", () => {
     const text = markdownToText('Title: Example\n# Hello\n\n![A diagram](../flow.png "Steps in order")\n\nDone.', "https://example.com/news/story");
     expect(segment(text).paragraphs.find((p) => p.visual)?.visual).toMatchObject({ src: "https://example.com/flow.png", alt: "A diagram", caption: "Steps in order" });
@@ -205,6 +242,23 @@ describe("PDFs", () => {
     expect(fetched.mock.calls.map(([input]) => input)).toEqual([url, `/api/fetch?url=${encodeURIComponent(url)}`]);
     expect(result).toMatchObject({ title: "Tool Use", domain: "web.stanford.edu", meta: { url, author: "Diyi Yang" } });
     expect(result.text).toBe("# Tool Use\n\n## Why LLMs need tools\n\nModels cannot look anything up. Tools let them act.");
+  });
+
+  it("fetches the stylesheets a page's inline SVG needs, through the server when the site sends no CORS headers", async () => {
+    const url = "https://example.com/post/";
+    const sheet = "https://cdn.example.com/site.css";
+    const body = `<html><head><title>Post</title><link rel="stylesheet" href="${sheet}"><link rel="stylesheet" media="print" href="/print.css"></head><body><article>
+      <p>An article about requests and the way they flow.</p><figure class="d"><svg viewBox="0 0 100 100" role="img" aria-label="Flow"><rect fill="var(--c)"/></svg></figure><p>The end of it.</p></article></body></html>`;
+    const fetched = vi.fn(async (input: string) => {
+      if (input === url) return new Response(body, { headers: { "content-type": "text/html" } });
+      if (input === sheet) throw new TypeError("CORS");
+      if (input === `/api/fetch?url=${encodeURIComponent(sheet)}`) return new Response(".d{--c:#0a0b0c}", { headers: { "content-type": "text/css" } });
+      return new Response("nope", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetched);
+    const result = await fetchReadable(url);
+    expect(fetched.mock.calls.map(([input]) => input)).not.toContain("https://example.com/print.css");
+    expect(decodeURIComponent(segment(result.text).paragraphs.find((p) => p.visual)!.visual!.src)).toContain('fill="#0a0b0c"');
   });
 
   it("never takes a PDF's bytes for text, whatever type it is served as", async () => {
