@@ -6,7 +6,19 @@ test.use({ launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-
 type MockProfile = { id: string; name: string; kind: string; language: string; personality?: string; ref_audio_path?: string };
 const LIBRARIAN_PROFILE: MockProfile = { id: "voice-3", name: "The Librarian", kind: "design", language: "English", personality: "archetype:librarian" };
 
+const NPR_PASSAGE = "The city council met on Tuesday night to debate a plan that would add bike lanes to three of the busiest streets downtown. Supporters said the lanes would make cycling safer, while several shop owners worried about losing parking.";
+const NPR_PAGES: Record<string, string> = {
+  "https://text.npr.org/1001": '<ul><li><a class="topic-title" href="/nx-s1-1">Bike lanes</a></li><li><a class="topic-title" href="/nx-s1-2">Ferry service</a></li></ul>',
+  "https://text.npr.org/nx-s1-1": `<h1 class="story-title">Council weighs new bike lanes</h1><div class="paragraphs-container"><p>${NPR_PASSAGE}</p></div>`,
+  "https://text.npr.org/nx-s1-2": '<h1 class="story-title">Island ferry returns</h1><div class="paragraphs-container"><p>After a winter without service, the ferry to the island made its first run of the season on Saturday morning. Dozens of residents lined the dock to greet it, and the captain sounded the horn twice as it pulled in.</p></div>',
+};
+
 async function mockStudio(page: Page, extraProfiles: MockProfile[] = []) {
+  // Reading scripts come from NPR through the app's page fetcher.
+  await page.route("**/api/fetch?**", (route) => {
+    const html = NPR_PAGES[new URL(route.request().url()).searchParams.get("url") ?? ""];
+    return html ? route.fulfill({ contentType: "text/html", body: html }) : route.fulfill({ status: 502, body: "Unavailable" });
+  });
   const profiles: MockProfile[] = [{ id: "voice-1", name: "My narrator", kind: "clone", language: "English" }, ...extraProfiles];
   const calls: { path: string; body: string; method: string }[] = [];
   await page.route("**/api/vs/**", async (route) => {
@@ -59,6 +71,45 @@ test("clones an uploaded reference and reloads saved voices", async ({ page }) =
   expect(call?.body).toContain('name="ref_audio"');
   expect(call?.body).toContain("The reference text");
   expect(call?.body).toContain("clone");
+});
+
+test("offers an NPR passage to read and uses it as the words of a recording", async ({ page }) => {
+  const calls = await mockStudio(page);
+  await page.goto("/studio/clone");
+  const script = page.getByRole("region", { name: "Script to read" });
+  await expect(script).toContainText(/bike lanes|ferry/);
+  await expect(script.getByRole("link")).toHaveAttribute("href", /^https:\/\/www\.npr\.org\/nx-s1-[12]$/);
+  // Another passage comes from a different story.
+  const first = await script.locator("p").first().textContent();
+  await script.getByRole("button", { name: "Another passage" }).click();
+  await expect(script.locator("p").first()).not.toHaveText(first ?? "");
+  const passage = (await script.locator("p").first().textContent()) ?? "";
+
+  await page.getByLabel("Voice name", { exact: true }).fill("New voice");
+  await page.getByRole("button", { name: "Record microphone" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Recording ·" })).toBeVisible();
+  await page.getByRole("button", { name: "Stop recording" }).click();
+  await expect(page.getByLabel("Words spoken")).toHaveValue(passage);
+  await expect(page.getByText("Filled in from the passage you read.")).toBeVisible();
+  await page.getByRole("button", { name: "Save voice" }).click();
+  await expect(page.getByRole("link", { name: "Choose New voice in Voices" })).toBeVisible();
+  expect(calls.find((c) => c.path === "/profiles" && c.body)?.body).toContain(passage);
+
+  // An uploaded clip wasn't read from the script, so the passage comes back out; typed words stay.
+  await page.getByLabel("Reference audio or video").setInputFiles({ name: "reference.wav", mimeType: "audio/wav", buffer: Buffer.from("test") });
+  await expect(page.getByLabel("Words spoken")).toHaveValue("");
+  await page.getByLabel("Words spoken").fill("My own words");
+  await page.getByRole("button", { name: "Record microphone" }).click();
+  await page.getByRole("button", { name: "Stop recording" }).click();
+  await expect(page.getByLabel("Words spoken")).toHaveValue("My own words");
+});
+
+test("still clones when NPR can't be reached", async ({ page }) => {
+  await mockStudio(page);
+  await page.route("**/api/fetch?**", (route) => route.fulfill({ status: 502, body: "Unavailable" }));
+  await page.goto("/studio/clone");
+  await expect(page.getByRole("region", { name: "Script to read" })).toContainText("Couldn't load a passage from NPR");
+  await expect(page.getByRole("button", { name: "Record microphone" })).toBeEnabled();
 });
 
 test("designs only recognized traits, shows every setting, and lists ignored words", async ({ page }) => {

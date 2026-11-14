@@ -5,6 +5,7 @@ import { useVoices } from "../../state/voices";
 import { studioJson, jsonBody, type Design, type Profile } from "../../lib/studio";
 import { DESIGN_SETTINGS, explainDesign, type DesignExplanation } from "../../lib/voiceDesign";
 import { Field, ErrorNotice, Recorder, LocalAudio, SavedVoiceAvatar, fieldClass, panelClass, useOperation } from "./shared";
+import { ReadingScriptCard, ScriptedReferenceNote, useScriptedReference } from "./ReadingScript";
 
 export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
   const [name, setName] = useState("");
@@ -13,6 +14,7 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
   const [description, setDescription] = useState("");
   const [design, setDesign] = useState<{ result: Design; explanation: DesignExplanation } | null>(null);
   const [saved, setSaved] = useState<Profile | null>(null);
+  const scripted = useScriptedReference(reference, setReference);
   const op = useOperation();
   const save = () => op.run(async (signal) => {
     if (!name.trim()) throw new Error("Give your voice a name.");
@@ -29,14 +31,16 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
   });
   return <div className={`${panelClass} flex flex-col gap-5`}>
     <div><h2 className="font-serif text-xl">{mode === "clone" ? "Clone a voice" : "Design a voice"}</h2>
-      <p className="mt-2 text-sm text-fg2">{mode === "clone" ? "Upload or record a clear, single-speaker sample. Around 10–20 seconds works well." : "Describe a voice, review the attributes VoiceStudio recognizes, then save it for reading and dubbing."}</p></div>
+      <p className="mt-2 text-sm text-fg2">{mode === "clone" ? "Record yourself reading the passage below, or upload a clear, single-speaker sample. Around 10–20 seconds works well." : "Describe a voice, review the attributes VoiceStudio recognizes, then save it for reading and dubbing."}</p></div>
     <Field label="Voice name"><input className={fieldClass} value={name} onChange={(e) => { setName(e.target.value); setSaved(null); }} maxLength={100} placeholder="My narrator" /></Field>
     {mode === "clone" ? <>
-      <Field label="Reference audio or video"><input className={fieldClass} type="file" accept="audio/*,video/*" disabled={op.busy} onChange={(e) => { setFile(e.target.files?.[0] ?? null); setSaved(null); }} /></Field>
-      <Recorder disabled={op.busy} onRecorded={(audio) => { setFile(audio); setSaved(null); }} />
+      <ReadingScriptCard onScript={scripted.onScript} />
+      <Recorder disabled={op.busy} onRecorded={(audio) => { setFile(audio); setSaved(null); scripted.recorded(); }} />
+      <Field label="Reference audio or video"><input className={fieldClass} type="file" accept="audio/*,video/*" disabled={op.busy} onChange={(e) => { setFile(e.target.files?.[0] ?? null); setSaved(null); scripted.uploaded(); }} /></Field>
       {file && <p className="text-sm text-fg2">{file.name}</p>}
       <LocalAudio file={file} />
       <Field label="Words spoken in the sample (optional)"><textarea className={fieldClass} rows={3} value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Leave blank to transcribe automatically." /></Field>
+      <ScriptedReferenceNote show={scripted.fromScript} />
     </> : <>
       <Field label="Describe your voice"><textarea className={fieldClass} rows={4} maxLength={2000} value={description} onChange={(e) => { setDescription(e.target.value); setDesign(null); setSaved(null); }} placeholder="A middle-aged British woman with a low pitch." /></Field>
       <Button className="self-start" disabled={!description.trim()} loading={op.busy} onClick={() => void op.run(async (signal) => {
