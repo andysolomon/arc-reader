@@ -15,6 +15,7 @@ module.exports = {
         "accent-fg": "var(--accent-fg)",
         hl: "var(--hl)",
         danger: "var(--danger)",
+        "verdict-swap": "var(--verdict-swap)",
       },
       fontFamily: {
         serif: ["Literata", "Georgia", '"Times New Roman"', "serif"],

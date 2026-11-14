@@ -160,6 +160,12 @@ export async function analyzeClip(blob: Blob, fallbackDuration: number, partWord
 }
 
 /** Decode a clip and measure how much of it is voiced speech (see voicing.ts); undefined when it cannot be decoded or judged. */
+/** A recording decoded to mono samples, or null when the browser can't decode it. */
+export async function decodeMono(blob: Blob): Promise<{ samples: Float32Array; sampleRate: number } | null> {
+  const buf = await decode(blob);
+  return buf && buf.length ? { samples: mono(buf), sampleRate: buf.sampleRate } : null;
+}
+
 export async function clipVoicedShare(blob: Blob): Promise<number | undefined> {
   const buf = await decode(blob);
   if (!buf || !buf.length) return undefined;

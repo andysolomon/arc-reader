@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { SquarePen, Library, Mic, SlidersHorizontal, Terminal, PanelLeft, AudioLines, type LucideIcon } from "lucide-react";
+import { SquarePen, Library, Mic, SlidersHorizontal, Terminal, PanelLeft, AudioLines, BookOpenCheck, type LucideIcon } from "lucide-react";
 import { THEMES, getTheme } from "@readaloud/tokens";
 import { ThemeIcon, cn } from "@readaloud/ui";
 import { useSettings, useThemeId } from "../state/settings";
@@ -21,6 +21,7 @@ export const LIBRARY: Screen = { to: "/library", label: "Library", Icon: Library
 export const SCREENS: Screen[] = [
   { to: "/voices", label: "Voices", Icon: Mic },
   { to: "/studio", label: "Studio", Icon: AudioLines },
+  { to: "/practice", label: "Practice", Icon: BookOpenCheck },
   { to: "/settings", label: "Settings", Icon: SlidersHorizontal },
   { to: "/linux", label: "Linux client", Icon: Terminal },
 ];

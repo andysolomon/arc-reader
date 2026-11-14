@@ -494,6 +494,14 @@ Categories come from [Jev](https://docs.typesafe.ai), TypeSafe's classification 
 
 Paste a TypeSafe API key in **Settings → Library** (from console.typesafe.ai/keys). Like the OpenCode key, the server checks it, saves it as `typesafe.json` (mode 600) in `LIBRARY_DATA_DIR`, and only ever shows the browser its last four characters; a saved key takes precedence over `TYPESAFE_API_KEY`. `/api/jev` forwards `POST /v1/systemone` only, to `TYPESAFE_URL` (default `https://api.typesafe.ai`). Without a key, documents can still be categorized by hand.
 
+## Reading practice
+
+**Practice** (`/practice`) is a read-aloud game for grade 6 through advanced readers. Pick a level (Grades 6–8, 9–12, College or Advanced), read the passage into the microphone, and each word comes back marked: mispronounced, a different word, skipped, or unclear. You also get accuracy, words correct per minute, and levels for phrasing (the 4-level NAEP oral reading fluency scale), expression and pace. Tap a marked word to hear it in your chosen voice or to try just that word. Missed words collect in **Words to practise** and count as mastered after three clean reads in a row. Level, streak, points and the word list stay in this browser (`readaloud:practice`).
+
+Passages for Grades 6–8 and Advanced come from about 40 bundled public-domain excerpts (`src/data/practicePassages.ts`, verbatim from Project Gutenberg). For Grades 9–12 and College, about half the time the app tries a current NPR passage of the right length instead. Jev checks its level and whether it is unsuitable for a 12-year-old, and the passage is only used if Jev is at least 70% sure it fits and at most 30% sure it is unsuitable. Without a TypeSafe key, or if nothing fits, a bundled passage is used.
+
+The judge is Google's Gemini Decision 1 (`gemini-decision-1`), which hears the recording itself instead of a transcript. The browser converts the take to a 16 kHz mono WAV and sends it to `/api/decide`, which forwards `POST /v1/systemone` to OpenCode's System One endpoint (`DECIDE_URL`, default `https://opencode.ai/inference/systemone/v1`). It uses the same OpenCode key as summaries (`llm.json`, else `LLM_API_KEY`) and refuses any other model. One request asks a choice question per word plus phrasing, expression, pace and an off-script check. A word the judge would mark wrong with less than 70% confidence is shown as unclear and not counted against the reader. The recording goes to Google through OpenCode; nothing is stored on the server.
+
 ## Links
 
 Every document keeps the hyperlinks it came with: the links inside a fetched article, and any Markdown or bare URLs in pasted or uploaded text. When playback finishes the word or phrase a link was attached to, the link appears as a toast for five seconds; selecting it opens the address in a new tab. Skipping past a link with a seek does not show it. Turn the toasts off with **Settings → Playback → Show links as they are read**.

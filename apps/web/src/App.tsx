@@ -9,6 +9,7 @@ import { Reader } from "./routes/Reader";
 import { ReadNew } from "./routes/ReadNew";
 import { LibraryPage } from "./routes/Library";
 import { StudioPage } from "./routes/Studio";
+import { PracticePage } from "./routes/Practice";
 import { VoicesPage } from "./routes/Voices";
 import { SettingsPage } from "./routes/Settings";
 import { LinuxPage } from "./routes/Linux";
@@ -70,6 +71,7 @@ export default function App() {
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/studio" element={<StudioPage />} />
             <Route path="/studio/:tool" element={<StudioPage />} />
+            <Route path="/practice" element={<PracticePage />} />
             <Route path="/voices" element={<VoicesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/linux" element={<LinuxPage />} />

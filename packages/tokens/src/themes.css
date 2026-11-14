@@ -4,6 +4,8 @@ html[data-theme="dark"] {
   color-scheme: dark;
   /* Lightness of service-coloured text (voice names); light themes override it. */
   --voice-text-l: 0.82;
+  /* Practice's "different word" mark: a cool hue that reads apart from --accent and --danger. */
+  --verdict-swap: oklch(var(--voice-text-l, 0.82) 0.11 250);
   --bg: #161412;
   --bg2: #1d1a17;
   --bg3: #272320;

@@ -75,11 +75,15 @@ export function storyParagraphs(doc: Document): string[][][] {
   return runs.filter((run) => run.length);
 }
 
+/** A passage length in words, inclusive. */
+export interface WordRange { min: number; max: number }
+const CLONE_RANGE: WordRange = { min: MIN_WORDS, max: MAX_WORDS };
+
 /**
  * Every passage that starts at a paragraph and runs whole sentences, into the next paragraph of
- * its run if need be, until it reaches MIN_WORDS; ones longer than MAX_WORDS are dropped.
+ * its run if need be, until it reaches `min` words; ones longer than `max` are dropped.
  */
-export function passages(runs: string[][][]): string[] {
+export function passages(runs: string[][][], { min, max }: WordRange = CLONE_RANGE): string[] {
   const out: string[] = [];
   for (const run of runs) {
     for (let start = 0; start < run.length; start++) {
@@ -87,18 +91,18 @@ export function passages(runs: string[][][]): string[] {
       let count = 0;
       for (const sentence of run.slice(start).flat()) {
         taken.push(sentence); count += words(sentence);
-        if (count >= MIN_WORDS) break;
+        if (count >= min) break;
       }
-      if (count >= MIN_WORDS && count <= MAX_WORDS) out.push(taken.join(" "));
+      if (count >= min && count <= max) out.push(taken.join(" "));
     }
   }
   return [...new Set(out)];
 }
 
 /** A random passage from a text.npr.org story page, or null if it has none that fits. */
-export function scriptFromStory(html: string, id: string, random = Math.random): ReadingScript | null {
+export function scriptFromStory(html: string, id: string, random = Math.random, range: WordRange = CLONE_RANGE): ReadingScript | null {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  const options = passages(storyParagraphs(doc));
+  const options = passages(storyParagraphs(doc), range);
   if (!options.length) return null;
   const title = clean(doc.querySelector(".story-title")?.textContent ?? doc.title);
   return { text: options[Math.floor(random() * options.length)], title, url: `https://www.npr.org/${id}` };
@@ -128,7 +132,7 @@ function shuffled<T>(items: T[], random: () => number): T[] {
  * A passage from a random current NPR news story. `avoid` is the story shown last, so asking
  * for another gives a different one. The topic page's story list is reused for ten minutes.
  */
-export async function nprReadingScript({ avoid, signal, random = Math.random }: { avoid?: string; signal?: AbortSignal; random?: () => number } = {}): Promise<ReadingScript> {
+export async function nprReadingScript({ avoid, signal, random = Math.random, words = CLONE_RANGE }: { avoid?: string; signal?: AbortSignal; random?: () => number; words?: WordRange } = {}): Promise<ReadingScript> {
   if (!section || Date.now() - section.at > SECTION_TTL_MS) {
     const ids = storyIds(await page(SECTION, signal));
     if (!ids.length) throw new Error("NPR listed no stories");
@@ -137,7 +141,7 @@ export async function nprReadingScript({ avoid, signal, random = Math.random }: 
   const candidates = shuffled(section.ids.filter((id) => avoid !== `https://www.npr.org/${id}`), random);
   // Some stories are podcast notes or photo essays with no run of prose; try a few.
   for (const id of candidates.slice(0, 4)) {
-    const script = scriptFromStory(await page(`${SITE}/${id}`, signal), id, random);
+    const script = scriptFromStory(await page(`${SITE}/${id}`, signal), id, random, words);
     if (script) return script;
   }
   throw new Error("No NPR story had a passage to read");
