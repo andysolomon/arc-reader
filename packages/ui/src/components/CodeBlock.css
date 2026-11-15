@@ -1,0 +1,40 @@
+/*
+ * Syntax colours for CodeBlock. Hues are fixed; lightness follows --voice-text-l, which
+ * light themes lower, so every theme gets readable tokens without its own palette.
+ */
+.code-hl {
+  --code-l: var(--voice-text-l, 0.82);
+  color: var(--fg);
+}
+.code-hl .hljs-keyword,
+.code-hl .hljs-selector-tag,
+.code-hl .hljs-literal,
+.code-hl .hljs-built_in.hljs-keyword { color: var(--accent); }
+.code-hl .hljs-string,
+.code-hl .hljs-regexp,
+.code-hl .hljs-template-tag,
+.code-hl .hljs-addition { color: oklch(var(--code-l) 0.12 145); }
+.code-hl .hljs-number,
+.code-hl .hljs-symbol,
+.code-hl .hljs-bullet { color: oklch(var(--code-l) 0.12 60); }
+.code-hl .hljs-title,
+.code-hl .hljs-title.function_,
+.code-hl .hljs-section { color: oklch(var(--code-l) 0.11 250); }
+.code-hl .hljs-type,
+.code-hl .hljs-title.class_,
+.code-hl .hljs-built_in,
+.code-hl .hljs-selector-class { color: oklch(var(--code-l) 0.11 300); }
+.code-hl .hljs-attr,
+.code-hl .hljs-attribute,
+.code-hl .hljs-property,
+.code-hl .hljs-variable.language_,
+.code-hl .hljs-template-variable,
+.code-hl .hljs-selector-id { color: oklch(var(--code-l) 0.09 200); }
+.code-hl .hljs-meta,
+.code-hl .hljs-name,
+.code-hl .hljs-tag { color: oklch(var(--code-l) 0.1 20); }
+.code-hl .hljs-comment,
+.code-hl .hljs-quote { color: var(--fg2); font-style: italic; }
+.code-hl .hljs-deletion { color: var(--danger); }
+.code-hl .hljs-emphasis { font-style: italic; }
+.code-hl .hljs-strong { font-weight: 600; }
