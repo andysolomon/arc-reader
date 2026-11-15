@@ -202,3 +202,53 @@ test("a book the Internet Archive only lends is not imported, and says why", asy
   await page.getByRole("link", { name: "Library", exact: true }).click();
   await expect(page.getByText("The Count of Monte Cristo")).toHaveCount(0);
 });
+
+/** A small EPUB 3: a cover, a copyright page and three chapters, two of them in one file. */
+async function buildEpub(): Promise<Buffer> {
+  const { strToU8, zipSync } = await import("fflate");
+  const prose = (about: string) => Array.from({ length: 4 }, (_, p) => `<p>${Array.from({ length: 5 }, (_, i) => `${about} ${p + 1} went on in sentence ${i + 1}, long enough that the paragraph reads as prose.`).join(" ")}</p>`).join("");
+  const page = (body: string) => `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>The Farmyard</title></head><body>${body}</body></html>`;
+  const files: Record<string, string> = {
+    mimetype: "application/epub+zip",
+    "META-INF/container.xml": `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`,
+    "OEBPS/content.opf": `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>The Farmyard</dc:title><dc:creator>Jane Example</dc:creator></metadata>
+      <manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="copy" href="copyright.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/><item id="c23" href="ch2-3.xhtml" media-type="application/xhtml+xml"/></manifest>
+      <spine><itemref idref="cover"/><itemref idref="copy"/><itemref idref="c1"/><itemref idref="c23"/></spine></package>`,
+    "OEBPS/nav.xhtml": page(`<nav epub:type="toc"><ol><li><a href="cover.xhtml">Cover</a></li><li><a href="copyright.xhtml">Copyright</a></li><li><a href="ch1.xhtml">Old Major</a></li><li><a href="ch2-3.xhtml#c2">The Rebellion</a></li><li><a href="ch2-3.xhtml#c3">The Harvest</a></li></ol></nav>`),
+    "OEBPS/cover.xhtml": page(`<p>Cover picture</p>`),
+    "OEBPS/copyright.xhtml": page(`<p>Copyright notice, all rights reserved.</p>`),
+    "OEBPS/ch1.xhtml": page(`<section><header><h2>Old Major</h2></header>${prose("The meeting")}</section>`),
+    "OEBPS/ch2-3.xhtml": page(`<section id="c2"><h2>The Rebellion</h2>${prose("The rebellion")}</section><section id="c3"><h2>The Harvest</h2>${prose("The harvest")}</section>`),
+  };
+  return Buffer.from(zipSync(Object.fromEntries(Object.entries(files).map(([name, text]) => [name, strToU8(text)]))));
+}
+
+test("an EPUB chosen from the device goes into the Library as a book, every chapter at once", async ({ page }) => {
+  const epub = { name: "the-farmyard.epub", mimeType: "application/epub+zip", buffer: await buildEpub() };
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(epub);
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+  await expect(page.getByRole("status").filter({ hasText: "Added 3 chapters of The Farmyard" })).toBeVisible();
+  await expect(page.getByText("Chapter 1 of 3")).toBeVisible();
+  const text = page.getByRole("region", { name: "Document text" }).locator("article");
+  await expect(text.getByRole("heading", { name: "Old Major" })).toBeVisible();
+  await expect(text).toContainText("The meeting 4 went on");
+  await expect(text).not.toContainText("Copyright");
+  await expect(text).not.toContainText("The rebellion");
+
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const book = page.locator('li[data-book="The Farmyard"]');
+  await expect(book).toContainText("3 chapters");
+  await book.getByRole("button", { name: "Show chapters of The Farmyard" }).click();
+  const rows = page.getByRole("list", { name: "Chapters of The Farmyard" }).getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(2)).toContainText("3. The Harvest");
+
+  // The same book chosen again opens the shelved copy instead of adding it twice.
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(epub);
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+  await expect(page.getByText("Chapter 1 of 3")).toBeVisible();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  await expect(page.locator('li[data-book="The Farmyard"]')).toContainText("3 chapters");
+});
