@@ -1,20 +1,11 @@
 import { activeApiBase } from "../engine/providers";
+import { errorMessage } from "@readaloud/practice/errorMessage";
 import { withSpeechAuth } from "./speechServer";
+
+export { errorMessage };
 
 export const studioUrl = (path: string) => `${activeApiBase() || "/api/vs"}${path}`;
 export const idPath = encodeURIComponent;
-
-export function errorMessage(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map(errorMessage).join("; ");
-  if (value && typeof value === "object") {
-    const v = value as Record<string, unknown>;
-    for (const key of ["message", "detail", "error", "reason", "msg"]) {
-      if (v[key]) return errorMessage(v[key]);
-    }
-  }
-  return "VoiceStudio could not complete this request.";
-}
 
 export async function studioFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const url = studioUrl(path);

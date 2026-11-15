@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Check, Plus, UserRound } from "lucide-react";
 import { Button, Dialog, Input, cn } from "@readaloud/ui";
 import { NAME_MAX, readerList, usePractice } from "../../state/practice";
-import { dayOf } from "../../lib/practice/score";
+import { dayOf } from "@readaloud/practice/score";
 import { currentStreak } from "../../state/practice";
 
 /** "Reading as …" with a dialog to switch, add, rename or remove readers sharing this browser. */

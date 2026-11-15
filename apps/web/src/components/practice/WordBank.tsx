@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Mic } from "lucide-react";
 import { Button, Popover, SectionLabel, cn } from "@readaloud/ui";
 import { CLEAN_TO_MASTER, mastered, toGo, usePractice, type BankWord } from "../../state/practice";
-import { wordKey } from "../../lib/practice/words";
+import { wordKey } from "@readaloud/practice/words";
 import { WordPractice } from "./WordPractice";
 
 const missedLabel = (n: number) => n === 1 ? "Missed once" : `Missed ${n} times`;

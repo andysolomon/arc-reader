@@ -1,3 +1,4 @@
+import { practiceHost } from "./host";
 import type { Token } from "./words";
 import { wordKey } from "./words";
 
@@ -101,7 +102,7 @@ export function lookUpWord(word: string, sentence?: string): Promise<WordInfo> {
   const inFlight = pending.get(key);
   if (inFlight) return inFlight;
   const request = (async () => {
-    const response = await fetch("/api/llm/v1/chat/completions", {
+    const response = await fetch(`${practiceHost().api}/llm/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-opencode-session": "readaloud-practice-word-info" },
       signal: AbortSignal.timeout(60_000),

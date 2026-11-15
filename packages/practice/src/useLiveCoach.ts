@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { encodeWav } from "../engine/audio";
-import { JUDGE_SAMPLE_RATE, resample } from "../lib/practice/audio";
-import { transcribeAudio } from "../lib/practice/judge";
-import { LIVE_START, advanceLive, type LiveState } from "../lib/practice/live";
-import { tokens } from "../lib/practice/words";
+import { encodeWav } from "./pcm";
+import { JUDGE_SAMPLE_RATE, resample } from "./audio";
+import { transcribeAudio } from "./judge";
+import { LIVE_START, advanceLive, type LiveState } from "./live";
+import { tokens } from "./words";
 import type { Samples } from "./useMicRecorder";
 
 /** A transcript needs this much audio to be worth asking for. */

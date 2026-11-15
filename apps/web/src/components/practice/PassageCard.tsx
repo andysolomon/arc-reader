@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Passage } from "../../lib/practice/passages";
+import type { Passage } from "@readaloud/practice/passages";
 
 /** The passage card, built like ReadingScriptCard: a head row, the passage, the attribution. */
 export function PassageCard({ head, action, children, passage, footer }: { head: ReactNode; action?: ReactNode; children: ReactNode; passage: Passage | null; footer?: ReactNode }) {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { ACCESS_COOKIE, FUNNEL_HEADER, accessGate } from "./vite.gate";
+import { ACCESS_COOKIE, FUNNEL_HEADER, accessGate, type GateOptions } from "./vite.gate";
 import { PROBE_IMAGE } from "./vite.shell";
 
 const TOKEN = "s3cret-token-with-enough-entropy";
@@ -9,8 +9,8 @@ const FUNNEL = { [FUNNEL_HEADER]: "?1" };
 
 describe("public access through Tailscale Funnel", () => {
   let server: Server, base: string;
-  const start = async (token: string) => {
-    const gate = accessGate(token);
+  const start = async (token: string, options: GateOptions = { open: [PROBE_IMAGE] }) => {
+    const gate = accessGate(token, options);
     server = createServer((req, res) => gate(req, res, () => { res.writeHead(200); res.end("app"); }));
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -56,6 +56,18 @@ describe("public access through Tailscale Funnel", () => {
   it("lets the iOS offline page check that the server is up", async () => {
     await start(TOKEN);
     expect((await get(`${PROBE_IMAGE}?123`, FUNNEL)).status).toBe(200);
+  });
+
+  it("can redirect relatively and name another app, for one served under a path it never sees", async () => {
+    await start(TOKEN, { app: "Cadence", message: "This Cadence is private.", relativeRedirect: true });
+    // The browser resolves these against the address it asked for, whatever prefix that had.
+    expect((await get(`/?access=${encodeURIComponent(TOKEN)}`, FUNNEL)).headers.get("location")).toBe("./");
+    expect((await get(`/words/list?tab=1&access=${encodeURIComponent(TOKEN)}`, FUNNEL)).headers.get("location")).toBe("list?tab=1");
+    const refused = await get("/", FUNNEL);
+    expect(refused.status).toBe(401);
+    expect(await refused.text()).toContain("<title>Cadence</title><p style=\"font:17px system-ui;margin:2em\">This Cadence is private.</p>");
+    // Nothing is open unless listed.
+    expect((await get(PROBE_IMAGE, FUNNEL)).status).toBe(401);
   });
 
   it("refuses every Funnel request when no token is configured", async () => {

@@ -24,8 +24,8 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 export const PAGES = ["docs/readaloud-bpmn.html", "docs/readaloud-sequence.html"];
 const ANCHORS = "docs/diagram-anchors.json";
 const SRC = "apps/web/src/";
-// Both spellings used on the pages: SRC + "engine/engine.ts:443" and "apps/web/vite.prepare.ts:240".
-const REF = /SRC \+ "([^"]+?):(\d+)"|"((?:apps\/web\/|compose\.yaml)[^"]*?):(\d+)"/g;
+// The spellings used on the pages: SRC + "engine/engine.ts:443", "apps/web/vite.prepare.ts:240" and "packages/practice/src/pcm.ts:67".
+const REF = /SRC \+ "([^"]+?):(\d+)"|"((?:apps\/web\/|packages\/|compose\.yaml)[^"]*?):(\d+)"/g;
 
 const read = (path) => readFileSync(resolve(ROOT, path), "utf8");
 const fileLines = new Map();

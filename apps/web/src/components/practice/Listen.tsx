@@ -1,31 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Play, Square, Volume2 } from "lucide-react";
 import { Button } from "@readaloud/ui";
-import { playClip, speakPassage } from "../../lib/practice/speak";
-
-type Kind = "mine" | "voice";
-type Playing = { kind: Kind; ready: boolean } | null;
-
-/** One thing playing at a time; pressing what's playing stops it. */
-function useListen() {
-  const [playing, setPlaying] = useState<Playing>(null);
-  const [error, setError] = useState("");
-  const controller = useRef<AbortController>();
-  useEffect(() => () => controller.current?.abort(), []);
-
-  const stop = useCallback(() => { controller.current?.abort(); setPlaying(null); }, []);
-  const toggle = async (kind: Kind, run: (signal: AbortSignal, ready: () => void) => Promise<unknown>) => {
-    const wasPlaying = playing?.kind === kind;
-    stop();
-    if (wasPlaying) return;
-    const ac = new AbortController(); controller.current = ac;
-    setError(""); setPlaying({ kind, ready: false });
-    try { await run(ac.signal, () => { if (!ac.signal.aborted) setPlaying({ kind, ready: true }); }); }
-    catch (e) { if (!ac.signal.aborted) setError(e instanceof Error ? e.message : "Couldn't play that."); }
-    finally { if (controller.current === ac) setPlaying(null); }
-  };
-  return { playing, error, stop, toggle };
-}
+import { playClip, speakPassage } from "@readaloud/practice/speak";
+import { useListen } from "@readaloud/practice/useListen";
 
 const stopIcon = <Square size={14} fill="currentColor" aria-hidden />;
 

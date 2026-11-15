@@ -8,6 +8,8 @@ Paste anything. Hear it read. A React + Vite PWA that streams text-to-speech pas
 
 ```
 apps/web          The app (Vite + React 18 + TypeScript, React Router, Zustand, Framer Motion, PWA)
+apps/cadence      Cadence: Reading Practice as an app of its own, on the same practice engine
+packages/practice The practice engine both apps share: passages, the judge, scoring, progress, the live coach
 packages/ui       Component library (Tailwind + Morphicons + Lucide) with Storybook
 packages/tokens   CSS variables for all 8 themes, a Tailwind preset, and a WCAG contrast check
 deploy/kind       Terraform-managed local kind cluster and deployment helper
@@ -28,6 +30,8 @@ pnpm storybook        # Storybook on :6006 (dark / light / all Omarchy themes in
 pnpm typecheck
 pnpm test             # tokens contrast check + vitest unit tests
 pnpm test:e2e         # Playwright: keyboard flow, responsive, axe per screen per theme
+pnpm cadence          # Cadence on http://127.0.0.1:5183, using the deployed ReadAloud's API (see Cadence below)
+pnpm test:e2e:cadence # Playwright: Cadence's screens, its /cadence path and its access gate
 pnpm contrast         # WCAG 2.2 AA table for every theme
 docker compose up -d  # VoiceStudio + the built app on :4179 (see Voices below)
 ```
@@ -214,12 +218,15 @@ Terraform owns all of it in two stages: `deploy/kind/terraform/cluster` creates 
 
 Set `READALOUD_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:<port>` in `.env` and Terraform also has Tailscale serve the web port at that address (`deploy/kind/terraform/app/public-url.tf`): it runs `tailscale serve` when the address is first set or changes, runs it again if Tailscale has stopped serving it, and refuses an address that names another machine. Each deploy then ends by checking that the address serves the new build, and fails if it does not. The iOS app can be built to load from the same address ([iOS app](#load-the-app-from-the-server)), which makes this deploy the way the phone is updated. Without the setting, Terraform leaves Tailscale alone. `READALOUD_FUNNEL_PORT` also opens the app to the internet through Tailscale Funnel, behind `READALOUD_ACCESS_TOKEN` ([without Tailscale on the phone](#without-tailscale-on-the-phone)).
 
+[Cadence](#cadence) runs in the same cluster, in its own namespace `cadence`: `deploy/kind/terraform/app/cadence.tf` calls the `deploy/terraform/modules/cadence` module (Deployment, Service, Secret and an Ingress for `/cadence` on the web port). With `CADENCE_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:<port>` in `.env`, Tailscale serves that port from `http://127.0.0.1:4179/cadence`, so the address opens Cadence at its root.
+
 ```sh
-deploy/kind/deploy.sh   # build the web image, load it into kind, roll out
+deploy/kind/deploy.sh   # build the web and Cadence images, load them into kind, roll out
 kubectl --context kind-readaloud -n readaloud get pods
+kubectl --context kind-readaloud -n cadence get pods
 kubectl --context kind-readaloud -n readaloud logs deploy/web
 kubectl --context kind-readaloud -n traefik logs deploy/traefik   # routing errors, 404s while a pod restarts
-deploy/kind/terraform.sh app plan       # what a deploy would change (keeps the running web image)
+deploy/kind/terraform.sh app plan       # what a deploy would change (keeps the running images)
 deploy/kind/terraform.sh cluster plan   # cluster changes; applying one recreates the cluster
 ```
 
@@ -500,11 +507,11 @@ Paste a TypeSafe API key in **Settings → Library** (from console.typesafe.ai/k
 
 Several readers can share a browser: **Change reader** on the start screen switches, adds, renames or removes readers, and each keeps their own level, streak, points and words (`readaloud:practice`, in this browser only).
 
-Passages are always the source's own words; nothing is rewritten or simplified. Advanced reads about 40 bundled public-domain excerpts (`src/data/practicePassages.ts`, verbatim from Project Gutenberg), 10 per level. For the other levels, about half the time the app tries a current NPR passage of the right length instead. Jev checks its level and whether it is unsuitable for a 12-year-old, and the passage is used, exactly as written, only if Jev is at least 70% sure it fits and at most 30% sure it is unsuitable. Without a TypeSafe key, or if nothing fits, a bundled passage is used. The next passage is fetched while you read the current one.
+Passages are always the source's own words; nothing is rewritten or simplified. Advanced reads about 40 bundled public-domain excerpts (`packages/practice/src/practicePassages.ts`, verbatim from Project Gutenberg), 10 per level. For the other levels, about half the time the app tries a current NPR passage of the right length instead. Jev checks its level and whether it is unsuitable for a 12-year-old, and the passage is used, exactly as written, only if Jev is at least 70% sure it fits and at most 30% sure it is unsuitable. Without a TypeSafe key, or if nothing fits, a bundled passage is used. The next passage is fetched while you read the current one.
 
-**While you read, the passage follows you.** Every couple of seconds the part of the recording not yet settled goes to the speech server, and its transcript is lined up against the passage from where the reader had got to (`src/lib/practice/live.ts`): words dim as they are read, and a skipped or misread word is marked a few seconds later. A transcript of audio that stops mid-sentence invents its last words, so only its finished segments are settled; the unfinished one just moves the reader's place. Unclear words and runs of missing words are left unmarked while reading, and if the coach loses its place it looks up to 40 words ahead to find it. These marks are provisional: the full check after the take decides the results, and a speech server that is busy or unreachable just leaves the passage unmarked.
+**While you read, the passage follows you.** Every couple of seconds the part of the recording not yet settled goes to the speech server, and its transcript is lined up against the passage from where the reader had got to (`packages/practice/src/live.ts`): words dim as they are read, and a skipped or misread word is marked a few seconds later. A transcript of audio that stops mid-sentence invents its last words, so only its finished segments are settled; the unfinished one just moves the reader's place. Unclear words and runs of missing words are left unmarked while reading, and if the coach loses its place it looks up to 40 words ahead to find it. These marks are provisional: the full check after the take decides the results, and a speech server that is busy or unreachable just leaves the passage unmarked.
 
-The judge has two parts that run side by side. **Words come from a transcript**: the browser converts the take to a 16 kHz mono WAV and the speech server's Whisper (`/api/vs/transcribe`, with no hint of the passage and no clean-up) writes down what it hears. The transcript is lined up against the passage (`src/lib/practice/align.ts`, `hear.ts`): a word missing from it was skipped, a word replaced by a similar one was mispronounced, and one replaced by something else was a different word; the popover says what was heard. Digits, British and American spellings, sound-alikes ("their", "there") and words run together or split count as read. Where a transcript can't be trusted the word is marked unclear and not counted: a misheard name, one short word for another ("in", "and"), or a word that differs only in its ending. When the fast transcript looks like it dropped a stretch (five skipped words in a row, or under 80% read), a second, slower one is made and a word either heard counts as read. A take with under half the passage in it isn't scored.
+The judge has two parts that run side by side. **Words come from a transcript**: the browser converts the take to a 16 kHz mono WAV and the speech server's Whisper (`/api/vs/transcribe`, with no hint of the passage and no clean-up) writes down what it hears. The transcript is lined up against the passage (`packages/practice/src/align.ts`, `hear.ts`): a word missing from it was skipped, a word replaced by a similar one was mispronounced, and one replaced by something else was a different word; the popover says what was heard. Digits, British and American spellings, sound-alikes ("their", "there") and words run together or split count as read. Where a transcript can't be trusted the word is marked unclear and not counted: a misheard name, one short word for another ("in", "and"), or a word that differs only in its ending. When the fast transcript looks like it dropped a stretch (five skipped words in a row, or under 80% read), a second, slower one is made and a word either heard counts as read. A take with under half the passage in it isn't scored.
 
 **Phrasing, expression and pace come from Google's Gemini Decision 1** (`gemini-decision-1`), which hears the recording itself. `/api/decide` sends it the WAV and three questions through Google's Decisions API (`GEMINI_URL`, default `https://generativelanguage.googleapis.com/v1beta`) and refuses any other model. Without a Gemini key the words are still scored and those three rows say they weren't checked. Nothing is stored on the server.
 
@@ -513,6 +520,31 @@ Asking Gemini Decision about every word in the audio was tried first and measure
 Paste a Gemini API key in **Settings → Practice** (from aistudio.google.com/apikey). Like the other keys, the server checks it, saves it as `gemini.json` (mode 600) in `LIBRARY_DATA_DIR`, and only ever shows the browser its last four characters; a saved key takes precedence over `GEMINI_API_KEY`, which the kind and AWS deployments pass from the root `.env` through Terraform into the `readaloud-secrets` Secret. On Google's free tier, content you send may be used to improve Google's products; on a paid key it is not. Without a Gemini key of its own, `/api/decide` falls back to OpenCode's System One endpoint (`DECIDE_URL`) with the summaries key, where Gemini Decision is billed to pay-as-you-go credits that an OpenCode Go plan does not include.
 
 `pnpm --filter @readaloud/web practice:eval` measures the judge: it speaks bundled passages with planted mistakes through Phonon, judges them the way the app does (`PRACTICE_EVAL_URL`, default the deployed app) and reports how many mistakes were caught and how many correct words were wrongly flagged. The readings are a synthetic voice; `--recordings DIR` adds real takes described by `NAME.json` files, which is the way to check how the judge does with people. `--live` also plays each reading to the live coach a few seconds at a time and reports what it had marked by the end, and `--only TEXT` keeps the readings whose name contains it.
+
+## Cadence
+
+**Cadence** (`apps/cadence`) is Reading Practice as an app of its own: the same passages, judge, scoring and live coach as ReadAloud's Practice, with its own screens. **Read** offers the next passage, with **Hear it first**, a level and a row each for words to practise and the last reading; reading it goes from "ready" through recording to results, where a marked word opens its details. **Words** lists the words to practise and the mastered ones, and **History** the readings so far. The avatar opens **Readers**. It follows the device's light or dark setting.
+
+Both apps import the engine from `packages/practice` (`@readaloud/practice/<module>`), and each tells it once how to reach a server and how to speak (`configurePractice` in `packages/practice/src/host.ts`): ReadAloud uses the voice and speech server chosen in Settings (`apps/web/src/lib/practiceHost.ts`), Cadence uses ReadAloud's default voice, Phonon's Easton, and falls back to the browser's own voice (`apps/cadence/src/host.ts`). Progress is separate: Cadence keeps its readers under `cadence:practice` in the browser, ReadAloud under `readaloud:practice`.
+
+Cadence has no keys or speech server of its own. Its server is `vite preview` with two additions (`apps/cadence/vite.server.ts`): it forwards the six API routes the engine uses to ReadAloud's web server (`CADENCE_API_URL`, default the deployed app at `http://127.0.0.1:4179`; in the cluster `http://web.readaloud.svc.cluster.local:4173`) and answers 404 for the rest of ReadAloud's API, and it serves the app under `/cadence` as well as at the root. The pages use relative addresses, so one build works at both.
+
+| Address | What it is |
+| --- | --- |
+| `CADENCE_PUBLIC_URL` (for example `https://<machine>.<tailnet>.ts.net:8466`) | Tailnet only. Tailscale maps the port's root onto `/cadence`. |
+| `<Funnel address>/cadence/` (for example `https://<machine>.<tailnet>.ts.net:10000/cadence/`) | From the internet, for a phone without Tailscale. Funnel has only ports 443, 8443 and 10000, so Cadence shares ReadAloud's. |
+
+Requests through Funnel need `READALOUD_ACCESS_TOKEN`, checked by the same gate as ReadAloud's (`apps/web/vite.gate.ts`). Open `<Funnel address>/cadence/?access=<token>` once in the phone's browser; the cookie it stores also opens ReadAloud there, and the reverse. Add Cadence to the home screen from the browser's share menu. It registers no service worker, and ReadAloud's leaves `/cadence/` alone.
+
+```sh
+pnpm cadence                                   # dev server on :5183
+pnpm --filter @readaloud/cadence build
+pnpm --filter @readaloud/cadence preview       # serve the build on :4183
+pnpm test:e2e:cadence                          # builds, serves on :4184, answers every API call itself
+docker build -f apps/cadence/Dockerfile -t readaloud-cadence:dev .
+```
+
+The AWS target does not deploy Cadence yet.
 
 ## Links
 

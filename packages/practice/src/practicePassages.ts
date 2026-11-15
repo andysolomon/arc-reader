@@ -1,4 +1,4 @@
-import type { Band } from "../lib/practice/bands";
+import type { Band } from "./bands";
 
 export interface BundledPassage {
   /** Stable, unique, kebab-case, e.g. "douglass-narrative-birth". */

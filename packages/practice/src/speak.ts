@@ -1,8 +1,4 @@
-import { synthesize } from "../../engine/providers";
-import { ApiBusy, ApiRejected, ApiUnreachable, LOCAL_ENGINE } from "../../engine/types";
-import { getVoice, isLocalVoice, voiceLang } from "../../state/voices";
-import { useSettings } from "../../state/settings";
-import { planPassages, splitSentences, splitWords } from "../segment";
+import { practiceHost } from "./host";
 import { displayText } from "./words";
 
 /** Whatever Practice is playing: a word, the passage, or the reader's own take. One at a time. */
@@ -59,27 +55,8 @@ function speakLocally(text: string, lang: string, signal?: AbortSignal): Promise
   });
 }
 
-/** Speech for `text` in the reader's chosen voice, the way the Voices preview makes it. */
-function voiceClip(text: string, signal?: AbortSignal) {
-  const settings = useSettings.getState();
-  const v = getVoice(settings.voice);
-  const clip = synthesize({
-    text,
-    voice: v.id,
-    engine: v.engine,
-    openaiModel: settings.openaiModel,
-    profile: v.kind === "profile",
-    signal,
-    forceLocal: isLocalVoice(v.id) || (v.kind === "profile" && settings.engine === LOCAL_ENGINE),
-  }).catch((error: unknown) => {
-    if (signal?.aborted) throw error;
-    if (error instanceof ApiUnreachable) throw new Error("The speech server is unreachable right now.");
-    if (error instanceof ApiBusy) throw new Error("VoiceStudio is busy. Try again in a moment.");
-    if (error instanceof ApiRejected) throw new Error(error.message);
-    throw new Error("Couldn't make the speech.");
-  });
-  return { clip, lang: voiceLang(v) };
-}
+/** Speech for `text` in the app's voice (PracticeHost.synthesize). */
+const voiceClip = (text: string, signal?: AbortSignal) => practiceHost().synthesize(text, signal);
 
 /** Say one word in the reader's chosen voice. Rejects with a message to show. */
 export async function speakWord(word: string, signal?: AbortSignal): Promise<void> {
@@ -99,23 +76,22 @@ export async function speakWord(word: string, signal?: AbortSignal): Promise<voi
  */
 export async function speakPassage(text: string, signal: AbortSignal, onPlaying?: () => void): Promise<void> {
   stopPlayback();
-  const sentences = splitSentences(displayText(text)).map((s) => ({ text: s, words: splitWords(s), para: 0 }));
-  const pieces = planPassages(sentences);
+  const pieces = practiceHost().speechPieces(displayText(text));
   // Its own controller, so clips being made ahead stop too when the reading gives way.
   const ac = new AbortController();
   const stop = () => ac.abort();
   signal.addEventListener("abort", stop, { once: true });
   try {
-    let next = pieces.length ? voiceClip(pieces[0].text, ac.signal) : null;
+    let next = pieces.length ? voiceClip(pieces[0], ac.signal) : null;
     for (let i = 0; i < pieces.length && next; i++) {
       const { clip, lang } = next;
       const chunk = await clip;
       if (ac.signal.aborted) return;
-      next = i + 1 < pieces.length ? voiceClip(pieces[i + 1].text, ac.signal) : null;
+      next = i + 1 < pieces.length ? voiceClip(pieces[i + 1], ac.signal) : null;
       // A clip made ahead that's never played still rejects when the reading stops; nobody waits on it then.
       next?.clip.catch(() => undefined);
       if (i === 0) onPlaying?.();
-      const ended = await (chunk.audio ? playClip(chunk.audio, ac.signal) : speakLocally(pieces[i].text, lang, ac.signal));
+      const ended = await (chunk.audio ? playClip(chunk.audio, ac.signal) : speakLocally(pieces[i], lang, ac.signal));
       if (!ended) return;
     }
   } catch (e) {

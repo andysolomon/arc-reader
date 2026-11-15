@@ -12,7 +12,7 @@ import { voiceAvatars } from "./vite.avatars";
 import { llm } from "./vite.llm";
 import { jev } from "./vite.jev";
 import { decide } from "./vite.decide";
-import { shellFallback } from "./vite.shell";
+import { PROBE_IMAGE, shellFallback } from "./vite.shell";
 import { publicAccess } from "./vite.gate";
 import { hostedDocs } from "./vite.docs";
 import { serverUrl, startUrl, UNREACHABLE_PAGE } from "./capacitor.config";
@@ -25,7 +25,8 @@ export default defineConfig(({ mode }) => {
   const proxy = voiceStudioProxy(env, activity);
   return {
   plugins: [
-    publicAccess(env),
+    // The iOS app's offline page loads the probe icon to learn that the server is up.
+    publicAccess(env, { open: [PROBE_IMAGE] }),
     react(),
     tailnetUrl(),
     pageFetch(env),
@@ -71,7 +72,8 @@ export default defineConfig(({ mode }) => {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
         navigateFallback: "/index.html",
         // The docs are full pages of their own (vite.docs.ts): fetch them, don't precache them.
-        navigateFallbackDenylist: [/^\/docs\//],
+        // Cadence is another app, served beside this one at /cadence/ on the public address.
+        navigateFallbackDenylist: [/^\/docs\//, /^\/cadence(\/|$)/],
         globIgnores: ["docs/**"],
         runtimeCaching: [
           {

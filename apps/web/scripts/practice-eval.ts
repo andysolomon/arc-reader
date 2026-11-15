@@ -27,10 +27,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PRACTICE_PASSAGES } from "../src/data/practicePassages";
-import { tokens } from "../src/lib/practice/words";
-import { hearTake, interpretProsody, prosodyRequest, type Verdict } from "../src/lib/practice/judge";
-import { LIVE_START, advanceLive, type Segment } from "../src/lib/practice/live";
+import { PRACTICE_PASSAGES } from "@readaloud/practice/practicePassages";
+import { tokens } from "@readaloud/practice/words";
+import { hearTake, interpretProsody, prosodyRequest, type Verdict } from "@readaloud/practice/judge";
+import { LIVE_START, advanceLive, type Segment } from "@readaloud/practice/live";
 
 const BASE = (process.env.PRACTICE_EVAL_URL ?? "https://omarchy.tail1b9428.ts.net:8449").replace(/\/$/, "");
 const VOICE = process.env.PRACTICE_EVAL_VOICE ?? "Easton";

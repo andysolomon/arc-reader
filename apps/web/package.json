@@ -19,6 +19,7 @@
     "@capacitor/core": "^8.6.0",
     "@capacitor/ios": "^8.6.0",
     "@capacitor/status-bar": "^8.0.4",
+    "@readaloud/practice": "workspace:*",
     "@readaloud/tokens": "workspace:*",
     "@readaloud/ui": "workspace:*",
     "clsx": "^2.1.1",

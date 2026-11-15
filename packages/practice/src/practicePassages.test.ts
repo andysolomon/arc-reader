@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { BANDS, bandInfo } from "../lib/practice/bands";
+import { BANDS, bandInfo } from "./bands";
 import { PRACTICE_PASSAGES } from "./practicePassages";
 
 const count = (text: string) => text.split(/\s+/).filter(Boolean).length;

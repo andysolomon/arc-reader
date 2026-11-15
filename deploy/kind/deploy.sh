@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the web image from this checkout and deploy ReadAloud to the local kind cluster.
+# Build the web and Cadence images from this checkout and deploy both to the local kind cluster.
 #   deploy/kind/deploy.sh
 # Terraform owns the cluster (terraform/cluster) and everything in it (terraform/app).
 # The first run creates the cluster; Docker Compose is stopped first because the cluster
@@ -28,12 +28,16 @@ set -a; . ./.env; set +a
 tag=$(git rev-parse --short HEAD)
 [ -z "$(git status --porcelain)" ] || tag="$tag-dirty-$(date +%s)"
 web_image="readaloud-web:$tag"
+cadence_image="readaloud-cadence:$tag"
 voicestudio_image="ghcr.io/debpalash/voicestudio:${VOICESTUDIO_TAG:-stable}"
 
 step "Building $web_image"
 # compose.yaml owns the build arguments (which providers are bundled).
 docker compose build web
 docker tag readaloud-web:latest "$web_image"
+
+step "Building $cadence_image"
+docker build -q -f apps/cadence/Dockerfile -t "$cadence_image" . >/dev/null
 
 if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
   if [ -n "$(docker compose ps -q 2>/dev/null)" ]; then
@@ -78,22 +82,25 @@ if ! docker exec "$node" crictl inspecti "$voicestudio_image" >/dev/null 2>&1; t
   kind load docker-image --name "$cluster" "$voicestudio_image"
 fi
 kind load docker-image --name "$cluster" "$web_image"
+kind load docker-image --name "$cluster" "$cadence_image"
 
 
 step "Deploying"
 export TF_VAR_web_image=$web_image
+export TF_VAR_cadence_image=$cadence_image
 # Waits for every Deployment to roll out.
 tf app apply -input=false -auto-approve
 
-# Keep only the web image that is running; VoiceStudio's 17 GB image stays.
+# Keep only the web and Cadence images that are running; VoiceStudio's 17 GB image stays.
 for image in $(docker exec "$node" crictl images -o json | python3 -c '
 import json, sys
 for image in json.load(sys.stdin)["images"]:
     for name in image.get("repoTags", []):
-        if name.startswith("docker.io/library/readaloud-web:"): print(name)'); do
-  [ "$image" = "docker.io/library/$web_image" ] || docker exec "$node" crictl rmi "$image" >/dev/null 2>&1 || true
+        if name.startswith(("docker.io/library/readaloud-web:", "docker.io/library/readaloud-cadence:")): print(name)'); do
+  case $image in "docker.io/library/$web_image" | "docker.io/library/$cadence_image") ;; *) docker exec "$node" crictl rmi "$image" >/dev/null 2>&1 || true ;; esac
 done
 docker image ls --format '{{.Repository}}:{{.Tag}}' readaloud-web | grep -vxE "readaloud-web:(latest|$tag)" | xargs -r docker rmi >/dev/null 2>&1 || true
+docker image ls --format '{{.Repository}}:{{.Tag}}' readaloud-cadence | grep -vxE "readaloud-cadence:$tag" | xargs -r docker rmi >/dev/null 2>&1 || true
 
 # The iOS app loads the web app from READALOUD_PUBLIC_URL, so that address must now
 # serve the build that was just deployed. Traefik can take a moment to see the new pod.
@@ -115,4 +122,22 @@ if [ -n "$public" ]; then
   fi
 fi
 
+# Cadence answers at /cadence on the same port, and at CADENCE_PUBLIC_URL when that is set.
+cadence=${CADENCE_PUBLIC_URL:+${CADENCE_PUBLIC_URL%/}}
+step "Checking Cadence${cadence:+ at $cadence}"
+deployed="" served=""
+for _ in $(seq 30); do
+  deployed=$(entry_script http://127.0.0.1:4179/cadence/)
+  served=$deployed
+  [ -z "$cadence" ] || served=$(entry_script "$cadence/")
+  [ -n "$deployed" ] && [ "$deployed" = "$served" ] && break
+  sleep 2
+done
+if [ -z "$deployed" ] || [ "$deployed" != "$served" ]; then
+  echo "Cadence is not serving the deployed build (local: ${deployed:-nothing}${cadence:+, $cadence: ${served:-nothing}})." >&2
+  echo "Check: kubectl --context kind-$cluster -n cadence get pods; tailscale serve status" >&2
+  exit 1
+fi
+
 step "Deployed $web_image: http://127.0.0.1:4179${public:+ ($public)}"
+step "Deployed $cadence_image: http://127.0.0.1:4179/cadence/${cadence:+ ($cadence)}"

@@ -251,7 +251,7 @@ const SEQS = {
     rows: [
       { f: "U", to: "UI", t: "async", n: "paste text · press Listen", say: "The listener pastes an article on Compose and presses Listen.",
         d: "Compose (the home route) takes pasted text, the clipboard, an uploaded .txt/.md file, the sample, or a web address. A share from another app opens /read/new?title=&text=&url= instead — the installed PWA is a Web Share Target.",
-        code: [SRC + "routes/Compose.tsx:119", SRC + "routes/Compose.tsx:76", SRC + "routes/ReadNew.tsx:15", "apps/web/vite.config.ts:60"] },
+        code: [SRC + "routes/Compose.tsx:119", SRC + "routes/Compose.tsx:76", SRC + "routes/ReadNew.tsx:15", "apps/web/vite.config.ts:61"] },
       { op: "opt", id: "url", g: "a web address was entered or shared", rows: [
         { f: "UI", to: "SV", t: "call", n: "GET /api/fetch?url=…", say: "Most sites send no CORS headers, so the app server fetches the page for the browser.",
           d: "fetchReadable tries a direct fetch first, then the app server’s /api/fetch, then an optional reader proxy. Links to X posts are fetched from the FxTwitter API and turned into HTML on the server. A book on the Internet Archive is read from the item’s full-text file, found through the Archive’s metadata API, and arrives already cut into chapters. A PDF is left to the app server, which answers with a page made from the file’s text and draws a picture of each slide that shows more than words; a course page that links numbered PDF decks comes back as a book of lectures.",
@@ -421,7 +421,7 @@ const SEQS = {
           { op: "alt", id: "have", ops: [
             { g: "cached", rows: [
               { op: "opt", id: "noise", g: "a VoiceStudio or Phonon clip cached before the noise check", rows: [
-                { f: "PR", to: "PR", t: "self", n: "clipVoicedShare(): < 20 % voiced → generate again", say: "It’s checked once for breathy noise; a garbled clip falls through to a fresh generation.", code: [SRC + "engine/providers.ts:458", SRC + "engine/audio.ts:169"] },
+                { f: "PR", to: "PR", t: "self", n: "clipVoicedShare(): < 20 % voiced → generate again", say: "It’s checked once for breathy noise; a garbled clip falls through to a fresh generation.", code: [SRC + "engine/providers.ts:458", SRC + "engine/audio.ts:8"] },
               ] },
               { f: "PR", to: "PR", t: "self", n: "locateSentences (older clips only)", say: "Found. Clips saved before passages existed are measured once on the way out.",
                 d: "Older clips carry no sentence starts, loudness or edge silences; they are measured by decoding the audio.", code: [SRC + "engine/providers.ts:367"] },
@@ -433,7 +433,7 @@ const SEQS = {
                 { f: "DB", to: "PR", t: "ret", n: "clip" },
               ] },
               { f: "PR", to: "PR", t: "self", n: "joinClips(): decode, trim, join", say: "They are decoded, trimmed and joined instead of paying for the passage again.",
-                d: "The join itself is not cached: it is cheap to redo and much larger as PCM.", code: [SRC + "engine/providers.ts:436", SRC + "engine/audio.ts:241"] },
+                d: "The join itself is not cached: it is cheap to redo and much larger as PCM.", code: [SRC + "engine/providers.ts:436", "packages/practice/src/pcm.ts:232"] },
               { f: "PR", to: "EN", t: "ret", n: "Chunk {source: cache}, joined WAV" },
             ] },
             { g: "not on the device", rows: [
@@ -505,7 +505,7 @@ const SEQS = {
                 { f: "PR", to: "PR", t: "self", n: "alignWords()", say: "…and aligned to the text’s words. Only an exact count or a clean match is accepted; a failure never blocks playback.", code: [SRC + "engine/providers.ts:538"] },
               ] },
               { f: "PR", to: "PR", t: "self", n: "locateSentences(): starts · silences · loudness", say: "Pauses in the audio (or the word timings) locate each sentence’s start, so the highlight can follow inside one clip.",
-                d: "Lead/tail silence and RMS loudness are measured too, for joining clips smoothly.", code: [SRC + "engine/providers.ts:367", SRC + "engine/audio.ts:67"] },
+                d: "Lead/tail silence and RMS loudness are measured too, for joining clips smoothly.", code: [SRC + "engine/providers.ts:367", "packages/practice/src/pcm.ts:65"] },
               { f: "PR", to: "DB", t: "call", n: "toCache(clip + timings)", say: "Saved to IndexedDB for next time.", d: "Quota errors are ignored. Past 2000 clips, the oldest are evicted.", code: [SRC + "engine/providers.ts:320"] },
               { f: "DB", to: "PR", t: "ret", n: "saved" },
               { f: "PR", to: "EN", t: "ret", n: "Chunk {source: api, renderSeconds}", say: "Back to the engine with a fresh clip.",

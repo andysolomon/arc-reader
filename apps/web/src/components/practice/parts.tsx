@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, ChevronDown, ChevronLeft, Flame } from "lucide-react";
 import { IconButton, Popover, cn } from "@readaloud/ui";
-import { BANDS, bandInfo, type Band } from "../../lib/practice/bands";
+import { BANDS, bandInfo, type Band } from "@readaloud/practice/bands";
 import { MenuOption } from "../IconMenu";
 
 /** The page title with one chip on the right of the same row, and Back to Practice's start when `onBack` is given. */

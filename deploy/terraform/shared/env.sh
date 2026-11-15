@@ -13,3 +13,5 @@ done
 [ -z "${READALOUD_PUBLIC_URL:-}" ] || export TF_VAR_public_url=$READALOUD_PUBLIC_URL
 # ...and opens it to the internet through Tailscale Funnel on this port, behind READALOUD_ACCESS_TOKEN.
 [ -z "${READALOUD_FUNNEL_PORT:-}" ] || export TF_VAR_funnel_port=$READALOUD_FUNNEL_PORT
+# Cadence's own tailnet address (deploy/kind/terraform/app/cadence.tf).
+[ -z "${CADENCE_PUBLIC_URL:-}" ] || export TF_VAR_cadence_public_url=$CADENCE_PUBLIC_URL
