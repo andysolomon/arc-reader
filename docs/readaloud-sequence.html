@@ -203,7 +203,7 @@ const SRC = "apps/web/src/";
 /* Participants, left to right. */
 const P = {
   U: { n: "Listener", kind: "actor", d: "The person using the app: pastes, shares, presses play, picks voices." },
-  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:60", SRC + "routes/Compose.tsx:119", SRC + "routes/ReadNew.tsx:15"] },
+  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:60", SRC + "routes/Compose.tsx:121", SRC + "routes/ReadNew.tsx:15"] },
   PL: { n: "usePlayer", s: "state/player.ts", d: "The Zustand player store. It owns the single PlaybackEngine, resolves the voice, rewrites Patois, restores the saved place, and turns engine callbacks into UI state (speechError, offline, toasts).", code: [SRC + "state/player.ts:105", SRC + "state/player.ts:162"] },
   EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:102"] },
   PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:454", SRC + "engine/preparation.ts:245"] },
@@ -250,8 +250,8 @@ const SEQS = {
     ],
     rows: [
       { f: "U", to: "UI", t: "async", n: "paste text · press Listen", say: "The listener pastes an article on Compose and presses Listen.",
-        d: "Compose (the home route) takes pasted text, the clipboard, an uploaded .txt/.md file, the sample, or a web address. A share from another app opens /read/new?title=&text=&url= instead — the installed PWA is a Web Share Target.",
-        code: [SRC + "routes/Compose.tsx:119", SRC + "routes/Compose.tsx:76", SRC + "routes/ReadNew.tsx:15", "apps/web/vite.config.ts:61"] },
+        d: "Compose (the home route) takes pasted text, the clipboard, an uploaded file (.txt/.md text, a PDF, or a whole book as an EPUB or a plain-text file with chapters, shelved chapter by chapter in the browser by bookFile.ts), the sample, or a web address. A share from another app opens /read/new?title=&text=&url= instead — the installed PWA is a Web Share Target.",
+        code: [SRC + "routes/Compose.tsx:121", SRC + "routes/Compose.tsx:78", SRC + "routes/ReadNew.tsx:15", "apps/web/vite.config.ts:61"] },
       { op: "opt", id: "url", g: "a web address was entered or shared", rows: [
         { f: "UI", to: "SV", t: "call", n: "GET /api/fetch?url=…", say: "Most sites send no CORS headers, so the app server fetches the page for the browser.",
           d: "fetchReadable tries a direct fetch first, then the app server’s /api/fetch, then an optional reader proxy. Links to X posts are fetched from the FxTwitter API and turned into HTML on the server. A book on the Internet Archive is read from the item’s full-text file, found through the Archive’s metadata API, and arrives already cut into chapters. A PDF is left to the app server, which answers with a page made from the file’s text and draws a picture of each slide that shows more than words; a course page that links numbered PDF decks comes back as a book of lectures.",
