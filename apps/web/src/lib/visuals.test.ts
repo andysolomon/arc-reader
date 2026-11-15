@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { imageSource, visualBlock, visualKey, visualNarration, visualText, type ArticleVisual } from "./visuals";
+import { imageSource, interfaceVisual, visualBlock, visualKey, visualNarration, visualText, type ArticleVisual } from "./visuals";
 import { readingBlocks } from "./codeBlocks";
 import { segment, planPassages } from "./segment";
 const visual: ArticleVisual = { kind: "diagram", src: "https://example.com/chart.png", alt: "Flow chart", caption: "A request passes from the client through a server to a database." };
@@ -52,5 +52,18 @@ describe("visual narration", () => {
     for (const src of ["/api/slides/../library", `/api/slides/${"a".repeat(32)}/source.pdf`, "/api/llm/config"]) expect(imageSource(src)).toBe("");
     const elsewhere = readingBlocks(visualBlock({ ...slide, src: "https://example.com/slide.png" }))[0];
     expect(elsewhere).toMatchObject({ visual: { kind: "image", src: "https://example.com/slide.png" } });
+  });
+  it("drops icons an older import saved as diagrams, and keeps real ones", () => {
+    const svg = (markup: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
+    const paper = '<rect x="0" y="0" width="256" height="256" style="fill:#fff;stroke:none"/>';
+    const check: ArticleVisual = { kind: "diagram", src: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" class="hidden h-[18px] w-[18px]" data-icon="ph:check">${paper}<path d="M1"/></svg>`), alt: "", caption: "" };
+    const bare: ArticleVisual = { ...check, src: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">${paper}<path d="M1"/></svg>`) };
+    const labelled: ArticleVisual = { kind: "diagram", src: svg(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300" viewBox="0 0 600 300" role="img">${paper}<rect/><text>Client</text></svg>`), alt: "Request flow", caption: "" };
+    const badge: ArticleVisual = { kind: "image", src: "https://deploy.workers.cloudflare.com/button", alt: "Deploy to Cloudflare", caption: "" };
+    expect([check, bare, badge].map(interfaceVisual)).toEqual([true, true, true]);
+    expect(interfaceVisual(labelled)).toBe(false);
+    expect(interfaceVisual({ ...check, caption: "The check mark used across the dashboard." })).toBe(false);
+    const blocks = readingBlocks(["Before.", visualBlock(check), visualBlock(labelled), visualBlock(badge), "After."].join("\n\n"));
+    expect(blocks.map((b) => b.kind)).toEqual(["prose", "visual", "prose"]);
   });
 });

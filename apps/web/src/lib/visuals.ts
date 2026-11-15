@@ -26,6 +26,70 @@ export function imageSource(input: string, base?: string): string {
   } catch { return ""; }
 }
 
+/** A length the page set on a picture, in CSS pixels; an em is taken as 16 pixels. */
+export function cssPixels(value: string | null): number {
+  const match = value?.trim().match(/^(\d*\.?\d+)\s*(px|r?em)?$/i);
+  if (!match) return NaN;
+  return Number(match[1]) * (match[2] && /em/i.test(match[2]) ? 16 : 1);
+}
+
+const ICON_CLASS = /^(?:icons?|[\w-]+-icon|icon-[\w-]+|lucide(?:-[\w-]+)?|octicon(?:-[\w-]+)?|feather(?:-[\w-]+)?|svg-inline--fa|fa-[\w-]+|bi-[\w-]+|material-icons[\w-]*|heroicon[\w-]*|emoji)$/i;
+/** Hidden for good; `hidden dark:block` is a light or dark copy of a picture, and is kept. */
+const HIDDEN_CLASS = /^(?:hidden|invisible|sr-only)$/;
+const SHOWN_CLASS = /:(?:block|inline|inline-block|inline-flex|flex|grid|table|contents|visible|not-sr-only)$/;
+
+/** Tailwind's height and size classes: h-4 is 16 pixels, h-[18px] is 18. */
+function classHeight(token: string): number {
+  const match = token.match(/^(?:[\w-]+:)*(?:h|size)-(?:(\d*\.?\d+)|\[(\d*\.?\d+)(px|r?em)\])$/);
+  if (!match) return NaN;
+  return match[1] ? Number(match[1]) * 4 : cssPixels(`${match[2]}${match[3]}`);
+}
+
+/**
+ * Signs the page drew a control's symbol (copy, check, chevron) or something hidden, not a picture
+ * for the reader: an icon library's marks, icon or hidden classes, or a size of a line of text.
+ */
+export function iconLike(attr: (name: string) => string | null): boolean {
+  if (attr("data-icon") !== null || attr("hidden") !== null) return true;
+  if (/(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(attr("style") ?? "")) return true;
+  const classes = (attr("class") ?? "").split(/\s+/).filter(Boolean);
+  if (classes.some((token) => ICON_CLASS.test(token) || classHeight(token) <= 32)) return true;
+  if (classes.some((token) => HIDDEN_CLASS.test(token)) && !classes.some((token) => SHOWN_CLASS.test(token))) return true;
+  const width = cssPixels(attr("width"));
+  const height = cssPixels(attr("height"));
+  return width <= 32 && height <= 32;
+}
+
+const SHAPES = /<(?:path|rect|circle|ellipse|line|polyline|polygon|image)\b/gi;
+/** A diagram has words or several shapes; a symbol is a stroke or two. */
+export function substantialSvg(markup: string, paper = 0): boolean {
+  return /<text\b/i.test(markup) || (markup.match(SHAPES)?.length ?? 0) - paper >= 4;
+}
+
+/** Deploy buttons and README badges: a link's label drawn as a picture. */
+export const BADGE_SOURCE = /^https?:\/\/(?:img\.shields\.io|badgen\.net|badge\.fury\.io)\/|\/(?:deploy-?)?button(?:\.svg)?(?:[?#]|$)/i;
+
+/**
+ * Saved before icons were told apart from pictures: a control's symbol kept as a diagram, or a badge.
+ * Read from the picture the import kept, whose own width and height were replaced but whose marks were not.
+ */
+export function interfaceVisual(visual: ArticleVisual): boolean {
+  if (visual.caption.trim()) return false;
+  if (visual.kind === "image") return BADGE_SOURCE.test(visual.src);
+  if (visual.kind !== "diagram" || !/^data:image\/svg\+xml;charset=utf-8,/i.test(visual.src)) return false;
+  let markup: string;
+  try { markup = decodeURIComponent(visual.src.slice(visual.src.indexOf(",") + 1)); } catch { return false; }
+  const root = markup.match(/^<svg\b[^>]*>/i)?.[0];
+  if (!root) return false;
+  const attrs = new Map<string, string>();
+  for (const [, name, value] of root.matchAll(/\s([\w:-]+)\s*=\s*"([^"]*)"/g)) attrs.set(name.toLowerCase(), value);
+  // The import set width and height from the viewBox, so sizes say nothing here.
+  attrs.delete("width");
+  attrs.delete("height");
+  // The import put one paper rectangle behind every picture.
+  return iconLike((name) => attrs.get(name) ?? null) || (!visual.alt.trim() && !substantialSvg(markup, 1));
+}
+
 export function visualFrom(value: unknown): ArticleVisual | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Partial<ArticleVisual>;

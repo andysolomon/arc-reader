@@ -71,7 +71,7 @@
  "apps/web/src/engine/voicing.ts:44": "export function voicedShare(samples: Float32Array, sampleRate: number): number | undefined {",
  "apps/web/src/lib/appUpdate.ts:73": "export async function serverReturned(wanted: () => boolean, { every = 3000, patience = 10 * 60_000, probe = () => serverReachable(4000) } = {}): Promise<boolean> {",
  "apps/web/src/lib/codeBlocks.ts:13": "export function readingBlocks(source: string, baseUrl?: string): ReadingBlock[] {",
- "apps/web/src/lib/codeBlocks.ts:66": "export function safeCodeSummary(text: unknown): text is string {",
+ "apps/web/src/lib/codeBlocks.ts:68": "export function safeCodeSummary(text: unknown): text is string {",
  "apps/web/src/lib/codeSummaries.ts:41": "export async function prepareCodeSummaries(",
  "apps/web/src/lib/db.ts:61": "export interface DocRecord {",
  "apps/web/src/lib/db.ts:91": "export interface PositionRecord {",

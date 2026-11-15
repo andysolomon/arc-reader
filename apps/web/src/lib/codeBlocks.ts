@@ -1,4 +1,4 @@
-import { VISUAL_FENCE, visualFrom, markdownVisuals, type ArticleVisual } from "./visuals";
+import { VISUAL_FENCE, interfaceVisual, visualFrom, markdownVisuals, type ArticleVisual } from "./visuals";
 import { hash } from "./hash";
 
 export type ReadingBlock = { kind: "prose"; text: string } | { kind: "code"; text: string; language: string } | { kind: "visual"; text: string; visual: ArticleVisual };
@@ -32,6 +32,8 @@ export function readingBlocks(source: string, baseUrl?: string): ReadingBlock[] 
       if (fence[2].trim() === VISUAL_FENCE) {
         let visual: ArticleVisual | null = null;
         try { visual = visualFrom(JSON.parse(code.join("\n"))); } catch { /* Corrupt metadata is never spoken. */ }
+        // An icon saved by an older import is left out, not described.
+        if (visual && interfaceVisual(visual)) continue;
         blocks.push({ kind: "visual", text: "", visual: visual ?? { kind: "image", src: "", alt: "", caption: "" } });
         continue;
       }
