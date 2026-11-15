@@ -1,5 +1,6 @@
 import { VisualFigure } from "./VisualFigure";
-import { memo, useEffect, useRef, type MouseEvent } from "react";
+import { CodeBlock } from "./CodeBlock";
+import { memo, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Code2, ChevronDown } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { HighlightMode, ParagraphLike } from "../lib/types";
@@ -121,15 +122,7 @@ export const SentenceText = memo(function SentenceText({
               <span className="ml-auto text-[10px] tracking-[0.08em]">{p.code.summarized ? "Spoken summary" : "Skipped in audio"}</span>
             </div>
             <p className="m-0 px-5 py-5 text-[0.9em] leading-relaxed">{content}</p>
-            <details className="group border-t border-line">
-              <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3 text-[12px] text-fg2 hover:text-fg [&::-webkit-details-marker]:hidden">
-                <ChevronDown size={14} className="transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden />
-                View original code
-              </summary>
-              <pre className="m-0 max-h-96 overflow-auto border-t border-line bg-bg p-5 font-mono text-[12px] leading-6 [tab-size:2]" tabIndex={0} aria-label="Original code">
-                <code>{p.code.text}</code>
-              </pre>
-            </details>
+            <OriginalCode text={p.code.text} language={p.code.language} />
           </section>
         );
         if (p.heading) {
@@ -147,3 +140,17 @@ export const SentenceText = memo(function SentenceText({
     </article>
   );
 });
+
+/** The card's collapsible source; highlighting waits until it is first opened. */
+function OriginalCode({ text, language }: { text: string; language: string }): ReactNode {
+  const [opened, setOpened] = useState(false);
+  return (
+    <details className="group border-t border-line" onToggle={(e) => { if (e.currentTarget.open) setOpened(true); }}>
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3 text-[12px] text-fg2 hover:text-fg [&::-webkit-details-marker]:hidden">
+        <ChevronDown size={14} className="transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden />
+        View original code
+      </summary>
+      <CodeBlock text={text} language={language} visible={opened} className="border-t border-line bg-bg p-5" />
+    </details>
+  );
+}
