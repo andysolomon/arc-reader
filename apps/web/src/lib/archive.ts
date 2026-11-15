@@ -1,5 +1,5 @@
 import type { BookContents } from "./book";
-import { splitBook } from "./bookText";
+import { decodeText, splitBook } from "./bookText";
 import type { DocMeta } from "./db";
 import type { Fetched } from "./fetchUrl";
 import { hash } from "./hash";
@@ -98,15 +98,6 @@ async function get(url: string, signal?: AbortSignal): Promise<Response> {
   return r;
 }
 
-/** Scans are UTF-8; older transcriptions are Latin-1, which would otherwise lose every accent. */
-function decode(bytes: ArrayBuffer): string {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return new TextDecoder("windows-1252").decode(bytes);
-  }
-}
-
 /** The book as the app reads any page: its first chapter, with the others to be added from the offer. */
 export function archiveBook(id: string, metadata: Record<string, Field>, text: string): Fetched {
   const { title, meta } = catalogue(id, metadata);
@@ -137,7 +128,7 @@ export async function fetchArchiveBook(url: string, signal?: AbortSignal): Promi
   if (Number(file.size ?? 0) > MAX_BYTES) throw new ReadError(TOO_LARGE);
   try {
     const r = await get(`${API}/download/${encodeURIComponent(link.id)}/${file.name.split("/").map(encodeURIComponent).join("/")}`, signal);
-    return archiveBook(link.id, item.metadata, decode(await r.arrayBuffer()));
+    return archiveBook(link.id, item.metadata, decodeText(await r.arrayBuffer()));
   } catch (e) {
     // The Archive's storage servers fail now and then; the viewer's page would only import as clutter.
     if (e instanceof ReadError || signal?.aborted) throw e;
