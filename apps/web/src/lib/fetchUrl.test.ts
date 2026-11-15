@@ -51,6 +51,23 @@ describe("article images and diagrams", () => {
     expect(svg).not.toMatch(/onload|script|foreignObject/);
     expect(segment(result.text).sentences.map((s) => s.text).join(" ")).not.toMatch(/<svg|data:image|alert/);
   });
+  it("leaves out a code block's copy and check icons, hidden symbols and deploy badges", () => {
+    // Phosphor icons as Cloudflare's docs draw them: a 256 grid, sized 1em, the check hidden until copied.
+    const icon = (name: string, cls: string) => `<svg width="1em" height="1em" viewBox="0 0 256 256" class="${cls}" data-icon="ph:${name}"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56"/></svg>`;
+    const result = htmlToText(`<article><p>Run the agent.</p><div><pre><code>npm create cloudflare</code></pre>
+      <button aria-label="Copy">${icon("copy", "h-[18px] w-[18px]")}${icon("check", "hidden h-[18px] w-[18px]")}</button></div>
+      ${icon("check", "hidden")}<svg viewBox="0 0 512 512"><path d="M0 0h512"/></svg><svg viewBox="0 0 24 24" class="lucide lucide-copy" width="24" height="24"><rect/><path/></svg>
+      <a href="https://deploy.workers.cloudflare.com/?url=x"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"></a>
+      <img src="https://img.shields.io/npm/v/agents" alt="npm"><img src="https://example.com/smile.png" class="emoji" alt="smile"><p>Done.</p></article>`, "https://developers.cloudflare.com/agents/");
+    expect(segment(result.text).paragraphs.filter((p) => p.visual)).toHaveLength(0);
+  });
+  it("keeps an unlabelled inline diagram with words or several shapes, and both copies of a light and dark picture", () => {
+    const result = htmlToText(`<article><p>How it flows.</p>
+      <svg viewBox="0 0 600 300"><rect/><rect/><text>Client</text><text>Server</text></svg>
+      <svg viewBox="0 0 600 300"><rect/><circle/><line/><path/></svg>
+      <img src="/flow-light.png" class="dark:hidden" alt="Request flow"><img src="/flow-dark.png" class="hidden dark:block" alt="Request flow"><p>End.</p></article>`, "https://example.com/");
+    expect(segment(result.text).paragraphs.flatMap((p) => p.visual ? [p.visual.kind] : [])).toEqual(["diagram", "diagram", "image", "image"]);
+  });
   it("carries the page's colours, fonts and background into an inline SVG drawn with its CSS variables", () => {
     const css = `:root{--font-ui:Inter, sans-serif}
       .diagram{--dg-accent:#a8321b;--dg-ink:#16150f;--dg-paper:#fbfaf7}

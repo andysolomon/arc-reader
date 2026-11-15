@@ -1,4 +1,4 @@
-import { SLIDE_SOURCE, imageSource, type ArticleVisual } from "./visuals";
+import { BADGE_SOURCE, SLIDE_SOURCE, cssPixels, iconLike, imageSource, substantialSvg, type ArticleVisual } from "./visuals";
 import type { PageStyles } from "./svgStyles";
 
 function srcset(value: string): string {
@@ -49,16 +49,18 @@ export function svgImage(el: Element, styles?: PageStyles): string {
 
 export function articleVisual(el: Element, base: string, caption: string, styles?: PageStyles): ArticleVisual | null {
   if (el.getAttribute("role") === "presentation" || el.getAttribute("role") === "none") return null;
-  const width = Number(el.getAttribute("width"));
-  const height = Number(el.getAttribute("height"));
-  if (width > 0 && height > 0 && width <= 32 && height <= 32 && !caption) return null;
+  const width = cssPixels(el.getAttribute("width"));
+  const height = cssPixels(el.getAttribute("height"));
+  // A copy button's check mark or a hidden symbol: the page's controls, not what the article shows.
+  if (!caption && (iconLike((name) => el.getAttribute(name)) || el.closest("button"))) return null;
   if (el.tagName.toLowerCase() === "svg") {
     const alt = el.getAttribute("aria-label") || el.querySelector("title")?.textContent || "";
     const description = el.querySelector("desc")?.textContent || "";
-    // Tiny interface symbols usually have no meaningful description or figure.
+    // Icon sets draw on a large grid (Phosphor's is 256), so a viewBox alone does not make a picture.
     const dimensions = el.getAttribute("viewBox")?.trim().split(/[\s,]+/).map(Number);
     const large = (width > 64 && height > 64) || !!(dimensions && dimensions[2] > 64 && dimensions[3] > 64);
-    if (!caption && !alt && !description && !el.closest("figure") && el.getAttribute("role") !== "img" && !large) return null;
+    const pictured = large && substantialSvg(el.outerHTML);
+    if (!caption && !alt && !description && !el.closest("figure") && el.getAttribute("role") !== "img" && !pictured) return null;
     return { kind: "diagram", src: svgImage(el, styles), alt: alt.trim().slice(0, 1200), caption: (caption || description).trim().slice(0, 1600) };
   }
   const alt = el.getAttribute("alt") || el.getAttribute("aria-label") || el.getAttribute("title") || "";
@@ -69,5 +71,6 @@ export function articleVisual(el: Element, base: string, caption: string, styles
     srcset(picture?.querySelector("source")?.getAttribute("srcset") || ""), el.getAttribute("src")];
   const src = candidates.map((value) => value ? imageSource(value, base) : "").find(Boolean) || "";
   if (SLIDE_SOURCE.test(src)) return { kind: "slide", src, alt: alt.trim().slice(0, 1200), caption: "" };
+  if (!caption && BADGE_SOURCE.test(src)) return null;
   return { kind: /\b(?:diagram|chart|graph|flowchart)\b/i.test(`${alt} ${caption}`) ? "diagram" : "image", src, alt: alt.trim().slice(0, 1200), caption: caption.slice(0, 1600) };
 }
