@@ -68,6 +68,12 @@ describe("a scanned book's text", () => {
 });
 
 describe("headings a scan gets wrong", () => {
+  it("finds a heading Project Gutenberg set inside a picture's caption", () => {
+    const body = (about: string) => [para(`${about} a`), para(`${about} b`), para(`${about} c`), para(`${about} d`)].join("\n\n");
+    const text = ["[Illustration: ·THE FARMYARD·", "Chapter I.]", body("Major"), "[Illustration:", "Chapter II.]", body("Rebellion"), "Chapter III.", body("Harvest")].join("\n\n");
+    expect(splitBook(text).map((part) => part.title)).toEqual(["Chapter 1", "Chapter 2", "Chapter 3"]);
+  });
+
   it("reads a numeral that only fits the sequence once misread letters are undone", () => {
     const raw = ["CHAPTER X.", body("Ten"), "CHAPTER XL", body("Eleven"), "CHAPTER XIL", body("Twelve"), "CHAPTER XQ", body("Thirteen")].join("\n\n");
     expect(titles(raw)).toEqual(["Chapter 10", "Chapter 11", "Chapter 12", "Chapter 13"]);

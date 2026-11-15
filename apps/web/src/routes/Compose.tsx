@@ -13,7 +13,9 @@ import { toast } from "../state/toast";
 import { fetchReadable, hostOf, isWebAddress, looksLikeUrl, normalizeUrl, readPdfFile } from "../lib/fetchUrl";
 import { EXPLAIN_MS, ReadError } from "../lib/readError";
 import { openDocument } from "../lib/openDoc";
-import { importPage, isContentsPage } from "../state/books";
+import { finished, importPage, isContentsPage, nextUnread, shelves, useBooks } from "../state/books";
+import { isBookFile, readBookFile } from "../lib/bookFile";
+import type { Fetched } from "../lib/fetchUrl";
 import { SPEED_STEPS } from "@readaloud/ui";
 import { useClipboardImport } from "../hooks/useClipboardImport";
 import { useIsTouch } from "../hooks/useMedia";
@@ -184,9 +186,51 @@ export function Compose() {
     }
   };
 
+  /** A whole book goes into the Library at once, every chapter, and opens at its first. */
+  const shelveBook = async (f: Fetched) => {
+    const book = f.book!;
+    let opened = false;
+    const { added } = await useBooks.getState().add(book, {
+      async onFirst(first) {
+        opened = true;
+        await openDocument(first, navigate, { autoplay: true, resume: false });
+      },
+    });
+    if (added || opened) return;
+    // Already shelved: pick it up where it was left.
+    await useLibrary.getState().refresh();
+    const shelf = shelves(useLibrary.getState().items).get(book.id);
+    if (!shelf) return;
+    const next = nextUnread(shelf);
+    await openDocument(next.rec, navigate, { autoplay: true, resume: !finished(next) });
+  };
+
+  /** An EPUB, or a text file with chapters, becomes a book; any other text file opens in the text box. */
+  const readBook = async (file: File) => {
+    if (busy) return;
+    setBusy("fetch");
+    toast(`Reading ${file.name}…`);
+    try {
+      const f = await readBookFile(file);
+      if (f?.book) return await shelveBook(f);
+      if (f) {
+        const rec = await create({ text: f.text, title: f.title, source: "file", domain: f.domain, meta: f.meta });
+        return await openDocument(rec, navigate, { autoplay: true, resume: false });
+      }
+      setText(await file.text());
+      setTitle(file.name.replace(/\.txt$/i, ""));
+      openText();
+    } catch (e) {
+      toast(e instanceof ReadError ? e.message : `Couldn't read ${file.name}`, EXPLAIN_MS);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const onFile = (file: File | undefined) => {
     if (!file) return;
     if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) return void readPdf(file);
+    if (isBookFile(file)) return void readBook(file);
     const r = new FileReader();
     r.onload = () => {
       setText(String(r.result ?? ""));
@@ -257,7 +301,7 @@ export function Compose() {
               <Upload size={16} strokeWidth={1.5} aria-hidden />
             </span>
             Upload file
-            <input type="file" accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf" onChange={(e) => onFile(e.target.files?.[0])} className="sr-only" />
+            <input type="file" accept=".txt,.md,.markdown,.pdf,.epub,text/plain,text/markdown,application/pdf,application/epub+zip" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ""; }} className="sr-only" />
           </label>
           <Button
             leading={<AlignLeft size={16} strokeWidth={1.5} />}

@@ -91,7 +91,7 @@ export const useBooks = create<BooksState>()((set, get) => ({
           const loose = chapter.text === undefined ? byPage.get(pageKey(chapter.url)) : undefined;
           if (loose) rec = await useLibrary.getState().update(loose.id, { book: place, title: chapter.title });
           else if (chapter.text !== undefined) {
-            rec = await useLibrary.getState().create({ text: chapter.text, title: chapter.title, source: "url", domain: hostOf(chapter.url), meta: book.meta ?? { url: chapter.url }, book: place, batch: true });
+            rec = await useLibrary.getState().create({ text: chapter.text, title: chapter.title, source: book.file ? "file" : "url", domain: book.file ?? hostOf(chapter.url), meta: book.meta ?? { url: chapter.url }, book: place, batch: true });
             batch.push(rec);
           } else {
             const page = await fetchReadable(chapter.url);

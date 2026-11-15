@@ -27,6 +27,8 @@ export interface BookContents {
   contents?: string;
   /** Catalogue details for chapters that come with their text */
   meta?: DocMeta;
+  /** The file the book was chosen as, when it came from the device rather than a link */
+  file?: string;
 }
 
 /** What a book's parts are called. */

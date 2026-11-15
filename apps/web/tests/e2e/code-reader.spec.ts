@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "./fixtures";
 import { composeText } from "./helpers";
 
-const source = 'A useful example.\n\n```javascript\nconst active = users.filter(user => user.active);\nconsole.log(active);\n```\n\nThe article continues here.';
+const source = 'A useful example.\n\n```javascript\nconst active = users.filter(user => user.active);\nconsole.log(active);\nconst report = active.map((user) => `${user.firstName} ${user.lastName} <${user.email}> joined ${user.joinedAt.toLocaleDateString()}`).join("\\n");\n```\n\nThe article continues here.';
 const explanation = "This example selects active users and prints the resulting list.";
 
 for (const width of [390, 1440]) {
@@ -34,6 +34,9 @@ for (const width of [390, 1440]) {
     await card.getByText("View original code").click();
     await expect(card.locator("pre")).toBeVisible();
     await expect(card.locator("pre")).toContainText("console.log(active);");
+    // Highlighted, and long lines wrap instead of scrolling sideways.
+    await expect(card.locator("pre .hljs-keyword").first()).toBeVisible();
+    expect(await card.locator("pre").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     expect(spoken.join(" ")).not.toMatch(/console|const active|users\.filter/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const violations = (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations;

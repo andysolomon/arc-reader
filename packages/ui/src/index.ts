@@ -25,6 +25,7 @@ export * from "./components/PlayerControls";
 export * from "./components/PlayerPill";
 export * from "./components/PlayerBar";
 export * from "./components/SentenceText";
+export * from "./components/CodeBlock";
 export * from "./components/Dialog";
 export * from "./components/Sheet";
 export * from "./components/Toast";
