@@ -10,6 +10,15 @@ export interface BookPart {
   text: string;
 }
 
+/** UTF-8 when it is valid UTF-8; older transcriptions are Latin-1, which would otherwise lose every accent. */
+export function decodeText(bytes: ArrayBuffer | Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, "");
+  } catch {
+    return new TextDecoder("windows-1252").decode(bytes);
+  }
+}
+
 /** About 25 minutes of listening: the size of a part when a book's chapters can't be told apart */
 const PART_CHARS = 24_000;
 /** A heading with less text than this under it is still the contents list, not yet the book */
@@ -104,7 +113,8 @@ function headingOf(lines: string[]): { heading: Heading; rest: string[] } | null
   if (!token && !(shout && !m[2])) return null;
   // Capitals mark a heading by themselves; "Part I liked best" needs a numeral that is exact.
   if (token && !shout && !/^\d+$/.test(token) && !wordNumber(token) && roman(token) === null) return null;
-  const after = m[2].slice(token.length).replace(/^[\s.,:;—–-]+/, "");
+  // Project Gutenberg sets some headings inside a picture's caption: "[Illustration: … Chapter I.]"
+  const after = m[2].slice(token.length).replace(/^[\s.,:;—–-]+/, "").replace(/^\]$/, "");
   if (after.length > 80 || /^\p{Ll}/u.test(after)) return null;
   // A contents entry ends with its page number.
   const heading: Heading = { kind: m[1].toLowerCase().replace(/^chap$/, "chapter"), token, n: null, title: titled(after.replace(/[\s.…·]+\d{1,3}$/, "")) };
