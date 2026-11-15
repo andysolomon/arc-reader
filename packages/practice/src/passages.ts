@@ -1,5 +1,5 @@
-import { PRACTICE_PASSAGES } from "../../data/practicePassages";
-import { nprReadingScript } from "../readingScript";
+import { PRACTICE_PASSAGES } from "./practicePassages";
+import { nprReadingScript } from "./readingScript";
 import { bandInfo, type Band } from "./bands";
 import { fits, screenPassage } from "./screen";
 

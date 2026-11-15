@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { analyzePcm, encodeWav, joinPcm, proportionalStarts } from "./audio";
+import { analyzePcm, encodeWav, joinPcm, proportionalStarts } from "./pcm";
 
 const RATE = 16_000;
 /** Tone and silence segments in seconds → mono PCM. */

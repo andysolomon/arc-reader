@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_READER, EMPTY, addReader, applyRound, applyWordAttempt, currentStreak, mastered, readerList, removeReader, switchTo, toGo } from "./practice";
+import { DEFAULT_READER, EMPTY, addReader, applyRound, applyWordAttempt, currentStreak, mastered, readerList, removeReader, switchTo, toGo } from "./store";
 
 const at = (day: string) => new Date(`${day}T12:00:00`).getTime();
 const round = (missed: string[] = [], clean: string[] = []) => ({ passageId: "p", accuracy: 95, wcpm: 140, phrasing: 3, points: 60, missed, clean });

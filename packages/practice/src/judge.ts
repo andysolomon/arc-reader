@@ -1,5 +1,5 @@
-import { studioUrl, errorMessage } from "../studio";
-import { withSpeechAuth } from "../speechServer";
+import { errorMessage } from "./errorMessage";
+import { practiceHost } from "./host";
 import type { PreparedTake } from "./audio";
 import { alignTranscript } from "./align";
 import { hearReading, hearWord, looksDropped, OFF_SCRIPT, type Hearing, type WordResult } from "./hear";
@@ -81,7 +81,7 @@ export class JudgeNotConfigured extends Error {}
 
 /** POST a request to /api/decide and return its parsed answers. */
 export async function askJudge(request: unknown, signal?: AbortSignal): Promise<{ answers?: Record<string, Answer> }> {
-  const response = await fetch("/api/decide/v1/systemone", {
+  const response = await fetch(`${practiceHost().api}/decide/v1/systemone`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -114,12 +114,12 @@ export interface Transcript {
  * clean-up, so the words are the reader's. A busy server is waited for `retries` times.
  */
 export async function transcribeAudio(wav: Blob, mode: "fast" | "accurate", signal?: AbortSignal, retries = BUSY_RETRIES): Promise<Transcript> {
-  const url = studioUrl("/transcribe");
   for (let attempt = 0; ; attempt++) {
     const body = new FormData();
     body.set("audio", new File([wav], "reading.wav", { type: "audio/wav" }));
     body.set("mode", mode);
-    const response = await fetch(url, withSpeechAuth(url, { method: "POST", body, signal })).catch((error: unknown) => {
+    const request = practiceHost().speechRequest("/transcribe", { method: "POST", body, signal });
+    const response = await fetch(request.url, request.init).catch((error: unknown) => {
       if (signal?.aborted) throw error;
       throw new Error("Couldn't reach the speech server to check the reading. Please try again.");
     });

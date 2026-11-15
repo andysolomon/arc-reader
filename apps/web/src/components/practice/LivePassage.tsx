@@ -1,7 +1,7 @@
 import { Fragment, useMemo } from "react";
 import { cn } from "@readaloud/ui";
-import type { LiveState } from "../../lib/practice/live";
-import { tokens } from "../../lib/practice/words";
+import type { LiveState } from "@readaloud/practice/live";
+import { tokens } from "@readaloud/practice/words";
 import { MARK } from "./verdicts";
 
 /**

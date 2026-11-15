@@ -4,10 +4,7 @@
  "apps/web/src/App.tsx:60": "return (",
  "apps/web/src/components/ArticleSummary.tsx:27": "<Button leading={<Play size={14} strokeWidth={1.5} />} onClick={() => void usePlayer.getState().open(record, { summary: true, autoplay: true })}>",
  "apps/web/src/data/voices.ts:147": "export const DEFAULT_VOICE_ID = PHONON_PREFIX + \"Easton\";",
- "apps/web/src/engine/audio.ts:43": "export function proportionalStarts(duration: number, partWords: number[], lead = 0, tail = 0): number[] {",
- "apps/web/src/engine/audio.ts:67": "export function analyzePcm(samples: Float32Array, sampleRate: number, partWords: number[]): ClipAnalysis {",
- "apps/web/src/engine/audio.ts:169": "export async function clipVoicedShare(blob: Blob): Promise<number | undefined> {",
- "apps/web/src/engine/audio.ts:241": "export async function joinClips(blobs: Blob[]): Promise<JoinedClip | null> {",
+ "apps/web/src/engine/audio.ts:8": "export async function clipVoicedShare(blob: Blob): Promise<number | undefined> {",
  "apps/web/src/engine/engine.ts:96": "*   each clip carries its sentence starts, and crossing one advances the index without",
  "apps/web/src/engine/engine.ts:102": "export class PlaybackEngine {",
  "apps/web/src/engine/engine.ts:168": "load(doc: EngineDoc, index = 0, offset = 0) {",
@@ -223,5 +220,8 @@
  "compose.yaml:66": "VOICESTUDIO_SECONDARY_URL: ${VOICESTUDIO_SECONDARY_REMOTE_URL:-${VOICESTUDIO_REMOTE_URL:+http://voicestudio:3900}}",
  "compose.yaml:76": "PREPARATION_DATA_DIR: /app/preparations",
  "compose.yaml:77": "PREPARATION_YIELD_MS: ${PREPARATION_YIELD_MS:-}",
- "compose.yaml:78": "LIBRARY_DATA_DIR: /app/library"
+ "compose.yaml:78": "LIBRARY_DATA_DIR: /app/library",
+ "packages/practice/src/pcm.ts:41": "export function proportionalStarts(duration: number, partWords: number[], lead = 0, tail = 0): number[] {",
+ "packages/practice/src/pcm.ts:65": "export function analyzePcm(samples: Float32Array, sampleRate: number, partWords: number[]): ClipAnalysis {",
+ "packages/practice/src/pcm.ts:232": "export async function joinClips(blobs: Blob[]): Promise<JoinedClip | null> {"
 }

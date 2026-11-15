@@ -1,5 +1,5 @@
-import { JEV_MODEL } from "../category";
 import { BANDS, type Band } from "./bands";
+import { practiceHost } from "./host";
 
 /**
  * Jev reads an NPR passage before anyone is asked to read it aloud: which level it suits, and
@@ -7,6 +7,8 @@ import { BANDS, type Band } from "./bands";
  */
 export const LEVEL_SURE = 0.7;
 export const UNSUITABLE_MAX = 0.3;
+/** The same model ReadAloud sorts its library with (JEV_MODEL in apps/web/src/lib/category.ts). */
+export const JEV_MODEL = "jev-latest";
 const CACHE = "readaloud:practice-screening";
 const CACHE_LIMIT = 200;
 
@@ -60,7 +62,7 @@ export async function screenPassage(passage: string, signal?: AbortSignal): Prom
   const key = hash(passage);
   const cached = readCache()[key];
   if (cached) return cached;
-  const response = await fetch("/api/jev/v1/systemone", {
+  const response = await fetch(`${practiceHost().api}/jev/v1/systemone`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(screeningRequest(passage)),

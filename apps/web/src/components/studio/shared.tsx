@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, VoiceAvatar } from "@readaloud/ui";
 import { useVoices } from "../../state/voices";
-import { useMicRecorder } from "../../hooks/useMicRecorder";
+import { useMicRecorder } from "@readaloud/practice/useMicRecorder";
 
 export const fieldClass = "w-full rounded-control border border-line bg-bg px-3 py-2.5 text-fg";
 export const panelClass = "rounded-panel border border-line bg-bg2 p-5 sm:p-6";

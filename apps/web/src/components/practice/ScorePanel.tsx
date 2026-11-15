@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
-import { EXPRESSION, PACE, PHRASING, type Judgement } from "../../lib/practice/judge";
-import type { Score } from "../../lib/practice/score";
+import { EXPRESSION, PACE, PHRASING, type Judgement } from "@readaloud/practice/judge";
+import type { Score } from "@readaloud/practice/score";
 import { Meter, PaceDots } from "./parts";
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);

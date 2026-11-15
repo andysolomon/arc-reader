@@ -1,0 +1,27 @@
+{
+  "name": "@readaloud/practice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "echo 'practice: nothing to build (source consumed directly)'",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zustand": "^5.0.16"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "jsdom": "^26.0.0",
+    "react": "^18.3.1",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.0"
+  }
+}

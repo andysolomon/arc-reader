@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run Terraform for one stage of the kind deployment, with the shared state and the root .env.
 #   deploy/kind/terraform.sh cluster plan
-#   deploy/kind/terraform.sh app plan     # web_image defaults to the image running now
+#   deploy/kind/terraform.sh app plan     # the images default to the ones running now
 # deploy.sh uses it too. State and providers live outside the repository, so every
 # checkout manages the same cluster.
 set -euo pipefail
@@ -34,6 +34,11 @@ if [ "$stage" = app ]; then
     running=$(kubectl --context kind-readaloud -n readaloud get deployment web \
       -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
     [ -z "$running" ] || export TF_VAR_web_image=$running
+  fi
+  if [ -z "${TF_VAR_cadence_image:-}" ]; then
+    running=$(kubectl --context kind-readaloud -n cadence get deployment web \
+      -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
+    [ -z "$running" ] || export TF_VAR_cadence_image=$running
   fi
 fi
 

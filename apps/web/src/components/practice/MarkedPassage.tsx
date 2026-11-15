@@ -1,7 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Popover, cn } from "@readaloud/ui";
-import type { WordResult } from "../../lib/practice/judge";
-import { sentenceAround } from "../../lib/practice/wordInfo";
+import type { WordResult } from "@readaloud/practice/judge";
+import { sentenceAround } from "@readaloud/practice/wordInfo";
 import { MARK, isMarked, markLine, openTint } from "./verdicts";
 import { WordPractice } from "./WordPractice";
 

@@ -14,6 +14,7 @@ COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 # pnpm-workspace.yaml names these, so the install fails without them.
 COPY --chown=node:node patches patches/
 COPY --chown=node:node apps/web/package.json apps/web/
+COPY --chown=node:node packages/practice/package.json packages/practice/
 COPY --chown=node:node packages/tokens/package.json packages/tokens/
 COPY --chown=node:node packages/ui/package.json packages/ui/
 RUN pnpm install --frozen-lockfile --filter @readaloud/web...

@@ -1,4 +1,4 @@
-import { analyzePcm, decodeMono, encodeWav } from "../../engine/audio";
+import { analyzePcm, decodeMono, encodeWav } from "./pcm";
 import type { AudioInput } from "./judge";
 
 /** Plenty for speech, and a 30-second reading stays under a megabyte. */

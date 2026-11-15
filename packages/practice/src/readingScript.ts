@@ -3,6 +3,7 @@
  * from a current NPR story, long enough for 10–20 seconds of speech. NPR's text-only site
  * (text.npr.org) is plain HTML with no scripts, so the app's /api/fetch route can read it.
  */
+import { practiceHost } from "./host";
 
 export interface ReadingScript {
   text: string;
@@ -109,7 +110,7 @@ export function scriptFromStory(html: string, id: string, random = Math.random, 
 }
 
 async function page(url: string, signal?: AbortSignal): Promise<string> {
-  const r = await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal });
+  const r = await fetch(`${practiceHost().api}/fetch?url=${encodeURIComponent(url)}`, { signal });
   if (!r.ok) throw new Error(`NPR returned ${r.status}`);
   return r.text();
 }

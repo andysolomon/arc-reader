@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@readaloud/ui";
-import { nprReadingScript, type ReadingScript } from "../../lib/readingScript";
+import { nprReadingScript, type ReadingScript } from "@readaloud/practice/readingScript";
 
 /**
  * Something to read while recording: a short passage from a current NPR story, with a button

@@ -9,6 +9,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @readaloud/web test:e2e",
+    "cadence": "pnpm --filter @readaloud/cadence dev",
+    "test:e2e:cadence": "pnpm --filter @readaloud/cadence test:e2e",
     "storybook": "pnpm --filter @readaloud/ui storybook",
     "contrast": "pnpm --filter @readaloud/tokens contrast",
     "ios:sync": "pnpm --filter @readaloud/web ios:sync",
