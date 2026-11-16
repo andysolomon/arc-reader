@@ -49,7 +49,9 @@ test("enters the TypeSafe key in Settings", async ({ page }) => {
   await expect(page.getByText("Set on the server (TYPESAFE_API_KEY) · ends in -key")).toBeVisible();
   await page.getByRole("button", { name: "Replace TypeSafe key" }).click();
   const field = page.getByLabel("TypeSafe API key");
+  // Practice's Gemini key field has a Save button of its own while that key is unset.
+  const save = page.locator("form").filter({ has: field }).getByRole("button", { name: "Save" });
   await field.fill("wrong-key");
-  await page.getByRole("button", { name: "Save" }).click();
+  await save.click();
   await expect(page.getByRole("alert")).toContainText("TypeSafe didn't accept that key");
 });
