@@ -5,7 +5,7 @@ import { PageStyles } from "./svgStyles";
 import type { DocMeta } from "./db";
 
 import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
-import { bookContents, type BookContents } from "./book";
+import { bookContents, breadcrumbParent, openedAt, type BookContents } from "./book";
 import { fetchArchiveBook } from "./archive";
 import { ReadError } from "./readError";
 
@@ -20,6 +20,8 @@ export interface Fetched {
   links: DocLink[];
   /** The book this page is a chapter of, or the contents page for */
   book?: BookContents;
+  /** The page the breadcrumbs put this one under, which may list it as a chapter when it lists nothing itself */
+  partOf?: string;
 }
 
 const PROXY = import.meta.env.VITE_FETCH_PROXY as string | undefined;
@@ -166,6 +168,7 @@ export function htmlToText(html: string, url: string, sheets: ReadonlyMap<string
   const styles = doc.querySelector("svg") ? new PageStyles(pageCss(doc, url, sheets)) : undefined;
   // The chapter list usually sits in the navigation, which is dropped next.
   const book = bookContents(doc, url);
+  const partOf = book ? null : breadcrumbParent(doc, url);
   doc.querySelectorAll("script,noscript,nav,footer,header,aside,form,iframe,[aria-hidden='true']").forEach((n) => {
     if (n.tagName !== "ASIDE" || !isCallout(n)) n.remove();
   });
@@ -236,7 +239,7 @@ export function htmlToText(html: string, url: string, sheets: ReadonlyMap<string
     const href = absoluteUrl(a.getAttribute("href") ?? "", base);
     return href ? [{ url: href, text: a.textContent ?? "" }] : [];
   });
-  return { title, text, domain: hostOf(url), meta, links: uniqueLinks(links), ...(book ? { book } : {}) };
+  return { title, text, domain: hostOf(url), meta, links: uniqueLinks(links), ...(book ? { book } : partOf ? { partOf } : {}) };
 }
 
 export function markdownToText(md: string, base?: string): string {
@@ -322,6 +325,46 @@ export async function readPdfFile(file: File, signal?: AbortSignal): Promise<Fet
   return { ...htmlToText(await r.text(), ""), domain: file.name };
 }
 
+const PARENT_TIMEOUT_MS = 8000;
+
+async function pageHtml(url: string, signal: AbortSignal): Promise<string> {
+  const read = async (r: Response) => {
+    if (!r.ok || !/html/i.test(r.headers.get("content-type") ?? "")) throw new Error(`HTTP ${r.status}`);
+    return r.text();
+  };
+  try {
+    return await read(await fetch(url, { signal, mode: "cors" }));
+  } catch (e) {
+    if (signal.aborted) throw e;
+  }
+  return read(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }));
+}
+
+/**
+ * A page that names the page above it but lists no chapters of its own is looked up on that
+ * page: a track's notes link only back to the track, which lists them all in order.
+ */
+async function withParentBook(page: Fetched, signal?: AbortSignal): Promise<Fetched> {
+  const { partOf, ...rest } = page;
+  if (!partOf || page.book) return rest;
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), PARENT_TIMEOUT_MS);
+  const abort = () => stop.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    const doc = new DOMParser().parseFromString(await pageHtml(partOf, stop.signal), "text/html");
+    const contents = bookContents(doc, partOf);
+    const book = contents && contents.index === null ? openedAt(contents, page.meta.url ?? "") : null;
+    return book ? { ...rest, book } : rest;
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    return rest;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
 /**
  * Direct fetch (works for CORS-enabled pages), then the dev/preview server's /api/fetch, then VITE_FETCH_PROXY.
  * A book on the Internet Archive is read from its files instead of its page. Throws a ReadError
@@ -338,12 +381,12 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
     if (e instanceof ReadError || signal?.aborted) throw e;
   }
   try {
-    return await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain, signal);
+    return await withParentBook(await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain, signal), signal);
   } catch (e) {
     if (signal?.aborted) throw e;
   }
   try {
-    return await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain, signal);
+    return await withParentBook(await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain, signal), signal);
   } catch (e) {
     if (!PROXY || signal?.aborted) throw e;
   }

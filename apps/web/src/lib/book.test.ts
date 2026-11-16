@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { bookContents, pageKey } from "./book";
-import { htmlToText } from "./fetchUrl";
+import { fetchReadable, htmlToText } from "./fetchUrl";
 
 const SITE = "https://book.example";
 const CHAPTERS = [["01-http", "HTTP & CORS"], ["02-routing", "Routing"], ["03-databases", "Databases"], ["04-caching", "Caching"]];
@@ -118,5 +118,62 @@ describe("finding a course's lectures", () => {
     expect(course(`<a href="lecture1.pdf">One</a><a href="lecture2.pdf">Two</a>`)).toBeNull();
     // Numbers too far apart are years or sizes, not a series.
     expect(course(`<a href="lecture1.pdf">a</a><a href="lecture40.pdf">b</a><a href="lecture90.pdf">c</a>`)).toBeNull();
+  });
+});
+
+describe("finding a track's notes", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const STUDY = "https://study.example";
+  const TRACK = `${STUDY}/tracks/computer-networks`;
+  const NOTES = [["what-is-computer-networking", "What is Computer Networking?"], ["osi-model", "OSI Model"], ["tcp-ip-model", "TCP/IP Model"], ["subnet-mask", "Subnet Mask"]];
+  const crumbs = (...trail: [string, string][]) => `<script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@type": "BreadcrumbList",
+    itemListElement: trail.map(([name, item], i) => ({ "@type": "ListItem", position: i + 1, name, item })) })}</script>`;
+  const trackTrail: [string, string][] = [["Home", `${STUDY}/`], ["Library", `${STUDY}/library`], ["Computer Networks", TRACK]];
+  const trackPage = `<title>Computer Networks notes | StudyAtlas</title><meta property="og:site_name" content="StudyAtlas">
+    <link rel="canonical" href="${TRACK}">${crumbs(...trackTrail)}
+    <main><nav><a href="/library">← Library</a></nav><h1>Computer Networks</h1><p>Networking concepts every backend developer should be able to explain.</p>
+    <ul>${NOTES.map(([slug, title]) => `<li><a href="/notes/${slug}">${title}</a> — What ${title} is about.</li>`).join("")}</ul></main>`;
+  const notePage = (i: number) => `<title>${NOTES[i][1]} | StudyAtlas</title><meta property="og:type" content="article">
+    <script type="application/ld+json">${JSON.stringify([{ "@type": "Article", headline: NOTES[i][1] }, JSON.parse(crumbs(...trackTrail, [NOTES[i][1], `${STUDY}/notes/${NOTES[i][0]}`]).replace(/<\/?script[^>]*>/g, ""))])}</script>
+    <main><nav><a href="/library">← Library</a> · Computer Networks</nav><article><h1>${NOTES[i][1]}</h1><p>The body of the note, long enough to be worth reading aloud.</p></article></main>`;
+
+  it("reads an unnumbered list of notes off a page that sits in the breadcrumbs and is little else", () => {
+    const book = bookContents(parse(trackPage), TRACK);
+    expect(book).toMatchObject({ title: "Computer Networks", index: null, contents: TRACK });
+    expect(book!.chapters).toEqual(NOTES.map(([slug, title]) => ({ url: `${STUDY}/notes/${slug}`, title })));
+  });
+
+  it("finds a note's track on the page its breadcrumbs put it under, and opens the book at the note", async () => {
+    const note = `${STUDY}/notes/${NOTES[1][0]}`;
+    const fetched = vi.fn(async (input: string) => {
+      const page = input === note ? notePage(1) : input === TRACK ? trackPage : null;
+      return page ? new Response(page, { headers: { "content-type": "text/html" } }) : new Response("nope", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetched);
+    const result = await fetchReadable(note);
+    expect(fetched.mock.calls.map(([input]) => input)).toEqual([note, TRACK]);
+    expect(result.book).toMatchObject({ id: bookContents(parse(trackPage), TRACK)!.id, title: "Computer Networks", index: 1, contents: TRACK });
+    expect(result).not.toHaveProperty("partOf");
+  });
+
+  it("reads a note as an article when the page above it lists no track", async () => {
+    const note = `${STUDY}/notes/${NOTES[0][0]}`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => input === note
+      ? new Response(notePage(0), { headers: { "content-type": "text/html" } })
+      : new Response("<title>Library</title><main><h1>Library</h1><p>Browse everything.</p></main>", { headers: { "content-type": "text/html" } })));
+    const result = await fetchReadable(note);
+    expect(result.book).toBeUndefined();
+    expect(result.text).toContain("The body of the note");
+  });
+
+  it("leaves lists that are not tracks alone", () => {
+    // Without breadcrumbs ending on the page, an unnumbered list is just a list.
+    expect(bookContents(parse(trackPage.replace(/<script[\s\S]*?<\/script>/, "")), TRACK)).toBeNull();
+    // An archive of dated posts.
+    const archive = trackPage.replace(/<\/a> —/g, "</a> <time datetime=\"2026-01-02\">2 Jan</time> —");
+    expect(bookContents(parse(archive), TRACK)).toBeNull();
+    // An article that happens to hold a list of links among plenty of others.
+    const article = trackPage.replace("<ul>", `<p>${[1, 2, 3, 4, 5].map((n) => `<a href="/elsewhere/${n}">see ${n}</a>`).join(" ")}</p><ul>`);
+    expect(bookContents(parse(article), TRACK)).toBeNull();
   });
 });

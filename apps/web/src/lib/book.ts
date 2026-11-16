@@ -259,6 +259,109 @@ function pdfSeries(doc: Document, page: URL, base: URL): BookContents | null {
   };
 }
 
+interface Crumb { key: string; url: string }
+
+/** The trail of pages a page says it sits under, in schema.org BreadcrumbList data: home first, the page itself last. */
+function breadcrumbs(doc: Document, page: URL): Crumb[] {
+  for (const script of Array.from(doc.querySelectorAll('script[type="application/ld+json"]'))) {
+    let data: unknown;
+    try { data = JSON.parse(script.textContent ?? ""); } catch { continue; }
+    const nodes = (Array.isArray(data) ? data : [data]).flatMap((node) => node?.["@graph"] ?? [node]) as Record<string, unknown>[];
+    const list = nodes.find((node) => node && ([] as unknown[]).concat(node["@type"]).includes("BreadcrumbList"));
+    if (!list || !Array.isArray(list.itemListElement)) continue;
+    const items = (list.itemListElement as Record<string, unknown>[])
+      .filter((item) => item && typeof item === "object")
+      .sort((a, b) => Number(a.position ?? 0) - Number(b.position ?? 0));
+    const trail: Crumb[] = [];
+    for (const item of items) {
+      const at = item.item;
+      const href = typeof at === "string" ? at : at && typeof at === "object" ? (at as Record<string, unknown>)["@id"] ?? (at as Record<string, unknown>).url : item.url;
+      if (typeof href !== "string") return [];
+      try {
+        const url = new URL(href, page);
+        if (url.origin !== page.origin) return [];
+        trail.push({ key: pageKey(url.href), url: url.href });
+      } catch { return []; }
+    }
+    return trail;
+  }
+  return [];
+}
+
+/** The page the breadcrumbs end on is this one: by its address, or the address it declares as its own. */
+function endsHere(trail: Crumb[], doc: Document, page: URL): boolean {
+  const last = trail[trail.length - 1]?.key;
+  if (!last) return false;
+  const canonical = doc.querySelector('link[rel~="canonical"][href]')?.getAttribute("href");
+  let declared = "";
+  try { declared = canonical ? pageKey(new URL(canonical, page).href) : ""; } catch { /* No declared address. */ }
+  return last === pageKey(page.href) || last === declared;
+}
+
+const OUTSIDE = "nav,header,footer,aside,[role='navigation']";
+
+/**
+ * A track: a page that sits in its site's breadcrumbs and is little more than a heading and one
+ * list of the pages it is made of, in order, with no numbers on them. Its pages may live anywhere
+ * on the site. A list of dated posts is an archive, not a track.
+ */
+function trackContents(doc: Document, page: URL, base: URL): BookContents | null {
+  const trail = breadcrumbs(doc, page);
+  if (trail.length < 2 || !endsHere(trail, doc, page)) return null;
+  const above = new Set(trail.map((crumb) => crumb.key));
+  const root = doc.querySelector("main") ?? doc.querySelector('[role="main"]') ?? doc.querySelector("article") ?? doc.body;
+  const target = (a: Element): string | null => {
+    try {
+      const url = new URL(a.getAttribute("href") ?? "", base);
+      return url.origin === page.origin && /^https?:$/.test(url.protocol) && !url.hash && !above.has(pageKey(url.href)) ? url.href : null;
+    } catch { return null; }
+  };
+  const pageLinks = Array.from(root.querySelectorAll("a[href]")).filter((a) => !a.closest(OUTSIDE) && target(a));
+  let best: { a: Element; url: string }[] = [];
+  for (const list of Array.from(root.querySelectorAll("ul,ol"))) {
+    if (list.closest(OUTSIDE) || list.querySelector("time")) continue;
+    const items = Array.from(list.children).filter((li) => li.tagName === "LI");
+    const parts = items.flatMap((li) => {
+      const a = li.querySelector("a[href]");
+      const url = a && target(a);
+      return a && url ? [{ a, url }] : [];
+    });
+    if (parts.length < MIN_CHAPTERS || parts.length > MAX_CHAPTERS || parts.length < items.length) continue;
+    if (new Set(parts.map((part) => pageKey(part.url))).size < parts.length) continue;
+    // The list is the page: hardly any other links sit beside it.
+    const listed = new Set(list.querySelectorAll("a[href]"));
+    if (pageLinks.filter((a) => !listed.has(a)).length > parts.length / 3) continue;
+    if (parts.length > best.length) best = parts;
+  }
+  if (!best.length) return null;
+  const heading = tidy(root.querySelector("h1")?.textContent ?? "");
+  return {
+    id: `book:${hash(pageKey(best[0].url))}`,
+    title: (heading && heading.length <= 200 ? heading : bookTitle(doc, page, null)).slice(0, 300),
+    chapters: best.map((part, i) => ({ url: part.url, title: cleanTitle(pieces(part.a).join(" ")) || `Chapter ${i + 1}` })),
+    index: null,
+    contents: page.href,
+  };
+}
+
+/**
+ * The page a page's breadcrumbs name as the one just above it, when that is not the site's home
+ * page: where a page that does not list its neighbours may be listed with them.
+ */
+export function breadcrumbParent(doc: Document, url: string): string | null {
+  let page: URL;
+  try { page = new URL(url); } catch { return null; }
+  const trail = breadcrumbs(doc, page);
+  return trail.length >= 3 && endsHere(trail, doc, page) ? trail[trail.length - 2].url : null;
+}
+
+/** A book read off its contents page, opened at the given page; null when the page is not one of its chapters. */
+export function openedAt(book: BookContents, url: string): BookContents | null {
+  const key = pageKey(url);
+  const index = book.chapters.findIndex((chapter) => pageKey(chapter.url) === key);
+  return index < 0 ? null : { ...book, index };
+}
+
 /**
  * The book a page belongs to, when the page lists its chapters in order. Looks at the whole
  * page, navigation included, so call it before the page is trimmed down to its article.
@@ -277,7 +380,7 @@ export function bookContents(doc: Document, url: string): BookContents | null {
     .filter((r) => r.length <= MAX_CHAPTERS && (r.some((e) => e.key === here) || r.every((e) => `${e.key}/`.startsWith(folder))))
     .filter((r) => looksLikeContents(r, doc, base))
     .sort((a, b) => b.length - a.length)[0];
-  if (!run) return null;
+  if (!run) return trackContents(doc, page, base);
   // The same chapter is often linked twice, from a card and from the navigation: keep the plainest name.
   const names = new Map<string, string>();
   for (const entry of entries) {
