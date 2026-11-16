@@ -1,7 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { libraryDataDir, preparationDataDir } from "./tests/e2e-data";
 
 /** LIVE=1 runs the suite against a real VoiceStudio at VOICESTUDIO_URL (key from VOICESTUDIO_API_KEY or apps/web/.env.local). */
 const LIVE = process.env.LIVE === "1";
@@ -19,6 +18,8 @@ const localEnv = (() => {
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Removes data folders left by killed runs; returns the teardown that removes this run's.
+  globalSetup: "./tests/e2e-data.ts",
   timeout: 60_000,
   fullyParallel: true,
   retries: process.env.CI ? 1 : 0,
@@ -84,8 +85,8 @@ export default defineConfig({
         FISH_API_KEY: LIVE ? process.env.FISH_API_KEY || localEnv.FISH_API_KEY || "" : "",
         VITE_PHONON_BASE: LIVE ? process.env.VITE_PHONON_BASE || localEnv.VITE_PHONON_BASE || "" : "/api/phonon",
         PHONON_URL: LIVE ? process.env.PHONON_URL || localEnv.PHONON_URL || "" : `http://127.0.0.1:${phononPort}`,
-        LIBRARY_DATA_DIR: join(tmpdir(), `readaloud-e2e-library-${process.pid}`),
-        PREPARATION_DATA_DIR: join(tmpdir(), `readaloud-e2e-preparations-${process.pid}`),
+        LIBRARY_DATA_DIR: libraryDataDir,
+        PREPARATION_DATA_DIR: preparationDataDir,
       },
     },
   ],
