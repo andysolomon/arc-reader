@@ -40,6 +40,19 @@ for (const theme of THEMES) {
       expect(reading.violations, JSON.stringify(reading.violations, null, 2)).toEqual([]);
     });
 
+    test("reader with diagram", async ({ page }) => {
+      await page.route("**/api/llm/v1/chat/completions", (route) => route.fulfill({ json: { choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+        type: "hub", title: "Parts of a pangram", center: "Pangram", focus: 0,
+        items: [{ label: "Every letter", note: "All 26 appear" }, { label: "Short", note: "As few words as possible" }, { label: "Readable" }],
+      }) } }] } }));
+      await composeAndListen(page);
+      await page.keyboard.press("Space"); // paused: stable DOM for the scan
+      await page.getByRole("button", { name: "Draw a diagram" }).click();
+      await expect(page.getByRole("region", { name: "Diagram" }).getByRole("img")).toContainText("Every letter");
+      const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+    });
+
     test("reader with player and menu", async ({ page }) => {
       await composeAndListen(page);
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
