@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon, X } from "lucide-react";
+import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon, Workflow, X } from "lucide-react";
 import { Button, IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
@@ -18,6 +18,9 @@ import { hasSummary, summaryModelLabel } from "../lib/summary";
 import { useLlm } from "../state/llm";
 import { useSummaries } from "../state/summaries";
 import { ArticleSummary } from "../components/ArticleSummary";
+import { ArticleDiagram } from "../components/ArticleDiagram";
+import { hasDiagram } from "../lib/articleDiagram";
+import { useDiagrams } from "../state/diagrams";
 import { DocumentDetails } from "../components/DocumentDetails";
 import { DocumentLinks } from "../components/DocumentLinks";
 import { docLinks, linksRead } from "../state/links";
@@ -46,7 +49,7 @@ export function Reader() {
   const setShortcuts = usePlayer((s) => s.setShortcutsOpen);
   const record = usePlayer((s) => s.record);
   const readingSummary = usePlayer((s) => s.summary);
-  const { fontSize, wide, highlightStyle, showSummary, set } = useSettings();
+  const { fontSize, wide, highlightStyle, showSummary, showDiagram, set } = useSettings();
   const theme = getTheme(useThemeId());
   const cycleTheme = useCycleTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -94,6 +97,13 @@ export function Reader() {
   const toggleSummary = () => {
     if (!showSummary && summaryRecord && !hasSummary(summaryRecord)) void useSummaries.getState().request(summaryRecord);
     set("showSummary", !showSummary);
+  };
+  // A saved diagram stays visible without a key, like a summary.
+  const diagramRecord = ready && record?.id === id && (llmReady || hasDiagram(record)) ? record : null;
+  const drawing = useDiagrams((s) => !!(id && s.pending[id]));
+  const toggleDiagram = () => {
+    if (!showDiagram && diagramRecord && !hasDiagram(diagramRecord)) void useDiagrams.getState().request(diagramRecord);
+    set("showDiagram", !showDiagram);
   };
   const detailsRecord = ready && record?.id === id ? record : null;
   const hasLinks = !!ready && links.length > 0;
@@ -149,6 +159,11 @@ export function Reader() {
               <Sparkles size={20} strokeWidth={1.5} className={summarizing ? "animate-pulse" : undefined} />
             </IconButton>
           )}
+          {diagramRecord && !readingSummary && (
+            <IconButton label={showDiagram ? "Hide diagram" : "Draw a diagram"} active={showDiagram} aria-busy={drawing || undefined} onClick={toggleDiagram}>
+              <Workflow size={20} strokeWidth={1.5} className={drawing ? "animate-pulse" : undefined} />
+            </IconButton>
+          )}
           {bp === "sm" ? (
             <IconButton label="Text settings" onClick={() => setSheet(true)} className="font-serif text-[15px]">
               Aa
@@ -197,7 +212,7 @@ export function Reader() {
       )}
       <div className="flex min-h-0 flex-1">
       {/* Focusable so the text can be scrolled from the keyboard. */}
-      <div ref={scrollRef} role="region" aria-label="Document text" tabIndex={0} className={cn("relative min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pb-[200px] focus-visible:-outline-offset-2", focus ? "pt-16" : "pt-12")}>
+      <div ref={scrollRef} role="region" aria-label="Document text" tabIndex={0} style={{ containerType: "inline-size" }} className={cn("relative min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pb-[200px] focus-visible:-outline-offset-2", focus ? "pt-16" : "pt-12")}>
         {focus && (
           <IconButton label="Exit focus mode" title="Exit focus (Esc)" onClick={() => setFocus(false)} className="fixed right-3 top-3 z-20">
             <Minimize2 size={20} strokeWidth={1.5} />
@@ -240,6 +255,7 @@ export function Reader() {
             />
           )}
           {summaryRecord && showSummary && !readingSummary && <ArticleSummary record={summaryRecord} />}
+          {diagramRecord && showDiagram && !readingSummary && <ArticleDiagram record={diagramRecord} />}
           {ready ? (
             <SentenceText
               paragraphs={doc.paragraphs}

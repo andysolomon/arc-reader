@@ -34,6 +34,8 @@ export interface Settings {
   summaryModel: SummaryModel;
   /** Show the summary panel above the text in the Reader */
   showSummary: boolean;
+  /** Show the diagram panel above the text in the Reader */
+  showDiagram: boolean;
   fontSize: number;
   wide: boolean;
   railOpen: boolean;
@@ -111,6 +113,7 @@ export const useSettings = create<Settings & Actions>()(
       openaiModel: OPENAI_MODEL,
       summaryModel: DEFAULT_SUMMARY_MODEL,
       showSummary: false,
+      showDiagram: false,
       fontSize: 19,
       wide: false,
       railOpen: typeof window === "undefined" ? true : window.innerWidth > 1024,

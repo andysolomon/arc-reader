@@ -41,6 +41,12 @@ const validLinks = (value: unknown) => Array.isArray(value) && value.length <= M
   && value.every((link) => object(link) && typeof link.url === "string" && /^https?:\/\//i.test(link.url)
     && link.url.length <= MAX_LINK_URL && typeof link.text === "string" && link.text.length <= MAX_LINK_TEXT);
 
+/** The client reads the shape back through parseDiagram; here only its size and envelope are held. */
+const validDiagram = (value: unknown) => value === undefined || (object(value)
+  && typeof value.source === "string" && value.source.length <= 100
+  && typeof value.model === "string" && value.model.length <= 200
+  && number(value.version) && number(value.createdAt) && object(value.spec) && JSON.stringify(value.spec).length <= 20_000);
+
 function validDoc(value: unknown): value is DocRecord {
   if (!object(value)) return false;
   return id(value.id) && typeof value.title === "string" && value.title.length <= 10000
@@ -63,6 +69,7 @@ function validDoc(value: unknown): value is DocRecord {
       && value.summary.source.length <= 100 && typeof value.summary.text === "string" && value.summary.text.length <= 100_000
       && typeof value.summary.model === "string" && value.summary.model.length <= 200
       && number(value.summary.version) && number(value.summary.createdAt)))
+    && validDiagram(value.diagram)
     && (value.favoritedAt === undefined || number(value.favoritedAt))
     && validMeta(value.meta) && validBook(value.book) && validCategory(value.category) && validPremium(value.premium);
 }

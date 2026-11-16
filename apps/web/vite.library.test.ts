@@ -71,6 +71,16 @@ describe("shared server library", () => {
     expect(() => service.sync({ changes: [{ kind: "doc", record: bad }] })).toThrow("Invalid library change");
   });
 
+  it("stores document diagrams and rejects malformed or oversized ones", async () => {
+    const diagram = { source: "abc:6", spec: { type: "flow", title: "T", items: [{ label: "A" }, { label: "B" }] }, model: "glm-5.3", version: 1, createdAt: 2 } as DocRecord["diagram"];
+    const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), diagram } }] });
+    expect(result.docs[0].diagram).toEqual(diagram);
+    for (const bad of [{ spec: "flow" }, { model: undefined }, { spec: { type: "flow", title: "x".repeat(20_001) } }]) {
+      const record = { ...doc("b"), diagram: { ...diagram, ...bad } } as unknown as DocRecord;
+      expect(() => service.sync({ changes: [{ kind: "doc", record }] })).toThrow("Invalid library change");
+    }
+  });
+
   it("syncs favorites and Jev's premium fit, and rejects malformed ones", async () => {
     const premium = { fit: "strong" as const, confidence: 0.8, model: "jev-latest", source: "abc:6", at: 3 };
     const result = await service.sync({ changes: [{ kind: "doc", record: { ...doc("a"), favoritedAt: 2, premium } }] });

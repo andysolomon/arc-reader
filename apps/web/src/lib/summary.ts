@@ -27,12 +27,17 @@ export function hasSummary(rec: DocRecord): boolean {
   return rec.summary?.version === VERSION && rec.summary.source === summarySource(rec.text) && !!rec.summary.text.trim();
 }
 
-export async function summarize(rec: DocRecord, model: SummaryModel): Promise<NonNullable<DocRecord["summary"]>> {
+/** The document as a text model reads it: pictures as their descriptions, code fenced. */
+export function articleText(rec: DocRecord): string {
   const blocks = readingBlocks(rec.text);
-  const text = blocks.some((block) => block.kind === "visual")
+  return blocks.some((block) => block.kind === "visual")
     ? blocks.map((block) => block.kind === "visual" ? visualText(block.visual, rec.visualDescriptions)
       : block.kind === "code" ? fencedCode(block.text, block.language) : block.text).filter(Boolean).join("\n\n")
     : rec.text.trim();
+}
+
+export async function summarize(rec: DocRecord, model: SummaryModel): Promise<NonNullable<DocRecord["summary"]>> {
+  const text = articleText(rec);
   if (!text) throw new Error("There is no text to summarize.");
   if (text.length > MAX_CHARS) throw new Error("This document is too long to summarize in one go.");
   const response = await fetch("/api/llm/v1/chat/completions", {
