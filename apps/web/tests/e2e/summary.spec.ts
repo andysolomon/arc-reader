@@ -53,11 +53,13 @@ test("enters, replaces, and removes the OpenCode Go key in Settings", async ({ p
   await expect(page.getByText("Set on the server (LLM_API_KEY) · ends in -key")).toBeVisible();
   await page.getByRole("button", { name: "Replace OpenCode Go key" }).click();
   const field = page.getByLabel("OpenCode Go API key");
+  // Practice's Gemini key field has a Save button of its own while that key is unset.
+  const save = page.locator("form").filter({ has: field }).getByRole("button", { name: "Save" });
   await field.fill("wrong-key");
-  await page.getByRole("button", { name: "Save" }).click();
+  await save.click();
   await expect(page.getByRole("alert")).toContainText("didn't accept that key");
   await field.fill("oa-test-key");
-  await page.getByRole("button", { name: "Save" }).click();
+  await save.click();
   await expect(page.getByText("Saved on this server · ends in -key")).toBeVisible();
   await expect(field).toHaveCount(0);
   await page.getByRole("button", { name: "Remove OpenCode Go key" }).click();
