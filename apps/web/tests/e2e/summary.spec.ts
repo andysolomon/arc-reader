@@ -85,6 +85,8 @@ test("reads the summary aloud with the document's voice and returns to the artic
   await page.getByRole("region", { name: "Summary" }).getByRole("button", { name: "Listen" }).click();
   // The Reader now shows and highlights the summary, and speech is generated from it.
   await expect(page.getByText("Read the full article")).toBeVisible();
+  // The status bar keeps a way back in view wherever the summary is scrolled.
+  await expect(page.getByRole("button", { name: "Full article", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Summary" })).toHaveCount(0);
   await expect(page.locator('[data-screen="reader"]')).toContainText("A stub summary of the main point.");
   await expect(page.locator('[data-screen="reader"]')).not.toContainText("Pack my box");

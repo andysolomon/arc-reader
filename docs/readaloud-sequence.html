@@ -731,10 +731,10 @@ const SEQS = {
     sub: "An LLM writes a summary of the article on request; the listener can read it, or listen to it in the document’s voice.",
     overview: [
       "Summaries need an LLM key, set in Settings and saved on the app server. The request goes through the server’s /api/llm proxy to OpenCode Go.",
-      "Listening to a summary loads it as the reading in place of the article: read as written, never saving a position. “Read the full article” switches back.",
+      "Listening to a summary loads it as the reading in place of the article: read as written, never saving a position. “Full article” in the status bar, or the card at the end of the summary, switches back.",
     ],
     rows: [
-      { f: "U", to: "UI", t: "async", n: "tap Summarize", say: "In the Reader, the listener taps the sparkles button.", code: [SRC + "routes/Reader.tsx:158"] },
+      { f: "U", to: "UI", t: "async", n: "tap Summarize", say: "In the Reader, the listener taps the sparkles button.", code: [SRC + "routes/Reader.tsx:161"] },
       { f: "UI", to: "SM", t: "call", n: "request(record)", code: [SRC + "state/summaries.ts:20"] },
       { op: "alt", id: "fresh", ops: [
         { g: "a summary of this exact text is saved", rows: [
@@ -768,8 +768,8 @@ const SEQS = {
       { f: "PL", to: "UI", t: "ret", n: "opened" },
       { f: "PL", to: "EN", t: "async", n: "engine.play()" },
       { ref: "play", id: "refPlay", over: ["EN", "EX"], n: "Play passage by passage (Open and play)", say: "It plays like any reading." },
-      { op: "opt", id: "full", g: "the listener taps “Read the full article”", rows: [
-        { f: "U", to: "UI", t: "async", n: "Read the full article", code: [SRC + "routes/Reader.tsx:245"] },
+      { op: "opt", id: "full", g: "the listener taps “Full article” or the end-of-summary card", rows: [
+        { f: "U", to: "UI", t: "async", n: "Read the full article", code: [SRC + "routes/Reader.tsx:115"] },
         { f: "UI", to: "PL", t: "call", n: "open(record)", say: "The article itself is opened again, at its saved place." },
       ] },
       ] },
