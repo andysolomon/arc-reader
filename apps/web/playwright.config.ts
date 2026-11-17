@@ -8,6 +8,7 @@ const webPort = Number(process.env.E2E_PORT || 4173);
 const voicePort = Number(process.env.E2E_VOICE_PORT || 3999);
 const openaiPort = Number(process.env.E2E_OPENAI_PORT || 3998);
 const phononPort = Number(process.env.E2E_PHONON_PORT || 3997);
+const sitePort = Number(process.env.E2E_SITE_PORT || 3996);
 const localEnv = (() => {
   try {
     return Object.fromEntries(readFileSync(".env.local", "utf8").split("\n").filter((l: string) => /^[A-Z_]+=/.test(l)).map((l: string) => l.split(/=(.*)/s).slice(0, 2)));
@@ -45,6 +46,12 @@ export default defineConfig({
           {
             command: `node tests/stub-voicestudio.mjs ${openaiPort} oa-test-key`,
             url: `http://127.0.0.1:${openaiPort}/health`,
+            reuseExistingServer: !process.env.CI,
+            timeout: 20_000,
+          },
+          {
+            command: `node tests/stub-site.mjs ${sitePort}`,
+            url: `http://127.0.0.1:${sitePort}/health`,
             reuseExistingServer: !process.env.CI,
             timeout: 20_000,
           },

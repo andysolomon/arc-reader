@@ -3,10 +3,11 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { tailnetUrl } from "./vite.tailnet";
 import { voiceStudioProxy } from "./vite.proxy";
-import { pageFetch } from "./vite.fetch";
+import { pageFetch, slideStore } from "./vite.fetch";
 import { siteFavicons } from "./vite.favicon";
 import { audioPreparation } from "./vite.prepare";
-import { sharedLibrary } from "./vite.library";
+import { libraryService, sharedLibrary } from "./vite.library";
+import { bookImport } from "./vite.books";
 import { SpeechActivity } from "./vite.speech-activity";
 import { voiceAvatars } from "./vite.avatars";
 import { llm } from "./vite.llm";
@@ -24,17 +25,21 @@ export default defineConfig(({ mode }) => {
   // Live speech through the proxy pauses background preparation on the same VoiceStudio.
   const activity = new SpeechActivity(Number(env.PREPARATION_YIELD_MS) || undefined);
   const proxy = voiceStudioProxy(env, activity);
+  // One of each per server: the book import saves to the same library and slides the endpoints use.
+  const library = libraryService(env);
+  const slides = slideStore(env);
   return {
   plugins: [
     // The iOS app's offline page loads the probe icon to learn that the server is up.
     publicAccess(env, { open: [PROBE_IMAGE] }),
     react(),
     tailnetUrl(),
-    pageFetch(env),
+    pageFetch(env, slides),
     videoTranscripts(env, activity),
     siteFavicons(),
     audioPreparation(env, activity),
-    sharedLibrary(env),
+    sharedLibrary(env, library),
+    bookImport(library, slides),
     voiceAvatars(env),
     llm(env),
     jev(env),

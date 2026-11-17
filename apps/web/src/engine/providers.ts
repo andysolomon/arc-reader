@@ -301,10 +301,15 @@ export function apiSynthesize(req: TtsRequest & { profile?: boolean }): Promise<
  * A re-recorded clone adds its recording's revision, so clips of the old recording no longer match.
  */
 export function cacheKey(req: Pick<TtsRequest, "text" | "voice" | "engine" | "openaiModel">): string {
+  return cacheKeyPrefix(req) + hash(req.text);
+}
+
+/** The engine and voice part of a cache key, up to and including the separator before the text hash. */
+export function cacheKeyPrefix(req: Pick<TtsRequest, "voice" | "engine" | "openaiModel">): string {
   const openai = req.engine === OPENAI_ENGINE ? openaiModelFor(req) : "";
   const engine = req.engine === FISH_ENGINE ? `${FISH_ENGINE}:${FISH_MODEL}` : req.engine === PHONON_ENGINE ? `${PHONON_ENGINE}:${PHONON_MODEL}` : openai && !isTokenSpeechModel(openai) ? `${OPENAI_ENGINE}:${openai}` : req.engine;
   const revision = voiceRevision(req.voice);
-  return `${engine}|${revision ? `${req.voice}@${revision}` : req.voice}|${hash(req.text)}`;
+  return `${engine}|${revision ? `${req.voice}@${revision}` : req.voice}|`;
 }
 
 export async function fromCache(req: TtsRequest): Promise<Chunk | null> {
