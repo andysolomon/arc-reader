@@ -4,7 +4,7 @@ import { fetchReadable, hostOf, isWebAddress, normalizeUrl } from "../lib/fetchU
 import { EXPLAIN_MS, ReadError } from "../lib/readError";
 import { openDocument } from "../lib/openDoc";
 import { useLibrary } from "../state/library";
-import { importPage, isContentsPage } from "../state/books";
+import { importPage } from "../state/books";
 import { toast } from "../state/toast";
 
 export interface ClipboardImport {
@@ -19,7 +19,7 @@ export function useClipboardImport() {
   return value;
 }
 
-/** Pasting outside a text field opens the text (or fetched article) in the reader, one import at a time. */
+/** Pasting outside a text field opens the text (or fetched article, paused) in the reader, one import at a time. */
 export function useClipboardImportController(enabled: boolean): ClipboardImport {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
@@ -35,6 +35,7 @@ export function useClipboardImportController(enabled: boolean): ClipboardImport 
       if (!text) return;
       const create = useLibrary.getState().create;
       let rec;
+      // Pasted text is read out at once; a pasted link opens paused so the page can be looked over first.
       let listen = true;
       if (isWebAddress(text)) {
         const host = hostOf(normalizeUrl(text));
@@ -42,7 +43,7 @@ export function useClipboardImportController(enabled: boolean): ClipboardImport 
         toast(`Fetching ${host}…`);
         const article = await fetchReadable(text);
         rec = await importPage(article, { source: "url" });
-        listen = !isContentsPage(article);
+        listen = false;
       } else {
         rec = await create({ text, source: "paste" });
       }

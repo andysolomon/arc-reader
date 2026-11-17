@@ -14,6 +14,8 @@ async function expectReading(page: Page, text = "The quick brown fox") {
   await expect(page.locator("article")).toContainText(text);
 }
 
+const playPause = (page: Page) => page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^(Play|Pause)/ });
+
 test("the link field comes first and the text box stays folded away", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByLabel("Link to read")).toBeVisible();
@@ -28,11 +30,12 @@ test("the link field comes first and the text box stays folded away", async ({ p
   await expect(page.getByLabel("Text to read")).toHaveCount(0);
 });
 
-test("pasting a link starts reading right away", async ({ page }) => {
+test("pasting a link opens it right away, paused", async ({ page }) => {
   await page.route("https://example.com/story", (route) => route.fulfill({ contentType: "text/plain", headers: { "Access-Control-Allow-Origin": "*" }, body: TEXT }));
   await page.goto("/");
   await pasteInto(page, "Link to read", "https://example.com/story");
   await expectReading(page);
+  await expect(playPause(page)).toHaveAttribute("data-playing", "false");
 });
 
 test("a typed address without a scheme reads on Enter", async ({ page }) => {
@@ -41,6 +44,7 @@ test("a typed address without a scheme reads on Enter", async ({ page }) => {
   await page.getByLabel("Link to read").fill("example.com/story");
   await page.keyboard.press("Enter");
   await expectReading(page);
+  await expect(playPause(page)).toHaveAttribute("data-playing", "true");
 });
 
 test("pasting prose into the link field opens the text box with it", async ({ page }) => {
@@ -58,6 +62,7 @@ test("a link pasted into the text box is fetched, not read out as text", async (
   await page.getByRole("button", { name: "Type or paste text" }).click();
   await pasteInto(page, "Text to read", "https://example.com/story");
   await expectReading(page);
+  await expect(playPause(page)).toHaveAttribute("data-playing", "false");
   await expect(page.locator("article")).not.toContainText("https://example.com/story");
   // Nothing is left behind as a draft.
   await page.getByRole("link", { name: "Compose", exact: true }).click();
