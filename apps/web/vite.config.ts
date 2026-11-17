@@ -15,6 +15,7 @@ import { decide } from "./vite.decide";
 import { PROBE_IMAGE, shellFallback } from "./vite.shell";
 import { publicAccess } from "./vite.gate";
 import { hostedDocs } from "./vite.docs";
+import { videoTranscripts } from "./vite.transcribe";
 import { serverUrl, startUrl, UNREACHABLE_PAGE } from "./capacitor.config";
 
 export default defineConfig(({ mode }) => {
@@ -30,6 +31,7 @@ export default defineConfig(({ mode }) => {
     react(),
     tailnetUrl(),
     pageFetch(env),
+    videoTranscripts(env, activity),
     siteFavicons(),
     audioPreparation(env, activity),
     sharedLibrary(env),

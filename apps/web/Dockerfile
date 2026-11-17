@@ -4,6 +4,9 @@ FROM node:24-slim
 
 ENV CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
+# Takes the sound out of a post's video for transcription (vite.transcribe.ts). One static binary
+# of 140 MB; Debian's ffmpeg package would add 480 MB.
+COPY --from=mwader/static-ffmpeg:8.0 /ffmpeg /usr/local/bin/ffmpeg
 WORKDIR /app
 RUN chown node:node /app
 RUN mkdir /app/preparations && chown node:node /app/preparations

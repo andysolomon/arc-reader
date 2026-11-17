@@ -70,6 +70,7 @@ function validDoc(value: unknown): value is DocRecord {
       && typeof value.summary.model === "string" && value.summary.model.length <= 200
       && number(value.summary.version) && number(value.summary.createdAt)))
     && validDiagram(value.diagram)
+    && (value.transcript === undefined || (object(value.transcript) && number(value.transcript.seconds) && number(value.transcript.at)))
     && (value.favoritedAt === undefined || number(value.favoritedAt))
     && validMeta(value.meta) && validBook(value.book) && validCategory(value.category) && validPremium(value.premium);
 }
