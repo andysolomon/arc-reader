@@ -169,7 +169,7 @@ export function htmlToText(html: string, url: string, sheets: ReadonlyMap<string
   // The chapter list usually sits in the navigation, which is dropped next.
   const book = bookContents(doc, url);
   const partOf = book ? null : breadcrumbParent(doc, url);
-  doc.querySelectorAll("script,noscript,nav,footer,header,aside,form,iframe,[aria-hidden='true']").forEach((n) => {
+  doc.querySelectorAll("script,noscript,nav,footer,header,aside,form,iframe,button,[aria-hidden='true']").forEach((n) => {
     if (n.tagName !== "ASIDE" || !isCallout(n)) n.remove();
   });
   doc.querySelectorAll("style").forEach((style) => { if (!style.closest("svg")) style.remove(); });
@@ -227,7 +227,10 @@ export function htmlToText(html: string, url: string, sheets: ReadonlyMap<string
     }
     const boundary = /^(?:P|LI|BLOCKQUOTE|DIV|SECTION|ASIDE|BR|UL|OL|DL|DT|DD|FIGURE|FIGCAPTION)$/.test(node.tagName);
     if (boundary) flush();
-    node.childNodes.forEach(walk);
+    // A row of labels with no text between them ("Part 7", "13 chapters", "106 figures") is spaced
+    // out by the page's styles, not its text: keep them apart as words.
+    const row = node.children.length > 1 && Array.from(node.childNodes).every((child) => child.nodeType !== Node.TEXT_NODE || !child.textContent?.trim());
+    node.childNodes.forEach((child) => { walk(child); if (row) inline += " "; });
     if (boundary) flush();
   };
   walk(root);
@@ -375,25 +378,28 @@ const PARTS_AT_ONCE = 4;
  */
 async function withPartSections(page: Fetched, signal?: AbortSignal): Promise<Fetched> {
   const { book } = page;
-  if (!book?.unread) return page;
+  if (!book?.unread && !book?.tail) return page;
   const stop = new AbortController();
   const timer = setTimeout(() => stop.abort(), PARTS_TIMEOUT_MS);
   const abort = () => stop.abort();
   signal?.addEventListener("abort", abort, { once: true });
   const found = new Map<string, BookChapter[]>();
-  const read = async (url: string) => {
+  const read = async ({ url, n }: { url: string; n?: number }) => {
     try {
-      const sections = sectionsOf(new DOMParser().parseFromString(await pageHtml(url, stop.signal), "text/html"), url);
+      const sections = sectionsOf(new DOMParser().parseFromString(await pageHtml(url, stop.signal), "text/html"), url, n);
       if (sections.length) found.set(pageKey(url), sections);
     } catch { /* A part that can't be read stays one chapter. */ }
   };
   try {
-    const queue = [...book.unread];
+    const queue: { url: string; n?: number }[] = (book.unread ?? []).map((url) => ({ url }));
+    let parted = true;
     if (queue.length === book.chapters.length) {
       await read(queue.shift()!);
-      if (!found.size) queue.length = 0;
+      parted = found.size > 0;
+      if (!parted) queue.length = 0;
     }
-    const worker = async () => { for (let url = queue.shift(); url; url = queue.shift()) await read(url); };
+    if (parted && book.tail) queue.push(book.tail);
+    const worker = async () => { for (let part = queue.shift(); part; part = queue.shift()) await read(part); };
     await Promise.all(Array.from({ length: PARTS_AT_ONCE }, worker));
     if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
     return { ...page, book: withSections(book, found) };

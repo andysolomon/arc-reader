@@ -26,6 +26,15 @@ describe("importing code examples", () => {
   });
 });
 
+describe("page furniture", () => {
+  it("leaves out button labels and keeps a row of labels apart as words", () => {
+    const html = `<title>Indexes</title><article><div class="toc"><button type="button">On this page</button></div>
+      <div class="strip"><span class="pill">Part 7</span><span>13 chapters</span><span>106 figures</span><span>about <!-- -->5 hours<!-- --> of reading</span></div>
+      <p>An index finds a row in <b>three</b> or <i>four</i> page reads, not <em>2</em>50,000.</p></article>`;
+    expect(htmlToText(html, "https://example.com").text).toBe("Part 7 13 chapters 106 figures about 5 hours of reading\n\nAn index finds a row in three or four page reads, not 250,000.");
+  });
+});
+
 describe("article images and diagrams", () => {
   it("keeps figure captions, lazy sources, relative URLs and prose in reading order", () => {
     const result = htmlToText(`<title>Pictures</title><article><p>Before.</p>
