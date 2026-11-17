@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { audioCache, docs as docStore, positions, type DocBook, type DocMeta, type DocRecord, type DocSource } from "../lib/db";
-import { estimateTotal, titleFrom } from "../lib/segment";
-import { uid } from "../lib/hash";
+import { audioCache, docs as docStore, positions, type DocRecord } from "../lib/db";
+import { estimateTotal } from "../lib/segment";
+import { newDocRecord, type NewDocument } from "../lib/docRecord";
 import { planReading, preparedVoices, sharedPassages, type PreparedVoice } from "../lib/prepared";
 import { useVoices } from "./voices";
 import { useSettings } from "./settings";
@@ -9,10 +9,8 @@ import { usePreparation } from "./preparation";
 import { serverPreparedKeys } from "../engine/preparation";
 import { voiceIdOfKeyPart } from "../engine/voiceRevisions";
 import { readsOf } from "../lib/libraryProtocol";
-import { linksInMarkdown, uniqueLinks, type DocLink } from "../lib/links";
 import { updateDocument, type DocPatch } from "./documents";
 import { useCategories } from "./categories";
-import { catalogue } from "../lib/postTitle";
 
 export interface LibraryItem {
   rec: DocRecord;
@@ -33,7 +31,7 @@ interface LibraryState {
   loaded: boolean;
   refresh: () => Promise<void>;
   /** `batch` is one of many added together: the caller refreshes the library and files them once they are all in. */
-  create: (input: { text: string; title?: string; source: DocSource; domain?: string; voice?: string | null; meta?: DocMeta; links?: DocLink[]; book?: DocBook; batch?: boolean }) => Promise<DocRecord>;
+  create: (input: NewDocument & { batch?: boolean }) => Promise<DocRecord>;
   /** Edit catalogue fields: title, metadata, category. */
   update: (id: string, patch: DocPatch) => Promise<DocRecord | undefined>;
   remove: (id: string) => Promise<void>;
@@ -76,27 +74,8 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       set({ loaded: true });
     }
   },
-  async create({ text, title, source, domain, voice = null, meta, links = [], book, batch = false }) {
-    const now = Date.now();
-    // Page links come from the HTML; links written into the text itself count too.
-    const allLinks = uniqueLinks([...links, ...linksInMarkdown(text)]);
-    // X's page title carries the author and site; keep them in their own fields instead.
-    const named = title?.trim() ? catalogue({ title, domain, meta }) : null;
-    if (named?.author && !meta?.author) meta = { ...meta, author: named.author };
-    const rec: DocRecord = {
-      id: uid(),
-      title: named?.title || titleFrom(text),
-      text,
-      source,
-      domain: domain ?? (source === "paste" ? "Pasted text" : source === "sample" ? "Sample" : source === "share" ? "Shared" : "Text"),
-      voice,
-      ...(meta && Object.keys(meta).length ? { meta } : {}),
-      ...(book ? { book } : {}),
-      chars: text.length,
-      ...(allLinks.length ? { links: allLinks } : {}),
-      createdAt: now,
-      updatedAt: now,
-    };
+  async create({ batch = false, ...input }) {
+    const rec = newDocRecord(input);
     await docStore.put(rec);
     if (batch) return rec;
     void get().refresh();
