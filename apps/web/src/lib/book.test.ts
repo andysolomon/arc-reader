@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { bookContents, pageKey } from "./book";
+import { bookContents, pageKey, sectionsOf } from "./book";
 import { fetchReadable, htmlToText } from "./fetchUrl";
 
 const SITE = "https://book.example";
@@ -175,5 +175,84 @@ describe("finding a track's notes", () => {
     // An article that happens to hold a list of links among plenty of others.
     const article = trackPage.replace("<ul>", `<p>${[1, 2, 3, 4, 5].map((n) => `<a href="/elsewhere/${n}">see ${n}</a>`).join(" ")}</p><ul>`);
     expect(bookContents(parse(article), TRACK)).toBeNull();
+  });
+});
+
+describe("finding the sections of a book in parts", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const DOCS = "https://tutorial.example/learn";
+  const PARTS: [string, string, string[]][] = [
+    ["before-we-begin", "Before We Begin", ["How this works", "Meet the shop"]],
+    ["storage", "How Data Lives on Disk", ["Hard disks", "Pages", "Slotted pages"]],
+    ["indexes", "Indexes: Finding Data Fast", ["Why indexes exist", "B-trees"]],
+  ];
+  const slug = (title: string) => title.toLowerCase().replace(/[^a-z]+/g, "-");
+  const partUrl = (p: number) => `${DOCS}/${PARTS[p][0]}/`;
+  const sectionUrl = (p: number, s: number) => `${partUrl(p)}${slug(PARTS[p][2][s])}/`;
+  /** The sidebar every page but the first carries: all the parts, and the sections of the one being read. */
+  const sidebar = (open: number) => `<nav aria-label="Docs sidebar"><ul>${PARTS.map(([, title, sections], p) =>
+    `<li><a href="${partUrl(p)}">${p} · ${title}</a>${p === open ? `<ul>${sections.map((name, s) => `<li><a href="${sectionUrl(p, s)}">${p}.${s + 1} · ${name}</a></li>`).join("")}</ul>` : ""}</li>`).join("")}</ul></nav>`;
+  const body = "<main><article><h1>Heading</h1><p>The body of the page, long enough to be worth reading aloud.</p></article></main>";
+  const home = `<title>How it really works | Tutorial</title><main><h1>Tutorial</h1><p>A tutorial in parts, read one building block at a time.</p>
+    <ul class="contents">${PARTS.map(([, title], p) => `<li><a href="${partUrl(p)}"><span>${p}</span><h3>${title}</h3><p>What ${title} covers.</p></a></li>`).join("")}</ul></main>`;
+  const partPage = (p: number) => `<title>${p} · ${PARTS[p][1]} | Tutorial</title>${sidebar(p)}${body}`;
+  const sectionPage = (p: number, s: number) => `<title>${p}.${s + 1} · ${PARTS[p][2][s]} | Tutorial</title>${sidebar(p)}${body}`;
+  const whole = PARTS.flatMap(([, title, sections], p) => [{ url: partUrl(p), title }, ...sections.map((name, s) => ({ url: sectionUrl(p, s), title: name }))]);
+  const site = () => {
+    const pages = new Map<string, string>([[`${DOCS}/`, home]]);
+    PARTS.forEach(([, , sections], p) => {
+      pages.set(partUrl(p), partPage(p));
+      sections.forEach((_, s) => pages.set(sectionUrl(p, s), sectionPage(p, s)));
+    });
+    const fetched = vi.fn(async (input: string) => pages.has(input)
+      ? new Response(pages.get(input), { headers: { "content-type": "text/html" } }) : new Response("nope", { status: 404 }));
+    vi.stubGlobal("fetch", fetched);
+    return fetched;
+  };
+
+  it("keeps a part's sections out of the count of parts, and puts them after their part", () => {
+    const book = bookContents(parse(partPage(1)), partUrl(1))!;
+    expect(book.chapters.map((c) => c.title)).toEqual(["Before We Begin", "How Data Lives on Disk", "Hard disks", "Pages", "Slotted pages", "Indexes: Finding Data Fast"]);
+    expect(book.index).toBe(1);
+    expect(book.unread).toEqual([partUrl(0), partUrl(2)]);
+    expect(sectionsOf(parse(partPage(1)), partUrl(1))).toEqual(whole.slice(4, 7));
+  });
+
+  it("places a section in the book its part belongs to", () => {
+    const book = bookContents(parse(sectionPage(1, 2)), sectionUrl(1, 2))!;
+    expect(book).toMatchObject({ id: bookContents(parse(home), `${DOCS}/`)!.id, index: 4 });
+    expect(book.chapters[4].title).toBe("Slotted pages");
+  });
+
+  it("reads every part's page for its sections, whichever page of the book is fetched", async () => {
+    const fetched = site();
+    const contents = (await fetchReadable(`${DOCS}/`)).book!;
+    expect(contents.chapters).toEqual(whole);
+    expect(contents).toMatchObject({ index: null, contents: `${DOCS}/` });
+    expect(contents).not.toHaveProperty("unread");
+    fetched.mockClear();
+    const section = (await fetchReadable(sectionUrl(2, 0))).book!;
+    expect(section.chapters).toEqual(whole);
+    expect(section).toMatchObject({ id: contents.id, index: 8 });
+    // The part being read shows its sections already: only the other two are asked.
+    expect(fetched.mock.calls.map(([input]) => input).sort()).toEqual([partUrl(0), partUrl(1), sectionUrl(2, 0)].sort());
+  });
+
+  it("asks an ordinary book's first chapter and no more", async () => {
+    const pages = new Map(CHAPTERS.map(([slug], i) => [`${SITE}/${slug}/`, chapterPage(i)]));
+    const fetched = vi.fn(async (input: string) => new Response(pages.get(input) ?? contentsPage, { headers: { "content-type": "text/html" } }));
+    vi.stubGlobal("fetch", fetched);
+    const book = (await fetchReadable(`${SITE}/`)).book!;
+    expect(fetched.mock.calls.map(([input]) => input)).toEqual([`${SITE}/`, `${SITE}/01-http/`]);
+    expect(book.chapters).toEqual(CHAPTERS.map(([slug, title]) => ({ url: `${SITE}/${slug}/`, title })));
+    expect(book).not.toHaveProperty("unread");
+  });
+
+  it("leaves a part that can't be read as one chapter", async () => {
+    const fetched = site();
+    fetched.mockImplementation(async (input: string) => input === partUrl(1) ? new Response("nope", { status: 500 })
+      : new Response(input === `${DOCS}/` ? home : partPage(PARTS.findIndex((_, p) => partUrl(p) === input)), { headers: { "content-type": "text/html" } }));
+    const book = (await fetchReadable(`${DOCS}/`)).book!;
+    expect(book.chapters).toEqual(whole.filter((c) => c.url === partUrl(1) || !c.url.startsWith(partUrl(1))));
   });
 });

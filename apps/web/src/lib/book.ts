@@ -14,6 +14,9 @@ export interface BookChapter {
   text?: string;
 }
 
+/** The sections a chapter's own page lists under it, by the chapter's address. */
+export type Sections = ReadonlyMap<string, BookChapter[]>;
+
 export interface BookContents {
   /** The same on every page of the book, so chapters imported at different times still meet */
   id: string;
@@ -29,6 +32,11 @@ export interface BookContents {
   meta?: DocMeta;
   /** The file the book was chosen as, when it came from the device rather than a link */
   file?: string;
+  /**
+   * Chapters that may be parts, whose sections are listed only on their own pages. When it names
+   * every chapter, none has shown a section yet: the first one tells whether the book is in parts.
+   */
+  unread?: string[];
 }
 
 /** What a book's parts are called. */
@@ -38,12 +46,15 @@ export const partNames = (book?: { kind?: "course" } | null) => book?.kind === "
 
 export const MIN_CHAPTERS = 3;
 export const MAX_CHAPTERS = 500;
+const MIN_SECTIONS = 2;
 
 const KIND = String.raw`(?:chapter|ch\.?|part|lesson|lecture|lec\.?|section|unit|module|week|day)`;
 /** A piece of link text that is only the chapter's number: "01", "Chapter 3", "2." */
-const LABEL = new RegExp(String.raw`^(${KIND}\s*)?(\d{1,3})(?:[.:)]|\s*[-–—])?$`, "i");
+const LABEL = new RegExp(String.raw`^(${KIND}\s*)?(\d{1,3})(?:[.:)]|\s*[-–—·•|])?$`, "i");
 /** Link text that opens with the number: "1. Getting started", "Chapter 3: Trees", "01 Intro" */
-const LEAD = new RegExp(String.raw`^(${KIND}\s*)?(\d{1,3})(?:[.:)]\s*|\s*[-–—:]\s*|\s+)(\S.*)$`, "i");
+const LEAD = new RegExp(String.raw`^(${KIND}\s*)?(\d{1,3})(?:[.:)]\s*|\s*[-–—:·•|]\s*|\s+)(\S.*)$`, "i");
+/** Link text that opens with a chapter's number and a section's: "7.1 · Why indexes exist", "7.10. Bloom filters" */
+const SECTION = /^(\d{1,3})\.(\d{1,3})(?:[.:)]\s*|\s*[-–—:·•|]\s*|\s+)(\S.*)$/;
 /** A path segment that opens with the number: "08-databases", "chapter-3", "ch03.html" */
 const SLUG = /^(?:(?:chapter|ch|part|lesson|lecture|lec|section|unit|module|week|day)[-_]?)?(\d{1,3})(?=$|[-_.])/i;
 const CONTENTS = /contents|chapter|toc\b|table-of|sidebar|summary/i;
@@ -91,6 +102,8 @@ interface Entry {
   named: boolean;
   /** The address carries the same number */
   slugged: boolean;
+  /** Where a section sits in chapter `n`: the 1 of "7.1" */
+  sub?: number;
 }
 
 function entryOf(a: Element, page: URL): Entry | null {
@@ -102,6 +115,10 @@ function entryOf(a: Element, page: URL): Entry | null {
   const slug = segment.match(SLUG);
   const words = pieces(a);
   const text = tidy(words.join(" "));
+  const section = text.match(SECTION);
+  if (section) {
+    return { a, key: pageKey(target.href), url: target.href, n: Number(section[1]), sub: Number(section[2]), title: section[3].slice(0, 300), written: true, named: false, slugged: false };
+  }
   // A card's headline is its title; the rest is a blurb.
   const headline = tidy(a.querySelector("h1,h2,h3,h4,h5,h6,[class*='title'],[class*='Title']")?.textContent ?? "");
   const label = words.length > 1 ? words[0].match(LABEL) : null;
@@ -127,6 +144,25 @@ function runs(entries: Entry[]): Entry[][] {
     if (last && entry.n === last.n + 1 && !run.some((e) => e.key === entry.key)) { run.push(entry); continue; }
     close();
     if (entry.n <= 1) run = [entry];
+  }
+  close();
+  return found;
+}
+
+/** Each chapter's sections, numbered 7.1, 7.2, 7.3… in the order they appear, by the chapter's number. */
+function sectionRuns(entries: Entry[]): Map<number, Entry[]> {
+  const found = new Map<number, Entry[]>();
+  let run: Entry[] = [];
+  const close = () => {
+    if (run.length >= MIN_SECTIONS && run.length > (found.get(run[0].n)?.length ?? 0)) found.set(run[0].n, run);
+    run = [];
+  };
+  for (const entry of entries) {
+    const last = run[run.length - 1];
+    if (last && entry.key === last.key) continue;
+    if (last && entry.n === last.n && entry.sub === last.sub! + 1 && !run.some((e) => e.key === entry.key)) { run.push(entry); continue; }
+    close();
+    if (entry.sub! <= 1) run = [entry];
   }
   close();
   return found;
@@ -362,6 +398,12 @@ export function openedAt(book: BookContents, url: string): BookContents | null {
   return index < 0 ? null : { ...book, index };
 }
 
+/** The page's numbered links: those to chapters, and those to the sections of each chapter. */
+function numbered(doc: Document, base: URL): { entries: Entry[]; sections: Map<number, Entry[]> } {
+  const all = Array.from(doc.querySelectorAll("a[href]")).flatMap((a) => entryOf(a, base) ?? []);
+  return { entries: all.filter((entry) => entry.sub === undefined), sections: sectionRuns(all.filter((entry) => entry.sub !== undefined)) };
+}
+
 /**
  * The book a page belongs to, when the page lists its chapters in order. Looks at the whole
  * page, navigation included, so call it before the page is trimmed down to its article.
@@ -373,11 +415,12 @@ export function bookContents(doc: Document, url: string): BookContents | null {
   try { base = new URL(doc.querySelector("base[href]")?.getAttribute("href") || url, url); } catch { /* Use the page URL. */ }
   const files = pdfSeries(doc, page, base);
   if (files) return files;
-  const entries = Array.from(doc.querySelectorAll("a[href]")).flatMap((a) => entryOf(a, base) ?? []);
+  const { entries, sections } = numbered(doc, base);
   const here = pageKey(page.href);
+  const listsHere = (e: Entry) => !!sections.get(e.n)?.some((section) => section.key === here);
   const folder = `${page.protocol}//${page.host.toLowerCase()}${page.pathname.replace(/\/index\.html?$/i, "/").replace(/[^/]*$/, "")}`;
   const run = runs(entries)
-    .filter((r) => r.length <= MAX_CHAPTERS && (r.some((e) => e.key === here) || r.every((e) => `${e.key}/`.startsWith(folder))))
+    .filter((r) => r.length <= MAX_CHAPTERS && (r.some((e) => e.key === here || listsHere(e)) || r.every((e) => `${e.key}/`.startsWith(folder))))
     .filter((r) => looksLikeContents(r, doc, base))
     .sort((a, b) => b.length - a.length)[0];
   if (!run) return trackContents(doc, page, base);
@@ -388,14 +431,53 @@ export function bookContents(doc: Document, url: string): BookContents | null {
     const known = names.get(entry.key);
     if (!known || entry.title.length < known.length) names.set(entry.key, entry.title);
   }
-  const chapters = run.map((entry, i) => ({ url: entry.url, title: names.get(entry.key) || entry.title || `Chapter ${i + 1}` }));
-  const at = run.findIndex((entry) => entry.key === here);
+  const listed = new Set(run.map((entry) => entry.key));
+  // A part's sections follow it. A section that is itself a chapter is only a second link to it.
+  const under = (entry: Entry) => (sections.get(entry.n) ?? []).filter((section) => !listed.has(section.key));
+  const chapters: BookChapter[] = run.flatMap((entry, i) => [
+    { url: entry.url, title: names.get(entry.key) || entry.title || `Chapter ${i + 1}` },
+    ...under(entry).map((section) => ({ url: section.url, title: section.title })),
+  ]);
+  const at = chapters.findIndex((chapter) => pageKey(chapter.url) === here);
   const index = at < 0 ? null : at;
+  const parts = run.filter((entry) => under(entry).length).length;
+  // Navigation that opens only the part being read says nothing of the others' sections.
+  const unread = parts === 1 ? run.filter((entry) => !under(entry).length) : parts === 0 && index === null ? run : [];
   return {
     id: `book:${hash(run[0].key)}`,
     title: bookTitle(doc, page, index === null ? null : chapters[index].title),
     chapters,
     index,
     ...(index === null ? { contents: page.href } : {}),
+    ...(unread.length ? { unread: unread.map((entry) => entry.url) } : {}),
   };
+}
+
+/** The sections a chapter's own page lists under it, each a page to read; none when the chapter is not a part. */
+export function sectionsOf(doc: Document, url: string): BookChapter[] {
+  let page: URL;
+  try { page = new URL(url); } catch { return []; }
+  let base = page;
+  try { base = new URL(doc.querySelector("base[href]")?.getAttribute("href") || url, url); } catch { /* Use the page URL. */ }
+  const { entries, sections } = numbered(doc, base);
+  const here = pageKey(page.href);
+  const chapter = entries.find((entry) => entry.key === here && entry.written);
+  return (chapter ? sections.get(chapter.n) ?? [] : []).filter((section) => section.key !== here).map((section) => ({ url: section.url, title: section.title }));
+}
+
+/**
+ * A book in parts, with the sections read off the parts' pages put after their parts. Left as it
+ * was when that would make it longer than a book gets.
+ */
+export function withSections(book: BookContents, found: Sections): BookContents {
+  const { unread: _, ...rest } = book;
+  const keys = new Set(book.chapters.map((chapter) => pageKey(chapter.url)));
+  const chapters = book.chapters.flatMap((chapter) => {
+    const added = (found.get(pageKey(chapter.url)) ?? []).filter((section) => !keys.has(pageKey(section.url)));
+    for (const section of added) keys.add(pageKey(section.url));
+    return [chapter, ...added];
+  });
+  if (chapters.length === book.chapters.length || chapters.length > MAX_CHAPTERS) return rest;
+  const opened = book.index === null ? null : book.chapters[book.index];
+  return { ...rest, chapters, index: opened ? chapters.indexOf(opened) : null };
 }
