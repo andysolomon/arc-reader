@@ -6,28 +6,8 @@ const axe = async (page: Page) => {
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 };
 
-const SITE = "https://book.example";
-const CHAPTERS = [
-  ["01-http", "HTTP & CORS", "<h2>Why HTTP</h2><p>It carries every request and every response.</p>"],
-  ["02-routing", "Routing", `<h2>Static routes</h2><p>A route names a resource on the server. The router matches each request to one.</p>
-    <aside class="callout"><p>Mental model</p><p>Methods say what, routes say where.</p></aside>
-    <table><thead><tr><th>Part</th><th>Meaning</th></tr></thead><tbody><tr><td>Path</td><td>Which resource</td></tr></tbody></table>
-    <h3>Dynamic routes</h3><p>A parameter stands in for part of the path. That keeps one route for every user.</p>`],
-  ["03-databases", "Databases", "<h2>Why databases exist</h2><p>They persist data across sessions. Disk is roomy and cheap.</p>"],
-];
-const nav = `<nav aria-label="All chapters"><a href="/">Overview</a><ol>${CHAPTERS.map(([slug, title], i) => `<li><a href="/${slug}/"><span>0${i + 1}</span><span>${title}</span></a></li>`).join("")}</ol></nav>`;
-const pages: Record<string, string> = {
-  "/": `<title>Backend Basics — a three-chapter reference</title>${nav}<main><h1>Backend Basics</h1><p>Every chapter is a field manual for one part of the backend.</p></main>`,
-  ...Object.fromEntries(CHAPTERS.map(([slug, title, body], i) => [`/${slug}/`, `<title>${title} · Chapter 0${i + 1} · Backend Basics</title>${nav}<main><article>${body}</article></main>`])),
-};
-
-/** The book's site, readable straight from the browser. */
-async function serveBook(page: Page) {
-  await page.route(`${SITE}/**`, (route) => {
-    const html = pages[new URL(route.request().url()).pathname];
-    return html ? route.fulfill({ contentType: "text/html; charset=utf-8", headers: { "access-control-allow-origin": "*" }, body: `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}</body></html>` }) : route.fulfill({ status: 404, body: "Not found" });
-  });
-}
+/** The book's site, from tests/stub-site.mjs: the app server fetches chapters itself, so the browser can't fake them. */
+const SITE = `http://127.0.0.1:${process.env.E2E_SITE_PORT || 3996}`;
 
 async function readLink(page: Page, url: string) {
   await page.goto("/");
@@ -37,7 +17,6 @@ async function readLink(page: Page, url: string) {
 }
 
 test("a contents page becomes a book read chapter by chapter", async ({ page }) => {
-  await serveBook(page);
   await readLink(page, `${SITE}/`);
   const contentsUrl = page.url();
   const offer = page.getByRole("complementary", { name: "Book" });
@@ -93,7 +72,6 @@ test("a contents page becomes a book read chapter by chapter", async ({ page }) 
 });
 
 test("a single chapter offers the rest of its book, then and later", async ({ page }) => {
-  await serveBook(page);
   await readLink(page, `${SITE}/02-routing/`);
   const offer = page.getByRole("complementary", { name: "Book" });
   await expect(offer).toContainText("This is chapter 2 of 3 in Backend Basics");

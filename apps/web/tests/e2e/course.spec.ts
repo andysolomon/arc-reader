@@ -1,44 +1,18 @@
 import { test, expect, type Page } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
-import { buildPdf } from "../fixtures/pdf";
 
 const axe = async (page: Page) => {
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 };
 
-const COURSE = "https://cs101.school.example/";
-const SLIDES = "https://web.school.example/class/cs101/slides";
-const LECTURES = ["Introduction to Systems", "Models for Builders", "Retrieval", "Tools"];
-
-/** The course page as it stands once `posted` lectures have slides: a schedule whose links only say "Slides". */
-const schedule = (posted: number) => `<!doctype html><html><head><meta charset="utf-8"><title>CS101 | Building Things</title></head><body>
-  <h1>CS 101: Building Things</h1><p>Welcome to the course. Lecture materials are linked here as they are released.</p>
-  <table><thead><tr><th>Week</th><th>Date</th><th>Lecture</th></tr></thead><tbody>${LECTURES.map((title, i) => `<tr><td>${i + 1}</td><td>Mon Sep ${21 + i}</td>
-    <td><span class="lec-title">${title}</span><span class="lec-desc">What this lecture covers.</span>${i < posted ? `<a href="${SLIDES}/lecture0${i + 1}.pdf">Slides</a>` : ""}</td></tr>`).join("")}
-  </tbody></table></body></html>`;
-
-const deck = (n: number) => buildPdf([
-  `BT /F1 60 Tf 150 260 Td (Deck ${n}) Tj ET BT /F1 30 Tf 150 180 Td (CS 101) Tj ET`,
-  `BT /F1 40 Tf 50 450 Td (Topic ${n}) Tj ET BT /F1 24 Tf 50 300 Td (Lecture ${n} makes a point long enough to be read aloud) Tj ET`,
-]);
-
-/** The course's site: its page readable from the browser, its decks only through the server, which is handed the files. */
-async function serveCourse(page: Page, posted: { count: number }) {
-  await page.route(COURSE, (route) => route.fulfill({ contentType: "text/html; charset=utf-8", headers: { "access-control-allow-origin": "*" }, body: schedule(posted.count) }));
-  await page.route(`${SLIDES}/**`, (route) => route.abort());
-  await page.route("**/api/fetch?url=*", async (route) => {
-    const target = new URL(route.request().url()).searchParams.get("url") ?? "";
-    const n = Number(target.match(/lecture0(\d)\.pdf$/)?.[1]);
-    if (!n) return route.fallback();
-    const read = await page.request.post(`/api/fetch/pdf?name=lecture0${n}.pdf`, { data: deck(n), headers: { "content-type": "application/pdf" } });
-    await route.fulfill({ status: read.status(), contentType: "text/html; charset=utf-8", body: await read.text() });
-  });
-}
+/** The course page, from tests/stub-site.mjs: the app server fetches its decks itself, so the browser can't fake them. */
+const SITE = `http://127.0.0.1:${process.env.E2E_SITE_PORT || 3996}`;
+const COURSE = `${SITE}/cs101/`;
+const post = (page: Page, count: number) => page.request.post(`${SITE}/cs101/posted?count=${count}`);
 
 test("a course page becomes a shelf of its lectures, and takes new ones as they are posted", async ({ page }) => {
-  const posted = { count: 3 };
-  await serveCourse(page, posted);
+  await post(page, 3);
   await page.goto("/");
   await page.getByLabel("Link to read").fill(COURSE);
   await page.keyboard.press("Enter");
@@ -73,7 +47,7 @@ test("a course page becomes a shelf of its lectures, and takes new ones as they 
   // Nothing new yet; then the fourth lecture's slides are posted.
   await course.getByRole("button", { name: "Check for new lectures" }).click();
   await expect(page.getByRole("status").filter({ hasText: "No new lectures have been posted" })).toBeVisible();
-  posted.count = 4;
+  await post(page, 4);
   await course.getByRole("button", { name: "Check for new lectures" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Added 1 lecture of CS 101: Building Things" })).toBeVisible({ timeout: 30_000 });
   await expect(course).toContainText("4 lectures");

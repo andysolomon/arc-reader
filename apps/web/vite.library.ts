@@ -139,6 +139,16 @@ export class LibraryService {
     });
   }
 
+  /** Every document, as stored now. */
+  documents(): Promise<DocRecord[]> {
+    return this.serialized(async () => (await this.load()).docs);
+  }
+
+  /** Saves documents the server made itself, checked the way a client's are. */
+  async save(records: DocRecord[]): Promise<void> {
+    await this.sync({ changes: records.map((record) => ({ kind: "doc", record })) });
+  }
+
   private serialized<T>(task: () => Promise<T>): Promise<T> {
     const run = this.queue.catch(() => {}).then(task);
     this.queue = run;
@@ -231,8 +241,9 @@ export function libraryMiddleware(service: LibraryService): Connect.NextHandleFu
   };
 }
 
-export function sharedLibrary(env: Record<string, string>): Plugin {
-  const service = new LibraryService(resolve(env.LIBRARY_DATA_DIR || ".readaloud-library"));
+export const libraryService = (env: Record<string, string>) => new LibraryService(resolve(env.LIBRARY_DATA_DIR || ".readaloud-library"));
+
+export function sharedLibrary(env: Record<string, string>, service = libraryService(env)): Plugin {
   const middleware = libraryMiddleware(service);
   return {
     name: "readaloud:shared-library",
