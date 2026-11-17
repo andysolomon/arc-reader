@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon, Workflow, X } from "lucide-react";
-import { Button, IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
+import { IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
 import { syncLibrary } from "../lib/librarySync";
@@ -110,6 +110,9 @@ export function Reader() {
   const showLinks = hasLinks && linksOpen && !focus;
   const chapter = detailsRecord?.book && !readingSummary ? detailsRecord : null;
   const { previous, next } = chapter ? neighbours(library, chapter) : {};
+  // Back from the summary to the article, carrying on playing if the summary was.
+  const fullArticle = readingSummary && detailsRecord ? detailsRecord : null;
+  const readFullArticle = () => { if (fullArticle) void usePlayer.getState().open(fullArticle, { autoplay: usePlayer.getState().playing }); };
 
   const textControls = (
     <>
@@ -187,13 +190,19 @@ export function Reader() {
             <span aria-hidden className="listening-bars" data-active={playing && !loading}><i /><i /><i /><i /></span>
             <span className="shrink-0 font-medium" role="status">{loading ? "Preparing audio" : ended ? "Reading complete" : playing ? "Now listening" : started ? "Paused" : "Ready to listen"}</span>
             <span className="hidden min-w-0 truncate sm:block">{offline ? "Browser voice" : getVoice(doc.voice).name}</span>
+            {fullArticle && (
+              <button type="button" onClick={readFullArticle} className="ml-auto inline-flex shrink-0 items-center gap-1.5 border-0 bg-transparent p-0 font-medium text-accent hover:text-fg">
+                Full article
+                <ArrowRight size={13} strokeWidth={1.5} aria-hidden />
+              </button>
+            )}
             {ended && next && (
               <button type="button" onClick={() => openChapter(next)} className="ml-auto inline-flex min-w-0 items-center gap-1.5 border-0 bg-transparent p-0 font-medium text-accent hover:text-fg">
                 <span className="truncate">Next: {next.rec.title}</span>
                 <ArrowRight size={13} strokeWidth={1.5} className="shrink-0" aria-hidden />
               </button>
             )}
-            <span className={cn("shrink-0 tabular-nums", !(ended && next) && "ml-auto")}>{ended ? <Check size={15} aria-label="Complete" /> : `${remainingMinutes} min left`}</span>
+            <span className={cn("shrink-0 tabular-nums", !(ended && next) && !fullArticle && "ml-auto")}>{ended ? <Check size={15} aria-label="Complete" /> : `${remainingMinutes} min left`}</span>
             <span className="w-9 text-right font-mono tabular-nums">{progress}%</span>
           </div>
           <div className="reader-progress" aria-hidden><span style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div>
@@ -239,12 +248,7 @@ export function Reader() {
           )}
           {ready && !readingSummary && doc.voice === JAMAICAN_PATOIS_VOICE_ID && <p className="mb-6 text-sm text-fg2">Jamaican Patois adaptation · Your original is saved. Choose another voice to read the original.</p>}
           {ready && readingSummary && record?.summary && (
-            <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-fg2">
-              <span className="flex-1">Summary · {summaryModelLabel(record.summary.model)}</span>
-              <Button variant="link" className="underline underline-offset-2" onClick={() => void usePlayer.getState().open(record, { autoplay: usePlayer.getState().playing })}>
-                Read the full article
-              </Button>
-            </div>
+            <p className="mb-6 mt-0 text-sm text-fg2">Summary · {summaryModelLabel(record.summary.model)}</p>
           )}
           {detailsRecord && details && !readingSummary && (
             <DocumentDetails
@@ -273,6 +277,14 @@ export function Reader() {
               <span className="block h-[1.2em] w-full animate-pulse rounded-[6px] bg-bg3 motion-reduce:animate-none" />
               <span className="block h-[1.2em] w-[85%] animate-pulse rounded-[6px] bg-bg3 motion-reduce:animate-none" />
               <span className="block h-[1.2em] w-[60%] animate-pulse rounded-[6px] bg-bg3 motion-reduce:animate-none" />
+            </div>
+          )}
+          {fullArticle && (
+            <div className="mt-14 border-t border-line pt-8">
+              <button type="button" onClick={readFullArticle} className="flex w-full min-w-0 flex-col gap-1 rounded-card border border-line bg-bg2 px-5 py-4 text-left font-sans transition-colors duration-fast hover:border-fg3 hover:bg-bg3">
+                <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2">End of summary · Read the full article<ArrowRight size={13} strokeWidth={1.5} aria-hidden /></span>
+                <span className="line-clamp-2 font-serif text-[17px] leading-snug text-fg">{fullArticle.title}</span>
+              </button>
             </div>
           )}
           {chapter && !focus && <ChapterNav previous={previous} next={next} className="mt-14 border-t border-line pt-8" />}
