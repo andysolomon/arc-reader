@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { xPostHtml, xPostId, type FxTweet } from "./vite.xpost";
+import { xPostHtml, xPostId, xPostVideo, type FxTweet } from "./vite.xpost";
 import { htmlToText } from "./src/lib/fetchUrl";
 
 const POST = "https://x.com/_vmlops/status/2119812449440563432";
@@ -67,5 +67,33 @@ describe("X posts", () => {
     expect(page.text).toContain("Second paragraph");
     expect(page.text).toContain("A cat");
     expect(page.text).toContain("The quoted words");
+  });
+
+  it("shows a video by its poster frame, so a post that is only a video still opens", () => {
+    const html = xPostHtml({
+      author: { name: "Joseph" },
+      media: { videos: [
+        { url: "https://video.twimg.com/tweet_video/loop.mp4", thumbnail_url: "https://pbs.twimg.com/tweet_video_thumb/loop.jpg", duration: 3, type: "gif" },
+        { url: "https://video.twimg.com/amplify_video/1/vid/avc1/1280x720/big.mp4", thumbnail_url: "https://pbs.twimg.com/amplify_video_thumb/1/img/poster.jpg", duration: 2186.617, type: "video" },
+      ] },
+    });
+    const page = htmlToText(html, "https://x.com/joseph/status/20");
+    expect(page.title).toBe("Post by Joseph");
+    expect(page.text).toContain("poster.jpg");
+    expect(page.text).toContain("Video, 36 minutes");
+    expect(page.text).not.toContain("loop.jpg");
+    expect(page.text.length).toBeGreaterThan(40);
+  });
+
+  it("picks the smallest MP4 of a post's video, from X's own video host only", () => {
+    const big = "https://video.twimg.com/amplify_video/1/vid/avc1/1280x720/big.mp4?tag=29";
+    const small = "https://video.twimg.com/amplify_video/1/vid/avc1/480x270/small.mp4?tag=29";
+    const formats = [{ url: "https://video.twimg.com/amplify_video/1/pl/list.m3u8", container: "m3u8" }, { url: big, container: "mp4", bitrate: 2_176_000 }, { url: small, container: "mp4", bitrate: 256_000 }];
+    expect(xPostVideo({ media: { videos: [{ url: big, duration: 2186.617, type: "video", formats }] } })).toEqual({ url: small, seconds: 2186.617 });
+    expect(xPostVideo({ media: { videos: [{ url: big, duration: 12 }] } })).toEqual({ url: big, seconds: 12 });
+    expect(xPostVideo({ media: { videos: [{ url: big, duration: 3, type: "gif" }] } })).toBeNull();
+    expect(xPostVideo({ media: { videos: [{ url: "https://evil.example/video.mp4", duration: 12 }] } })).toBeNull();
+    expect(xPostVideo({ media: { videos: [{ url: "http://video.twimg.com/a.mp4", duration: 12 }] } })).toBeNull();
+    expect(xPostVideo({ text: "No media", quote: { media: { videos: [{ url: big, duration: 12 }] } } })).toBeNull();
   });
 });

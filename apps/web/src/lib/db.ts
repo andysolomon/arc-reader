@@ -73,6 +73,8 @@ export interface DocRecord {
   codeSummaries?: Record<string, string>;
   /** Cached descriptions keyed by visual source, alt text, and caption. */
   visualDescriptions?: Record<string, string>;
+  /** The post's video has been transcribed into `text` (see videoTranscript.ts); `seconds` is the video's length. */
+  transcript?: { seconds: number; at: number };
   meta?: DocMeta;
   book?: DocBook;
   category?: DocCategory;
