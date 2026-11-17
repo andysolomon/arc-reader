@@ -5,7 +5,7 @@ import { PageStyles } from "./svgStyles";
 import type { DocMeta } from "./db";
 
 import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
-import { bookContents, breadcrumbParent, openedAt, type BookContents } from "./book";
+import { bookContents, breadcrumbParent, openedAt, pageKey, sectionsOf, withSections, type BookChapter, type BookContents } from "./book";
 import { fetchArchiveBook } from "./archive";
 import { ReadError } from "./readError";
 
@@ -365,6 +365,44 @@ async function withParentBook(page: Fetched, signal?: AbortSignal): Promise<Fetc
   }
 }
 
+const PARTS_TIMEOUT_MS = 30000;
+const PARTS_AT_ONCE = 4;
+
+/**
+ * A book in parts keeps each part's sections on the part's own page, and they are what there is
+ * to read: every part not yet seen open is asked for its sections. A contents page that shows no
+ * sections is settled by its first chapter, so an ordinary book costs one page.
+ */
+async function withPartSections(page: Fetched, signal?: AbortSignal): Promise<Fetched> {
+  const { book } = page;
+  if (!book?.unread) return page;
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), PARTS_TIMEOUT_MS);
+  const abort = () => stop.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  const found = new Map<string, BookChapter[]>();
+  const read = async (url: string) => {
+    try {
+      const sections = sectionsOf(new DOMParser().parseFromString(await pageHtml(url, stop.signal), "text/html"), url);
+      if (sections.length) found.set(pageKey(url), sections);
+    } catch { /* A part that can't be read stays one chapter. */ }
+  };
+  try {
+    const queue = [...book.unread];
+    if (queue.length === book.chapters.length) {
+      await read(queue.shift()!);
+      if (!found.size) queue.length = 0;
+    }
+    const worker = async () => { for (let url = queue.shift(); url; url = queue.shift()) await read(url); };
+    await Promise.all(Array.from({ length: PARTS_AT_ONCE }, worker));
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    return { ...page, book: withSections(book, found) };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
 /**
  * Direct fetch (works for CORS-enabled pages), then the dev/preview server's /api/fetch, then VITE_FETCH_PROXY.
  * A book on the Internet Archive is read from its files instead of its page. Throws a ReadError
@@ -381,12 +419,12 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
     if (e instanceof ReadError || signal?.aborted) throw e;
   }
   try {
-    return await withParentBook(await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain, signal), signal);
+    return await withPartSections(await withParentBook(await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain, signal), signal), signal);
   } catch (e) {
     if (signal?.aborted) throw e;
   }
   try {
-    return await withParentBook(await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain, signal), signal);
+    return await withPartSections(await withParentBook(await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain, signal), signal), signal);
   } catch (e) {
     if (!PROXY || signal?.aborted) throw e;
   }
