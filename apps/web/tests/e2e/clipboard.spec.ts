@@ -19,6 +19,12 @@ async function expectReading(page: Page, text = "The quick brown fox") {
   await expect(page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Pause/ })).toHaveAttribute("data-playing", "true");
 }
 
+async function expectOpenedPaused(page: Page, text = "The quick brown fox") {
+  await expect(page).toHaveURL(/\/read\/[a-z0-9-]+$/);
+  await expect(page.locator("article")).toContainText(text);
+  await expect(page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Play/ })).toHaveAttribute("data-playing", "false");
+}
+
 test("pasting outside fields imports text even without the clipboard API", async ({ page }) => {
   await withoutClipboardApi(page);
   await page.goto("/library");
@@ -57,7 +63,7 @@ test("pasting in text fields and editable content leaves normal editing alone", 
   await expect(page.getByText("Nothing here yet.", { exact: false })).toBeVisible();
 });
 
-test("a pasted article URL imports the article instead of reading its address", async ({ page }) => {
+test("a pasted article URL imports the article, opened paused, instead of reading its address", async ({ page }) => {
   await page.route("https://example.com/story", (route) => route.fulfill({
     contentType: "text/html",
     headers: { "Access-Control-Allow-Origin": "*" },
@@ -66,7 +72,7 @@ test("a pasted article URL imports the article instead of reading its address", 
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await paste(page, "https://example.com/story");
-  await expectReading(page);
+  await expectOpenedPaused(page);
   await expect(page.getByRole("heading", { name: "Clipboard article", exact: true })).toBeVisible();
 });
 
@@ -94,7 +100,7 @@ test("repeated paste while fetching imports only one document", async ({ page })
   await paste(page, "https://example.com/story");
   await paste(page, TEXT);
   finishFetch();
-  await expectReading(page);
+  await expectOpenedPaused(page);
   await page.getByRole("link", { name: "Library", exact: true }).click();
   await expect(page.locator('[data-screen="library"] li')).toHaveCount(1);
 });

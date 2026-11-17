@@ -75,7 +75,8 @@ export function Compose() {
     ta.current?.focus();
   };
 
-  const readLink = async (raw: string) => {
+  /** A pasted link opens paused; only Listen (or Enter) starts reading it. */
+  const readLink = async (raw: string, play = true) => {
     const input = raw.trim();
     if (!input || busy) return;
     const host = hostOf(normalizeUrl(input));
@@ -85,7 +86,7 @@ export function Compose() {
       const f = await fetchReadable(input);
       const rec = await importPage(f, { source: "url" });
       // A contents page is there to be swapped for its chapters, so it opens without reading itself out.
-      const listen = !isContentsPage(f);
+      const listen = play && !isContentsPage(f);
       await openDocument(rec, navigate, { autoplay: listen, resume: false });
     } catch (e) {
       if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
@@ -109,12 +110,12 @@ export function Compose() {
   };
 
   /** A link that ended up in the text box moves to the link field and is fetched from there. */
-  const readLinkFromText = (link: string) => {
+  const readLinkFromText = (link: string, play = true) => {
     setText("");
     setTitle(undefined);
     setTextOpen(false);
     setUrl(link);
-    return readLink(link);
+    return readLink(link, play);
   };
 
   /** Visible text wins; otherwise the link; a hidden draft is read only when there is no link. */
@@ -139,7 +140,7 @@ export function Compose() {
     e.preventDefault();
     if (looksLikeUrl(pasted)) {
       setUrl(pasted);
-      void readLink(pasted);
+      void readLink(pasted, false);
       return;
     }
     setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")}\n\n${pasted}` : pasted));
@@ -153,7 +154,7 @@ export function Compose() {
     // Only when the link would be all there is in the box; one pasted into a sentence is part of the text.
     if (busy || !isWebAddress(pasted) || (value.slice(0, selectionStart) + value.slice(selectionEnd)).trim()) return;
     e.preventDefault();
-    void readLinkFromText(pasted);
+    void readLinkFromText(pasted, false);
   };
 
   const onLinkKey = (e: KeyboardEvent<HTMLInputElement>) => {
