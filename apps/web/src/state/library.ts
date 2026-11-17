@@ -40,6 +40,16 @@ interface LibraryState {
   touch: (id: string) => Promise<void>;
 }
 
+// Measuring a document means segmenting all of it, so remember each estimate until its text changes.
+const estimates = new Map<string, { text: string; total: number }>();
+function estimatedTotal(rec: DocRecord) {
+  const saved = estimates.get(rec.id);
+  if (saved?.text === rec.text) return saved.total;
+  const total = estimateTotal(rec.text);
+  estimates.set(rec.id, { text: rec.text, total });
+  return total;
+}
+
 let refreshVersion = 0;
 export const useLibrary = create<LibraryState>()((set, get) => ({
   items: [],
@@ -66,7 +76,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
         items: all
           .map((rec, index) => {
             const p = byId.get(rec.id);
-            return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimateTotal(rec.text), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, openaiModel, shared, plans[index]) };
+            return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimatedTotal(rec), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, openaiModel, shared, plans[index]) };
           })
           // Newest first by when the document was added: filing, editing or opening it doesn't move it.
           .sort((a, b) => b.rec.createdAt - a.rec.createdAt),
