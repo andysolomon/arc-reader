@@ -248,6 +248,31 @@ describe("finding the sections of a book in parts", () => {
     expect(book).not.toHaveProperty("unread");
   });
 
+  it("takes an unnumbered last part whose sections are numbered after the others, and leaves other trailing links alone", async () => {
+    const APPENDICES = `${DOCS}/appendices/`;
+    const glossary = `${APPENDICES}glossary/`;
+    const lab = `${APPENDICES}lab/`;
+    // The cards go on to the appendices and the navigation to an About page; a figure links its full-size view.
+    const cards = home.replace("</ul>", `<li><a href="${APPENDICES}"><span>A</span><h3>Appendices</h3><p>The glossary and the lab.</p></a></li></ul><p><a href="${DOCS}/figures/1-0-1/"><img src="/f.svg" alt=""></a></p>`);
+    const appendixSidebar = sidebar(-1).replace("</ul></nav>", `<li><a href="${APPENDICES}">Appendices</a><ul><li><a href="${glossary}">3.1 · Glossary</a></li><li><a href="${lab}">3.2 · Setting up your lab</a></li></ul></li></ul></nav>`);
+    const fetched = site();
+    const pages = new Map<string, string>([[`${DOCS}/`, cards], [APPENDICES, `<title>Appendices</title>${appendixSidebar}${body}`], [glossary, `<title>Glossary</title>${appendixSidebar}${body}`]]);
+    const fallback = fetched.getMockImplementation()!;
+    fetched.mockImplementation(async (input: string) => pages.has(input) ? new Response(pages.get(input), { headers: { "content-type": "text/html" } }) : fallback(input));
+    const appendix = [{ url: APPENDICES, title: "Appendices" }, { url: glossary, title: "Glossary" }, { url: lab, title: "Setting up your lab" }];
+    const contents = (await fetchReadable(`${DOCS}/`)).book!;
+    expect(contents.chapters).toEqual([...whole, ...appendix]);
+    expect(contents).not.toHaveProperty("tail");
+    // From the appendices' own pages, the same book.
+    const fromGlossary = (await fetchReadable(glossary)).book!;
+    expect(fromGlossary).toMatchObject({ id: contents.id, index: whole.length + 1 });
+    expect(fromGlossary.chapters).toEqual(contents.chapters);
+    expect(bookContents(parse(pages.get(APPENDICES)!), APPENDICES)?.chapters.slice(-3)).toEqual(appendix);
+    // A trailing link whose page numbers no sections after the parts stays out.
+    pages.set(APPENDICES, `<title>About</title>${sidebar(-1)}${body}`);
+    expect((await fetchReadable(`${DOCS}/`)).book!.chapters).toEqual(whole);
+  });
+
   it("leaves a part that can't be read as one chapter", async () => {
     const fetched = site();
     fetched.mockImplementation(async (input: string) => input === partUrl(1) ? new Response("nope", { status: 500 })
