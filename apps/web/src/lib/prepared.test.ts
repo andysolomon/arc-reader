@@ -82,3 +82,15 @@ describe("passages shared between documents", () => {
     expect(preparedVoices(copy, [bella], keys, "gpt-4o-mini-tts", all)[0].fraction).toBe(1);
   });
 });
+
+describe("reading plans", () => {
+  it("are reused until the text they were made from changes", () => {
+    const doc = { ...rec, id: "plan" };
+    const plan = planReading(doc);
+    expect(planReading({ ...doc })).toBe(plan);
+    expect(planReading({ ...doc, text: "Something else." })).not.toBe(plan);
+    expect(planReading({ ...doc, text: "Something else." }).original.sentences.map((s) => s.text)).toEqual(["Something else."]);
+    const summarised = { ...doc, codeSummaries: { k: "An explanation." } };
+    expect(planReading(summarised)).not.toBe(planReading(doc));
+  });
+});
