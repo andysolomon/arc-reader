@@ -415,8 +415,16 @@ test("the player's voice avatar picks this document's voice in place, prepared v
   await expect(options.nth(0)).toContainText("Bella");
   await expect(options.nth(0)).toHaveAttribute("aria-checked", "true");
   await expect(options.nth(1)).toContainText("Jasper");
-  await expect(options.nth(1)).toContainText("Prepared");
+  await expect(options.nth(1)).toContainText("Prepared · Calm · narrator · VoiceStudio");
+  // The rest say what each voice sounds like, under the service that renders them and what it costs.
   await expect(picker.getByText("Other voices")).toBeVisible();
+  await expect(picker.getByText("Generates as it reads")).toHaveCount(0);
+  await expect(picker.getByRole("group", { name: "VoiceStudio: Free" }).getByRole("menuitemradio", { name: /Luna/ })).toContainText("Bright · clear");
+  await expect(picker.getByRole("group", { name: "Phonon: Free · keeps up with reading" }).getByRole("menuitemradio", { name: /Captain Silas Blackwater/ })).toContainText("Character · pirate");
+  await expect(picker.getByRole("group", { name: /^ChatGPT: ≈\$[\d.]+ to read this document$/ }).getByRole("menuitemradio", { name: /Alloy/ })).toContainText("Neutral · clear");
+  await picker.getByRole("textbox", { name: "Find a voice" }).fill("british");
+  await expect(options).toHaveCount(3);
+  await picker.getByRole("textbox", { name: "Find a voice" }).fill("");
   await picker.getByRole("menuitemradio", { name: /Jasper/ }).click();
   await expect(picker).toHaveCount(0);
   await expect(page).toHaveURL(/\/read\//);

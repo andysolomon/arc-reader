@@ -39,4 +39,4 @@ export * from "./components/Segmented";
 export * from "./components/Input";
 export * from "./components/icons";
 
-export { voiceAvatarIdentity, hasCuratedPortrait, type PortraitVoice } from "./lib/voicePortraits";
+export { voiceAvatarIdentity, hasCuratedPortrait, voicePortrait, type PortraitVoice } from "./lib/voicePortraits";
