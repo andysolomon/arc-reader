@@ -130,7 +130,7 @@ function withDom(): Promise<void> {
 export const readOnServer = (pictures?: SlidePictures): ReadChapter => async (url) => {
   await withDom();
   const { status, type, body } = await fetchUpstream(new URL(url), pictures);
-  return readChapterPage(new Response(body, { status, headers: { "content-type": type } }), url);
+  return readChapterPage(new Response(typeof body === "string" ? body : new Uint8Array(body), { status, headers: { "content-type": type } }), url);
 };
 
 export function bookImportMiddleware(imports: BookImports): Connect.NextHandleFunction {

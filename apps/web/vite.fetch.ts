@@ -4,6 +4,7 @@ import type { Connect, Plugin } from "vite";
 import { FXTWITTER_API, xPostHtml, xPostId, type FxTweet } from "./vite.xpost";
 import { MAX_PDF_BYTES, isPdf, isPdfType, pdfPage, type SlidePictures } from "./vite.pdf";
 import { SLIDE_ROUTE, SlideStore, slideMiddleware } from "./vite.slides";
+import { MAX_BOOK_BYTES, isEpubFile } from "./src/lib/epubType";
 
 /**
  * GET /api/fetch?url=… fetches a web page server-side and returns it as-is.
@@ -12,7 +13,8 @@ import { SLIDE_ROUTE, SlideStore, slideMiddleware } from "./vite.slides";
  * X posts come from FxTwitter's API as HTML, since x.com itself serves only a script shell.
  * A PDF, up to 60 MB, comes back as an HTML page of its text; POST /api/fetch/pdf does the
  * same for a PDF file sent as the request body. A deck's slides that show more than text come
- * with pictures, served from /api/slides.
+ * with pictures, served from /api/slides. An EPUB, up to 60 MB, comes back as the file it is,
+ * for the browser to cut into chapters.
  */
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -20,16 +22,18 @@ const TIMEOUT_MS = 20_000;
 /** A deck of slides runs to tens of megabytes. */
 const PDF_TIMEOUT_MS = 120_000;
 
-function send(res: ServerResponse, status: number, body: string, type = "application/json") {
-  res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
+function send(res: ServerResponse, status: number, body: string | Buffer, type = "application/json", disposition?: string) {
+  res.writeHead(status, { "content-type": type, "cache-control": "no-store", ...(disposition ? { "content-disposition": disposition } : {}) });
   res.end(body);
 }
 
-/** What the server got for a page: its body as text, or a JSON error to pass on. */
+/** What the server got for a page: its body as text, an EPUB's bytes, or a JSON error to pass on. */
 export interface Upstream {
   status: number;
   type: string;
-  body: string;
+  body: string | Buffer;
+  /** An EPUB's file name, as the site sent it. */
+  disposition?: string;
 }
 
 const failure = (status: number, error: Record<string, unknown>): Upstream => ({ status, type: "application/json", body: JSON.stringify(error) });
@@ -58,6 +62,11 @@ export async function fetchUpstream(url: URL, pictures?: SlidePictures): Promise
     }
     const buf = Buffer.from(await r.arrayBuffer());
     if (isPdf(buf, type)) return await readPdf(buf, r.url || url.href, pictures);
+    if (isEpubFile(buf, type, url.pathname)) {
+      if (buf.byteLength > MAX_BOOK_BYTES) return failure(413, { error: "too_large" });
+      const name = r.headers.get("content-disposition");
+      return { status: 200, type: "application/epub+zip", body: buf, ...(name ? { disposition: name } : {}) };
+    }
     if (buf.byteLength > MAX_BYTES) return failure(413, { error: "too_large" });
     return { status: 200, type: type || "text/plain", body: buf.toString("utf8") };
   } catch (e) {
@@ -76,8 +85,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, pictures?: Slid
   } catch {
     return send(res, 400, JSON.stringify({ error: "bad_url" }));
   }
-  const { status, body, type } = await fetchUpstream(url, pictures);
-  send(res, status, body, type);
+  const { status, body, type, disposition } = await fetchUpstream(url, pictures);
+  send(res, status, body, type, disposition);
 }
 
 async function readPdf(bytes: Buffer, url: string, pictures?: SlidePictures): Promise<Upstream> {

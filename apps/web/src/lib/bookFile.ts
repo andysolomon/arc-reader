@@ -2,6 +2,7 @@ import { strFromU8, unzipSync } from "fflate";
 import { MAX_CHAPTERS, type BookContents } from "./book";
 import { decodeText, splitBook, type BookPart } from "./bookText";
 import type { DocMeta } from "./db";
+import { MAX_BOOK_BYTES, isEpubFile } from "./epubType";
 import { htmlToText, type Fetched } from "./fetchUrl";
 import { hash } from "./hash";
 import { ReadError } from "./readError";
@@ -13,8 +14,7 @@ import { ReadError } from "./readError";
  * are, in its table of contents, and is cut there.
  */
 
-/** A file larger than this is not one book */
-export const MAX_BOOK_BYTES = 60 * 1024 * 1024;
+export { MAX_BOOK_BYTES };
 /** Less text than this under a heading is a divider ("Part One") or an epigraph, and goes with the chapter after it */
 const MIN_CHAPTER_CHARS = 400;
 /** One "chapter" longer than this is a whole book in one file, and is cut by its headings instead */
@@ -42,19 +42,20 @@ const fromFileName = (name: string) => tidy(name.replace(/\.[a-z0-9]{2,5}$/i, ""
  * The book as the app reads any page: its first chapter, with the others in `book`. The id
  * comes from the title, author and chapter list, not the file's name, so the same book chosen
  * again, or on another device, meets the copy already shelved instead of being added twice;
- * another edition, cut into different chapters, gets a shelf of its own.
+ * another edition, cut into different chapters, gets a shelf of its own. `shown` is the title
+ * with its subtitle, which names the book on the shelf without changing which book it is.
  */
-function asBook(file: string, title: string, meta: DocMeta, parts: BookPart[]): Fetched {
+function asBook(file: string, title: string, meta: DocMeta, parts: BookPart[], shown = title): Fetched {
   if (!parts.length) throw new ReadError(NO_TEXT);
   const book: BookContents | undefined = parts.length > 1 ? {
     id: `book:${hash(`file/${title.toLowerCase()}/${(meta.author ?? "").toLowerCase()}/${parts.map((part) => part.title).join("\n")}`)}`,
-    title,
+    title: shown,
     chapters: parts.slice(0, MAX_CHAPTERS).map((part) => ({ url: "", title: part.title, text: part.text })),
     index: 0,
     meta,
     file,
   } : undefined;
-  return { title, text: parts[0].text, domain: file, meta, links: [], ...(book ? { book } : {}) };
+  return { title: shown, text: parts[0].text, domain: file, meta, links: [], ...(book ? { book } : {}) };
 }
 
 /** Project Gutenberg's header names the book: "Title: Animal Farm", "Author: …", "Release date: …". */
@@ -101,6 +102,24 @@ const xml = (text: string) => new DOMParser().parseFromString(text, "application
 const parsed = (doc: Document) => !doc.getElementsByTagName("parsererror").length;
 const byName = (root: Document | Element, name: string) => Array.from(root.getElementsByTagNameNS("*", name));
 const firstText = (root: Document | Element, name: string) => tidy(byName(root, name)[0]?.textContent ?? "");
+const OPS = "http://www.idpf.org/2007/ops";
+const classed = (el: Element, name: string) => (el.getAttribute("class") ?? "").split(/\s+/).includes(name);
+/** A subtitle longer than this is a blurb */
+const MAX_SUBTITLE_CHARS = 200;
+/** The title page is among the first few files */
+const TITLE_PAGE_FILES = 3;
+
+/**
+ * The titles a book's record gives: its own, and a subtitle when the record marks one. The
+ * volumes of a set often share a title and differ only below it.
+ */
+function recordTitles(metadata: Element): { title: string; subtitle: string } {
+  const titles = byName(metadata, "title");
+  const kind = (title: Element) => tidy(byName(metadata, "meta").find((m) => m.getAttribute("property") === "title-type" && m.getAttribute("refines") === `#${title.getAttribute("id")}`)?.textContent ?? "");
+  const main = titles.find((title) => kind(title) === "main") ?? titles[0];
+  const sub = titles.find((title) => title !== main && kind(title) === "subtitle");
+  return { title: tidy(main?.textContent ?? ""), subtitle: tidy(sub?.textContent ?? "") };
+}
 
 /** `href` resolved against the file it appears in, as a path inside the archive, and its fragment. */
 function resolve(from: string, href: string): { path: string; anchor?: string } {
@@ -261,6 +280,16 @@ class Chapters {
     return text.split(GUTENBERG_END)[0].trim();
   }
 
+  /** The subtitle a title page sets under the title, when this file is the title page and marks one */
+  subtitle(index: number): string {
+    const page = this.page(index);
+    if (!page) return "";
+    const marked = (el: Element) => /\btitlepage\b/.test(`${el.getAttribute("epub:type") ?? el.getAttributeNS(OPS, "type") ?? ""} ${el.getAttribute("class") ?? ""}`);
+    const titlePage = [page.body, ...byName(page.body, "*")].find(marked);
+    const subtitle = titlePage && byName(titlePage, "*").find((el) => classed(el, "subtitle"));
+    return tidy(subtitle?.textContent ?? "");
+  }
+
   /** The first heading in a file, to name a chapter when the book has no contents */
   heading(index: number): string {
     const page = this.page(index);
@@ -306,7 +335,8 @@ export function epubBook(name: string, bytes: Uint8Array): Fetched {
   if (!spine.length) throw new ReadError(NO_TEXT);
 
   const metadata = byName(opf, "metadata")[0] ?? opf.documentElement;
-  const title = firstText(metadata, "title") || fromFileName(name);
+  const record = recordTitles(metadata);
+  const title = record.title || fromFileName(name);
   const creators = byName(metadata, "creator").map((c) => tidy(c.textContent ?? "")).filter(Boolean).slice(0, 3);
   const published = firstText(metadata, "date").slice(0, 10);
   const description = tidy(firstText(metadata, "description").replace(/<[^>]+>/g, " ")).slice(0, 2000);
@@ -339,6 +369,8 @@ export function epubBook(name: string, bytes: Uint8Array): Fetched {
   const ordered = cuts.every((cut, i) => i === 0 || cut.spine >= cuts[i - 1].spine);
 
   const chapters = new Chapters(spine, read);
+  const subtitle = record.subtitle || spine.slice(0, TITLE_PAGE_FILES).map((_, i) => chapters.subtitle(i)).find(Boolean) || "";
+  const shown = subtitle && subtitle.length <= MAX_SUBTITLE_CHARS && !title.toLowerCase().includes(subtitle.toLowerCase()) ? `${title}: ${subtitle}` : title;
   let parts: BookPart[];
   if (ordered && cuts.filter((cut) => !cut.skip).length >= 2) {
     parts = cuts.flatMap((cut, i) => {
@@ -360,7 +392,7 @@ export function epubBook(name: string, bytes: Uint8Array): Fetched {
     const split = splitBook(parts[0].text.replace(/^#{1,6} /gm, ""));
     if (split.length > 1) parts = split;
   }
-  return asBook(name, title, meta, parts);
+  return asBook(name, title, meta, parts, shown);
 }
 
 const isEpub = (file: File) => file.type === "application/epub+zip" || /\.epub$/i.test(file.name);
