@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate, useNavigationType } from "react-router-dom";
-import { Search, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, Speech, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X, CloudCheck, CloudOff, CloudUpload, RefreshCw, LoaderCircle } from "lucide-react";
+import { ArrowUp, Search, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, Speech, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X, CloudCheck, CloudOff, CloudUpload, RefreshCw, LoaderCircle } from "lucide-react";
 import { Button, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -75,9 +75,22 @@ export function LibraryPage() {
   const detailsItem = details ? items.find((it) => it.rec.id === details.docId) : undefined;
   const searchRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // Once a screen's worth has scrolled away, a button offers the way back up.
+  const [farDown, setFarDown] = useState(false);
+  const onScroll = (el: HTMLElement) => {
+    left.top = el.scrollTop;
+    setFarDown(el.scrollTop > el.clientHeight);
+  };
+  const toTop = () => {
+    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    scrollRef.current?.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+    // The button goes away at the top, so focus lands where the page starts rather than nowhere.
+    headingRef.current?.focus({ preventScroll: true });
+  };
 
   useLayoutEffect(() => {
-    if (returning && scrollRef.current) scrollRef.current.scrollTop = left.top;
+    if (returning && scrollRef.current) { scrollRef.current.scrollTop = left.top; onScroll(scrollRef.current); }
     else left.top = 0;
     // Only how the Library was entered matters.
   }, []);
@@ -236,11 +249,12 @@ export function LibraryPage() {
   );
 
   return (
-    <section ref={scrollRef} onScroll={(e) => { left.top = e.currentTarget.scrollTop; }} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
+    <>
+    <section ref={scrollRef} onScroll={(e) => onScroll(e.currentTarget)} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
       <div className="mx-auto flex max-w-[880px] flex-col gap-4">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex min-w-0 flex-1 items-baseline gap-2.5 sm:flex-none">
-            <h1 className="m-0 font-serif text-[26px] font-medium">Library</h1>
+            <h1 ref={headingRef} tabIndex={-1} className="m-0 font-serif text-[26px] font-medium focus:outline-none">Library</h1>
             {loaded && items.length > 0 && (
               <span className="truncate text-[13px] tabular-nums text-fg2" aria-label={sync.status === "synced" ? "Synced document count" : undefined}>
                 {narrowing ? `${filtered.length} of ${items.length}` : documentCount} {documentCount === 1 ? "document" : "documents"}
@@ -403,6 +417,15 @@ export function LibraryPage() {
       {detailsItem && details && !prepareIds && <PreparationDetails it={detailsItem} reading={details} defaultVoice={defaultVoice} onClose={closeDetails} onChooseVoices={() => { setDetails(null); setPrepareIds([details.docId]); }} />}
       {prepareIds && <PrepareDialog documents={items.filter((it) => prepareIds.includes(it.rec.id))} onClose={closePrepare} onQueued={stopSelecting} />}
     </section>
+    {/* Floats over the list's bottom corner, clear of the player when one is open. */}
+    {farDown && (
+      <div className="absolute right-5 z-20 animate-rise motion-reduce:animate-none sm:right-10" style={{ bottom: hasDoc ? 156 : 24 }}>
+        <IconButton label="Back to top" round size={touch ? 48 : 44} onClick={toTop} className="border border-line bg-bg2 text-fg shadow-overlay backdrop-blur-xl hover:bg-bg3">
+          <ArrowUp size={touch ? 22 : 20} strokeWidth={1.5} />
+        </IconButton>
+      </div>
+    )}
+    </>
   );
 }
 
