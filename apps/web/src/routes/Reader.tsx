@@ -289,7 +289,7 @@ export function Reader() {
               </button>
             </div>
           )}
-          {chapter && !focus && <ChapterNav previous={previous} next={next} className="mt-14 border-t border-line pt-8" />}
+          {chapter && !focus && <ChapterNav previous={previous} next={next} book={chapter.book!.id} className="mt-14 border-t border-line pt-8" />}
         </motion.div>
       </div>
       {showLinks && bp !== "sm" && (

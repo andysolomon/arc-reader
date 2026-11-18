@@ -106,22 +106,23 @@ export function useOpenChapter() {
 }
 
 /** The chapters either side of this one, at the foot of the text. */
-export function ChapterNav({ previous, next, className }: { previous?: LibraryItem; next?: LibraryItem; className?: string }) {
+export function ChapterNav({ previous, next, book, className }: { previous?: LibraryItem; next?: LibraryItem; /** The open chapter's book: a neighbour from another is in the series' volume before or after */ book?: string; className?: string }) {
   const open = useOpenChapter();
   if (!previous && !next) return null;
   const { One } = partNames((previous ?? next)!.rec.book);
+  const from = (it: LibraryItem) => book && it.rec.book!.id !== book ? " volume" : "";
   const card = "flex min-w-0 flex-1 basis-56 flex-col gap-1 rounded-card border border-line bg-bg2 px-5 py-4 text-left font-sans transition-colors duration-fast hover:border-fg3 hover:bg-bg3";
   return (
     <nav aria-label={`${One}s`} className={cn("flex flex-wrap gap-3", className)}>
       {previous && (
         <button type="button" onClick={() => open(previous)} className={card}>
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2"><ArrowLeft size={13} strokeWidth={1.5} aria-hidden />Previous · {One} {previous.rec.book!.chapter}</span>
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2"><ArrowLeft size={13} strokeWidth={1.5} aria-hidden />Previous{from(previous)} · {One} {previous.rec.book!.chapter}</span>
           <span className="line-clamp-2 font-serif text-[17px] leading-snug text-fg">{previous.rec.title}</span>
         </button>
       )}
       {next && (
         <button type="button" onClick={() => open(next)} className={cn(card, "items-end text-right")}>
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2">Next · {One} {next.rec.book!.chapter}<ArrowRight size={13} strokeWidth={1.5} aria-hidden /></span>
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-fg2">Next{from(next)} · {One} {next.rec.book!.chapter}<ArrowRight size={13} strokeWidth={1.5} aria-hidden /></span>
           <span className="line-clamp-2 font-serif text-[17px] leading-snug text-fg">{next.rec.title}</span>
         </button>
       )}

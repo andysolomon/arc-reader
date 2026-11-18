@@ -4,6 +4,7 @@ import { fetchReadable, hostOf, type Fetched } from "../lib/fetchUrl";
 import { partNames, type BookContents } from "../lib/book";
 import { placeIn, planChapters, type BookImportJob } from "../lib/bookImport";
 import { syncLibrary } from "../lib/librarySync";
+import { seriesPlace } from "../lib/series";
 import { FINISHED_FRACTION } from "../lib/libraryProtocol";
 import { useCategories } from "./categories";
 import { useLibrary, type LibraryItem } from "./library";
@@ -310,34 +311,84 @@ export function shelves(items: LibraryItem[]): Map<string, Shelf> {
   return out;
 }
 
-/** One line of a document list: a document, or a book standing in for its chapters. */
-export type LibraryEntry = { kind: "doc"; it: LibraryItem } | { kind: "book"; shelf: Shelf; duration: number };
+/** Books that are volumes of one work, in volume order. */
+export interface Series {
+  id: string;
+  title: string;
+  volumes: Volume[];
+}
 
-/** Two or more chapters of a book share one entry, placed where its newest chapter would be. */
+export interface Volume {
+  shelf: Shelf;
+  volume: number;
+  /** The book's title without the series' name */
+  title: string;
+}
+
+/** The series each book belongs to, keyed by book. It takes two volumes to make a series. */
+export function seriesOf(books: Map<string, Shelf>): Map<string, Series> {
+  const byKey = new Map<string, Series>();
+  for (const shelf of books.values()) {
+    const place = shelf.kind ? null : seriesPlace(shelf.title);
+    if (!place) continue;
+    const series: Series = byKey.get(place.key) ?? { id: `series:${place.key}`, title: place.name, volumes: [] };
+    series.volumes.push({ shelf, volume: place.volume, title: place.rest });
+    byKey.set(place.key, series);
+  }
+  const out = new Map<string, Series>();
+  for (const series of byKey.values()) {
+    if (series.volumes.length < 2) continue;
+    series.volumes.sort((a, b) => a.volume - b.volume);
+    for (const { shelf } of series.volumes) out.set(shelf.id, series);
+  }
+  return out;
+}
+
+/** One line of a document list: a document, a book standing in for its chapters, or a series standing in for its volumes. */
+export type LibraryEntry = { kind: "doc"; it: LibraryItem } | { kind: "book"; shelf: Shelf; duration: number } | { kind: "series"; series: Series; duration: number };
+
+const lengthOf = (shelf: Shelf) => shelf.items.reduce((sum, chapter) => sum + chapter.duration, 0);
+
+/**
+ * Two or more chapters of a book share one entry, placed where its newest chapter would be; so
+ * do the volumes of a series, even one that has a single chapter in the library so far.
+ */
 export function entriesOf(items: LibraryItem[]): LibraryEntry[] {
   const books = shelves(items);
+  const inSeries = seriesOf(books);
   const placed = new Set<string>();
   const list: LibraryEntry[] = [];
   for (const it of items) {
     const shelf = it.rec.book ? books.get(it.rec.book.id) : undefined;
-    if (!shelf || shelf.items.length < 2) list.push({ kind: "doc", it });
+    const series = shelf && inSeries.get(shelf.id);
+    if (series) {
+      if (placed.has(series.id)) continue;
+      placed.add(series.id);
+      list.push({ kind: "series", series, duration: series.volumes.reduce((sum, { shelf }) => sum + lengthOf(shelf), 0) });
+    } else if (!shelf || shelf.items.length < 2) list.push({ kind: "doc", it });
     else if (!placed.has(shelf.id)) {
       placed.add(shelf.id);
-      list.push({ kind: "book", shelf, duration: shelf.items.reduce((sum, chapter) => sum + chapter.duration, 0) });
+      list.push({ kind: "book", shelf, duration: lengthOf(shelf) });
     }
   }
   return list;
 }
 
-/** The chapters before and after this one that are in the library. */
+/** The chapters before and after this one that are in the library. A series reads on from one volume into the next. */
 export function neighbours(items: LibraryItem[], rec: DocRecord): { previous?: LibraryItem; next?: LibraryItem } {
   if (!rec.book) return {};
-  const chapters = shelves(items).get(rec.book.id)?.items ?? [];
+  const books = shelves(items);
+  const volumes = seriesOf(books).get(rec.book.id)?.volumes.map(({ shelf }) => shelf) ?? [];
+  const at = volumes.findIndex((shelf) => shelf.id === rec.book!.id);
+  const chapters = books.get(rec.book.id)?.items ?? [];
   return {
-    previous: chapters.filter((it) => it.rec.book!.chapter < rec.book!.chapter).pop(),
-    next: chapters.find((it) => it.rec.book!.chapter > rec.book!.chapter),
+    previous: chapters.filter((it) => it.rec.book!.chapter < rec.book!.chapter).pop() ?? volumes[at - 1]?.items.at(-1),
+    next: chapters.find((it) => it.rec.book!.chapter > rec.book!.chapter) ?? volumes[at + 1]?.items[0],
   };
 }
 
 /** Where to pick a book up: the first chapter not yet finished, or the start once all are. */
 export const nextUnread = (shelf: Shelf): LibraryItem => shelf.items.find((it) => !finished(it)) ?? shelf.items[0];
+
+/** Where to pick a series up: the first volume with a chapter not yet finished, or the start once all are. */
+export const nextInSeries = (series: Series): LibraryItem => nextUnread(series.volumes.find(({ shelf }) => shelf.items.some((it) => !finished(it)))?.shelf ?? series.volumes[0].shelf);
