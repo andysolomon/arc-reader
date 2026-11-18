@@ -22,22 +22,26 @@ const TIMEOUT_MS = 20_000;
 /** A deck of slides runs to tens of megabytes. */
 const PDF_TIMEOUT_MS = 120_000;
 
-function send(res: ServerResponse, status: number, body: string, type = "application/json") {
-  res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
+function send(res: ServerResponse, status: number, body: string | Buffer, type = "application/json", disposition?: string) {
+  res.writeHead(status, { "content-type": type, "cache-control": "no-store", ...(disposition ? { "content-disposition": disposition } : {}) });
   res.end(body);
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse, pictures?: SlidePictures) {
-  const target = new URL(req.url ?? "", "http://localhost").searchParams.get("url") ?? "";
-  let url: URL;
-  try {
-    url = new URL(target);
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error();
-  } catch {
-    return send(res, 400, JSON.stringify({ error: "bad_url" }));
-  }
+/** What the server got for a page: its body as text, an EPUB's bytes, or a JSON error to pass on. */
+export interface Upstream {
+  status: number;
+  type: string;
+  body: string | Buffer;
+  /** An EPUB's file name, as the site sent it. */
+  disposition?: string;
+}
+
+const failure = (status: number, error: Record<string, unknown>): Upstream => ({ status, type: "application/json", body: JSON.stringify(error) });
+
+/** Fetch a page the way /api/fetch answers for it: a PDF as an HTML page of its text, an X post as HTML. */
+export async function fetchUpstream(url: URL, pictures?: SlidePictures): Promise<Upstream> {
   const postId = xPostId(url);
-  if (postId) return handleXPost(postId, res);
+  if (postId) return fetchXPost(postId);
   const slow = new AbortController();
   let timer = setTimeout(() => slow.abort(), TIMEOUT_MS);
   try {
@@ -49,36 +53,48 @@ async function handle(req: IncomingMessage, res: ServerResponse, pictures?: Slid
         accept: "text/html,application/xhtml+xml,application/pdf;q=0.9,text/plain;q=0.9,*/*;q=0.5",
       },
     });
-    if (!r.ok) return send(res, 502, JSON.stringify({ error: "upstream_status", status: r.status }));
+    if (!r.ok) return failure(502, { error: "upstream_status", status: r.status });
     const type = r.headers.get("content-type") ?? "";
-    if (Number(r.headers.get("content-length")) > MAX_PDF_BYTES) return send(res, 413, JSON.stringify({ error: "too_large" }));
+    if (Number(r.headers.get("content-length")) > MAX_PDF_BYTES) return failure(413, { error: "too_large" });
     if (isPdfType(type)) {
       clearTimeout(timer);
       timer = setTimeout(() => slow.abort(), PDF_TIMEOUT_MS);
     }
     const buf = Buffer.from(await r.arrayBuffer());
-    if (isPdf(buf, type)) return sendPdf(res, buf, r.url || url.href, pictures);
+    if (isPdf(buf, type)) return await readPdf(buf, r.url || url.href, pictures);
     if (isEpubFile(buf, type, url.pathname)) {
-      if (buf.byteLength > MAX_BOOK_BYTES) return send(res, 413, JSON.stringify({ error: "too_large" }));
+      if (buf.byteLength > MAX_BOOK_BYTES) return failure(413, { error: "too_large" });
       const name = r.headers.get("content-disposition");
-      res.writeHead(200, { "content-type": "application/epub+zip", "cache-control": "no-store", ...(name ? { "content-disposition": name } : {}) });
-      return void res.end(buf);
+      return { status: 200, type: "application/epub+zip", body: buf, ...(name ? { disposition: name } : {}) };
     }
-    if (buf.byteLength > MAX_BYTES) return send(res, 413, JSON.stringify({ error: "too_large" }));
-    send(res, 200, buf.toString("utf8"), type || "text/plain");
+    if (buf.byteLength > MAX_BYTES) return failure(413, { error: "too_large" });
+    return { status: 200, type: type || "text/plain", body: buf.toString("utf8") };
   } catch (e) {
-    send(res, 502, JSON.stringify({ error: "upstream_unreachable", message: (e as Error).message }));
+    return failure(502, { error: "upstream_unreachable", message: (e as Error).message });
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function sendPdf(res: ServerResponse, bytes: Buffer, url: string, pictures?: SlidePictures) {
-  if (bytes.byteLength > MAX_PDF_BYTES) return send(res, 413, JSON.stringify({ error: "too_large" }));
+async function handle(req: IncomingMessage, res: ServerResponse, pictures?: SlidePictures) {
+  const target = new URL(req.url ?? "", "http://localhost").searchParams.get("url") ?? "";
+  let url: URL;
+  try {
+    url = new URL(target);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error();
+  } catch {
+    return send(res, 400, JSON.stringify({ error: "bad_url" }));
+  }
+  const { status, body, type, disposition } = await fetchUpstream(url, pictures);
+  send(res, status, body, type, disposition);
+}
+
+async function readPdf(bytes: Buffer, url: string, pictures?: SlidePictures): Promise<Upstream> {
+  if (bytes.byteLength > MAX_PDF_BYTES) return failure(413, { error: "too_large" });
   const html = await pdfPage(bytes, url, pictures);
   // A scan has pictures of its pages and no text to read.
-  if (!html) return send(res, 422, JSON.stringify({ error: "unreadable_pdf" }));
-  send(res, 200, html, "text/html; charset=utf-8");
+  if (!html) return failure(422, { error: "unreadable_pdf" });
+  return { status: 200, type: "text/html; charset=utf-8", body: html };
 }
 
 /** A PDF chosen from the device: the file is the request body, its name the `name` parameter. */
@@ -98,18 +114,19 @@ async function handleUpload(req: IncomingMessage, res: ServerResponse, pictures?
   }
   const bytes = Buffer.concat(chunks);
   if (!isPdf(bytes)) return send(res, 415, JSON.stringify({ error: "not_a_pdf" }));
-  await sendPdf(res, bytes, `file:///${encodeURIComponent(name)}`, pictures);
+  const { status, body, type } = await readPdf(bytes, `file:///${encodeURIComponent(name)}`, pictures);
+  send(res, status, body, type);
 }
 
-async function handleXPost(id: string, res: ServerResponse) {
+async function fetchXPost(id: string): Promise<Upstream> {
   try {
     const r = await fetch(`${FXTWITTER_API}/status/${id}`, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { "user-agent": "ReadAloud" } });
-    if (!r.ok) return send(res, 502, JSON.stringify({ error: "upstream_status", status: r.status }));
+    if (!r.ok) return failure(502, { error: "upstream_status", status: r.status });
     const { tweet } = await r.json() as { tweet?: FxTweet };
-    if (!tweet) return send(res, 502, JSON.stringify({ error: "upstream_status", status: r.status }));
-    send(res, 200, xPostHtml(tweet), "text/html; charset=utf-8");
+    if (!tweet) return failure(502, { error: "upstream_status", status: r.status });
+    return { status: 200, type: "text/html; charset=utf-8", body: xPostHtml(tweet) };
   } catch (e) {
-    send(res, 502, JSON.stringify({ error: "upstream_unreachable", message: (e as Error).message }));
+    return failure(502, { error: "upstream_unreachable", message: (e as Error).message });
   }
 }
 
@@ -119,9 +136,10 @@ export const fetchMiddleware = (pictures?: SlidePictures): Connect.NextHandleFun
   void handle(req, res, pictures);
 };
 
-export function pageFetch(env: Record<string, string> = {}): Plugin {
-  // Beside the shared library, so slide pictures live in the same volume.
-  const slides = new SlideStore(resolve(env.LIBRARY_DATA_DIR || ".readaloud-library", "slides"));
+/** Beside the shared library, so slide pictures live in the same volume. */
+export const slideStore = (env: Record<string, string> = {}) => new SlideStore(resolve(env.LIBRARY_DATA_DIR || ".readaloud-library", "slides"));
+
+export function pageFetch(env: Record<string, string> = {}, slides = slideStore(env)): Plugin {
   const middleware = fetchMiddleware(slides);
   const pictures = slideMiddleware(slides);
   return {

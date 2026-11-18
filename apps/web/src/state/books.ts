@@ -1,18 +1,15 @@
 import { create } from "zustand";
-import { docs as docStore, type DocBook, type DocRecord, type DocSource } from "../lib/db";
+import { docs as docStore, type DocRecord, type DocSource } from "../lib/db";
 import { fetchReadable, hostOf, type Fetched } from "../lib/fetchUrl";
-import { pageKey, partNames, type BookContents } from "../lib/book";
+import { partNames, type BookContents } from "../lib/book";
+import { placeIn, planChapters, type BookImportJob } from "../lib/bookImport";
+import { syncLibrary } from "../lib/librarySync";
 import { FINISHED_FRACTION } from "../lib/libraryProtocol";
-import { updateDocument } from "./documents";
 import { useCategories } from "./categories";
 import { useLibrary, type LibraryItem } from "./library";
 import { toast } from "./toast";
 
-/** The chapter at `index` in the book's contents, as it is stored on the chapter's document. */
-export const placeIn = (book: BookContents, index: number): DocBook => ({
-  id: book.id, title: book.title, chapter: index + 1, chapters: book.chapters.length,
-  ...(book.kind ? { kind: book.kind } : {}), ...(book.contents ? { contents: book.contents } : {}),
-});
+export { placeIn };
 
 /** Chapter numbers of the book that are already in the library. */
 const shelved = (all: DocRecord[], bookId: string) => new Set(all.flatMap((rec) => rec.book?.id === bookId ? [rec.book.chapter] : []));
@@ -38,12 +35,162 @@ interface BooksState {
   adding: Record<string, { done: number; total: number }>;
   dismiss: (docId: string) => void;
   /**
-   * Fetch every chapter the library doesn't have yet, in order. `onFirst` runs once the first of
-   * them is in the library, so reading can start while the rest arrive.
+   * Add every chapter the library doesn't have yet. A book with pages to fetch is added by the
+   * server, so it keeps arriving with the app closed. `onFirst` runs once the first of them is in
+   * the library, so reading can start while the rest arrive.
    */
   add: (book: BookContents, opts?: { onFirst?: (rec: DocRecord) => Promise<void> | void }) => Promise<AddResult>;
   /** Add the rest of a book from one of its chapters, by reading the chapter list off its page again. */
   complete: (rec: DocRecord) => Promise<AddResult | null>;
+  /** Follow the server's imports, including ones started before the app was last open. */
+  watch: () => void;
+}
+
+const report = (book: { title: string; kind?: "course" }, { added, failed }: AddResult) => {
+  const { one, many } = partNames(book);
+  toast(failed
+    ? added ? `Added ${added} ${added === 1 ? one : many}; ${failed} couldn't be fetched. Add the rest from your Library.` : `Couldn't fetch the ${many}. Check your connection and try again.`
+    : added ? `Added ${added} ${added === 1 ? one : many} of ${book.title}` : book.kind === "course" ? "No new lectures have been posted" : "Every chapter is already in your Library", 4000);
+};
+
+/** An import this app started or saw running, waiting to hear how it ends. */
+interface Follower {
+  /** The import's start on the server, once known */
+  startedAt?: number;
+  /** When this app began following it: a list asked for before then can't be expected to show it */
+  since: number;
+  onFirst?: (rec: DocRecord) => Promise<void> | void;
+  opened?: boolean;
+  resolve: (result: AddResult) => void;
+}
+const following = new Map<string, Follower>();
+/** Imports that finished while the app was away, whose chapters have since been filed */
+const filed = new Set<string>();
+const POLL_MS = 1500;
+let polling = false;
+
+const listImports = async (): Promise<BookImportJob[]> => {
+  const r = await fetch("/api/books/import", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return (await r.json() as { jobs: BookImportJob[] }).jobs;
+};
+
+/** The documents, once the library sync has brought them to this device. */
+async function pulled(ids: string[]): Promise<DocRecord[]> {
+  // A sync already under way may have asked before the newest of them were saved.
+  for (let round = 0; round < 2; round++) {
+    await syncLibrary();
+    const recs = (await Promise.all(ids.map((id) => docStore.get(id)))).filter((rec): rec is DocRecord => !!rec);
+    if (recs.length === ids.length || round === 1) {
+      await useLibrary.getState().refresh();
+      return recs;
+    }
+  }
+  return [];
+}
+
+const stopAdding = (bookId: string, failed: boolean) => {
+  const { [bookId]: _, ...adding } = useBooks.getState().adding;
+  // Every page of the book made the same offer; it has been taken up.
+  useBooks.setState({ adding, offers: Object.fromEntries(Object.entries(useBooks.getState().offers).filter(([, offer]) => offer.id !== bookId || failed)) });
+};
+
+/** Mirror the server's imports into `adding` until none is left running or awaited. */
+async function poll() {
+  if (polling) return;
+  polling = true;
+  try {
+    for (;;) {
+      const asked = Date.now();
+      let jobs: BookImportJob[];
+      try {
+        jobs = await listImports();
+      } catch {
+        // Out of reach for now: the server carries on, and we ask again until it answers.
+        if (!following.size) break;
+        await new Promise((r) => setTimeout(r, POLL_MS * 3));
+        continue;
+      }
+      const byBook = new Map(jobs.map((job) => [job.bookId, job]));
+      for (const job of jobs) {
+        const follower = following.get(job.bookId);
+        if (!job.finishedAt) {
+          // An import started elsewhere, or before the app was last open, is followed from here on.
+          if (!follower) following.set(job.bookId, { startedAt: job.startedAt, since: Date.now(), resolve: () => {} });
+          else follower.startedAt ??= job.startedAt;
+          useBooks.setState({ adding: { ...useBooks.getState().adding, [job.bookId]: { done: job.done, total: job.total } } });
+        }
+        const current = following.get(job.bookId);
+        const key = `${job.bookId}@${job.startedAt}`;
+        if (!current && job.finishedAt && !filed.has(key)) {
+          // Finished with the app closed: the chapters came by sync, and are filed now.
+          filed.add(key);
+          void pulled(job.added).then((recs) => fileInTurn(recs.filter((rec) => !rec.category)));
+        }
+        if (!current || (current.startedAt !== undefined && current.startedAt !== job.startedAt)) continue;
+        if (job.first && current.onFirst && !current.opened) {
+          current.opened = true;
+          const [first] = await pulled([job.first]);
+          if (first) await Promise.resolve(current.onFirst(first)).catch(() => {});
+        }
+        if (job.finishedAt) {
+          filed.add(key);
+          following.delete(job.bookId);
+          stopAdding(job.bookId, job.failed > 0);
+          const recs = await pulled(job.added);
+          void fileInTurn(recs.filter((rec) => !rec.category));
+          const result = { added: job.added.length, failed: job.failed };
+          report(job, result);
+          current.resolve(result);
+        }
+      }
+      // The server lost an import it was running (it restarted): what arrived stays, the Library offers the rest.
+      for (const [bookId, follower] of following) {
+        if (follower.since > asked || follower.startedAt === undefined || byBook.get(bookId)?.startedAt === follower.startedAt) continue;
+        following.delete(bookId);
+        stopAdding(bookId, true);
+        await pulled([]);
+        toast("Adding chapters stopped partway. Add the rest from your Library.", 4000);
+        follower.resolve({ added: 0, failed: 1 });
+      }
+      if (!following.size) break;
+      await new Promise((r) => setTimeout(r, POLL_MS));
+    }
+  } finally {
+    polling = false;
+  }
+}
+
+/** A book that came with every chapter's text, from a file: nothing to fetch, so it goes in here and at once. */
+async function addHere(book: BookContents, opts: { onFirst?: (rec: DocRecord) => Promise<void> | void }): Promise<AddResult> {
+  const get = useBooks.getState, set = useBooks.setState;
+  let added = 0, failed = 0;
+  const batch: DocRecord[] = [];
+  let first: Promise<void> | undefined;
+  try {
+    const { moved, missing } = planChapters(book, await docStore.all());
+    set({ adding: { ...get().adding, [book.id]: { done: 0, total: missing.length } } });
+    for (const { rec, book: place } of moved) await useLibrary.getState().update(rec.id, { book: place }).catch(() => undefined);
+    for (const [done, chapter] of missing.entries()) {
+      try {
+        const rec = await useLibrary.getState().create({ text: chapter.text!, title: chapter.title, source: book.file ? "file" : "url", domain: book.file ?? hostOf(chapter.url), meta: book.meta ?? { url: chapter.url }, book: placeIn(book, chapter.index), batch: true });
+        batch.push(rec);
+        if (++added === 1) first = Promise.resolve(opts.onFirst?.(rec)).catch(() => {});
+      } catch {
+        failed++;
+      }
+      set({ adding: { ...get().adding, [book.id]: { done: done + 1, total: missing.length } } });
+    }
+    await first;
+  } finally {
+    if (batch.length) {
+      await useLibrary.getState().refresh();
+      void fileInTurn(batch);
+    }
+    stopAdding(book.id, failed > 0);
+  }
+  report(book, { added, failed });
+  return { added, failed };
 }
 
 export const useBooks = create<BooksState>()((set, get) => ({
@@ -55,69 +202,28 @@ export const useBooks = create<BooksState>()((set, get) => ({
   },
   async add(book, opts = {}) {
     if (get().adding[book.id]) return { added: 0, failed: 0 };
-    set({ adding: { ...get().adding, [book.id]: { done: 0, total: book.chapters.length } } });
-    let added = 0, failed = 0;
-    // Chapters that came with their text: nothing to wait for between them, so they go in as one batch.
-    const batch: DocRecord[] = [];
-    // Opening the first chapter can take a minute (code explanations); the rest keep arriving meanwhile.
-    let first: Promise<void> | undefined;
+    if (book.chapters.every((chapter) => chapter.text !== undefined)) return addHere(book, opts);
+    // Shown as looking for the chapters until the server has counted them.
+    set({ adding: { ...get().adding, [book.id]: { done: 0, total: 0 } } });
+    let job: BookImportJob;
     try {
-      const all = await docStore.all();
-      const byPage = new Map(all.flatMap((rec) => rec.meta?.url && !rec.book ? [[pageKey(rec.meta.url), rec] as const] : []));
-      // Chapters already shelved are known by their addresses; one saved without an address keeps its number.
-      const mine = all.filter((rec) => rec.book?.id === book.id);
-      const byAddress = new Map(mine.flatMap((rec) => rec.meta?.url ? [[pageKey(rec.meta.url), rec] as const] : []));
-      // Chapters cut from one text share its address, which tells them apart no better than no address at all.
-      const sharing = new Map<string, number>();
-      for (const chapter of book.chapters) sharing.set(pageKey(chapter.url), (sharing.get(pageKey(chapter.url)) ?? 0) + 1);
-      const parts = book.chapters.map((chapter, index) => ({ ...chapter, index, rec: sharing.get(pageKey(chapter.url)) === 1 ? byAddress.get(pageKey(chapter.url)) : undefined }));
-      const listed = new Set(parts.flatMap((part) => part.rec ? [part.rec.id] : []));
-      const taken = new Set(mine.filter((rec) => !listed.has(rec.id)).map((rec) => rec.book!.chapter));
-      const missing = parts.filter((part) => !part.rec && !taken.has(part.index + 1));
-      set({ adding: { ...get().adding, [book.id]: { done: 0, total: missing.length } } });
-      // The list can have grown or shifted since (a course posts lectures as it runs): what is shelved follows it.
-      for (const part of parts) {
-        const place = placeIn(book, part.index);
-        const shelved = part.rec?.book;
-        if (part.rec && shelved && (shelved.chapter !== place.chapter || shelved.chapters !== place.chapters)) {
-          await useLibrary.getState().update(part.rec.id, { book: { ...shelved, chapter: place.chapter, chapters: place.chapters } }).catch(() => undefined);
-        }
-      }
-      for (const [done, chapter] of missing.entries()) {
-        const place = placeIn(book, chapter.index);
-        let rec: DocRecord | undefined;
-        try {
-          // A chapter saved earlier as a loose article joins the book instead of being fetched twice.
-          const loose = chapter.text === undefined ? byPage.get(pageKey(chapter.url)) : undefined;
-          if (loose) rec = await useLibrary.getState().update(loose.id, { book: place, title: chapter.title });
-          else if (chapter.text !== undefined) {
-            rec = await useLibrary.getState().create({ text: chapter.text, title: chapter.title, source: book.file ? "file" : "url", domain: book.file ?? hostOf(chapter.url), meta: book.meta ?? { url: chapter.url }, book: place, batch: true });
-            batch.push(rec);
-          } else {
-            const page = await fetchReadable(chapter.url);
-            rec = await useLibrary.getState().create({ text: page.text, title: chapter.title, source: "url", domain: page.domain, meta: page.meta, links: page.links, book: place });
-          }
-        } catch { /* Counted below; the rest of the book still arrives. */ }
-        if (rec) {
-          if (++added === 1) first = Promise.resolve(opts.onFirst?.(rec)).catch(() => {});
-        } else failed++;
-        set({ adding: { ...get().adding, [book.id]: { done: done + 1, total: missing.length } } });
-      }
-      await first;
-    } finally {
-      if (batch.length) {
-        await useLibrary.getState().refresh();
-        void fileInTurn(batch);
-      }
-      const { [book.id]: _, ...adding } = get().adding;
-      // Every page of the book made the same offer; it has been taken up.
-      set({ adding, offers: Object.fromEntries(Object.entries(get().offers).filter(([, offer]) => offer.id !== book.id || failed > 0)) });
+      // What is saved here and not yet on the server would otherwise be added twice.
+      await syncLibrary();
+      const r = await fetch("/api/books/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ book }), signal: AbortSignal.timeout(30_000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      job = (await r.json() as { job: BookImportJob }).job;
+    } catch {
+      stopAdding(book.id, true);
+      toast(`Couldn't start adding the ${partNames(book).many}. Check your connection and try again.`, 4000);
+      return { added: 0, failed: 0 };
     }
-    const { one, many } = partNames(book);
-    toast(failed
-      ? added ? `Added ${added} ${added === 1 ? one : many}; ${failed} couldn't be fetched. Add the rest from your Library.` : `Couldn't fetch the ${many}. Check your connection and try again.`
-      : added ? `Added ${added} ${added === 1 ? one : many} of ${book.title}` : book.kind === "course" ? "No new lectures have been posted" : "Every chapter is already in your Library", 4000);
-    return { added, failed };
+    const result = new Promise<AddResult>((resolve) => {
+      const known = following.get(book.id);
+      following.set(book.id, { startedAt: job.startedAt, since: Date.now(), onFirst: opts.onFirst, opened: known?.opened, resolve: (r) => { known?.resolve(r); resolve(r); } });
+    });
+    set({ adding: { ...get().adding, [book.id]: { done: job.done, total: job.total } } });
+    void poll();
+    return result;
   },
   async complete(rec) {
     const id = rec.book?.id;
@@ -144,6 +250,9 @@ export const useBooks = create<BooksState>()((set, get) => ({
     }
     // Keep the title the book already has on the shelf.
     return get().add({ ...book, title: rec.book.title });
+  },
+  watch() {
+    void poll();
   },
 }));
 

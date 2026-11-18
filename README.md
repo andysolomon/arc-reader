@@ -442,11 +442,31 @@ Opening or preparing a reading uses the saved **Settings → Summaries** connect
 Descriptions are saved and synced with the document, reused across voices, and used by live, browser, prepared, and downloaded audio. If vision is unavailable, the reader explicitly uses the article's caption or alt text; without either, it announces the unavailable description and continues. Broken images never stop the article. Up to eight uncached visuals are described per opening, two at a time, with a one-minute overall deadline; remaining visuals use article metadata. Previously saved descriptions remain available offline, though remote images themselves may not.
 
 This applies to new imports. Re-import older articles whose images were already stripped. Fetching cannot recover diagrams drawn only by page JavaScript or canvas, and a provider may not be able to load protected or unsupported image URLs. Inline SVG requires a browser with canvas support. Large embedded visuals are bounded to keep the shared library small. Old positions in documents with newly recognized visual blocks restart once because sentence indices changed.
+## Videos on X
+
+A post on X that has a video opens with the post's words and the video's poster frame, and the Reader offers to **Transcribe** it. What is said in the video is then added to the document under a "Transcript" heading, after the post's own words, where it is read, summarized and prepared like any other text. The offer also appears on posts already in the Library, and goes away once the transcript is in. A post that is only a video now opens too.
+
+The server does the work (`/api/transcribe?url=<post>`, `vite.transcribe.ts`): `GET` reports where a video stands and `POST` starts on it. The Reader asks every two seconds, so a phone that sleeps or changes networks picks the result up when it comes back.
+
+1. FxTwitter names the video's files. The smallest MP4 is downloaded from `video.twimg.com`, the only host a video is ever fetched from, and piped through ffmpeg, which keeps the sound as 16 kHz mono samples in a temporary file. ffmpeg itself never opens a network address.
+2. The sound goes to VoiceStudio's `/transcribe` in `fast` mode, five minutes at a time. One request for a whole video would outlast VoiceStudio's five-minute limit on a transcription. Each piece's last sentence is dropped and heard again at the start of the next piece, so no word is cut in two where pieces meet.
+3. Sentences are gathered into paragraphs at the speaker's pauses, or after about 900 characters when there are none.
+4. The result is kept in `LIBRARY_DATA_DIR/transcripts/<post id>.json`, so a post is transcribed once however many times it is imported. Nothing removes it when the document is deleted.
+
+On the Mac mini (MLX Whisper Turbo) a 36-minute talk took 81 seconds, measured on 2026-11-17; a CPU-only VoiceStudio is several times slower. One video is transcribed at a time. Between pieces a transcription waits for anyone listening through the same VoiceStudio, and background audio preparation stands aside until it is done. A busy VoiceStudio (HTTP 429) is asked again for about ten minutes before the transcription fails with **Retry**. A transcription in progress does not survive a restart of the web server; the Reader says so and offers **Retry**.
+
+- Only posts on X, and only the first video of a post. Silent loops (GIFs) are not offered. Videos longer than four hours are refused.
+- The words are as Whisper heard them: names and jargon can be wrong, speakers are not told apart, and nothing is corrected or rewritten afterwards.
+- The server needs ffmpeg. The Docker image carries a static build; elsewhere it is found on `PATH`, or at `FFMPEG_PATH`. Without it no video is offered.
+- The app needs its server for this, so an iOS build that runs its own files gets no offer.
+
 ## Books
 
 A book published as a website, one page per chapter, is read as a book rather than as a pile of articles. When a fetched page lists its chapters in order, the Reader offers to add them: paste the contents page and the chapters take its place, or paste any chapter and the others join it. Each chapter is its own document, so it keeps its own position, voice, prepared audio and summary.
 
 The Library shows the book as one row with how many chapters are read and how long the whole book is; open it for the chapters in order, press play to continue at the first unfinished one, or prepare audio for all of them at once. A lone chapter stays an ordinary row that names its book. In the Reader a chapter says where it sits ("Chapter 8 of 27"), links to the chapters either side at the foot of the text, and points to the next one when it finishes. A book with chapters missing can fetch them later, from its Library row or from any of its chapters.
+
+The web server adds the chapters, not the browser (`vite.books.ts`, `/api/books/import`): it fetches three at a time, each off its own page alone, and saves each straight into the shared library, so they keep arriving with the app closed or the phone locked. Library sync brings them to every device. The app shows how far the import has got, picking it up again when it is reopened. An import the server was running when it restarted stops there; add the rest from the Library. A book from a file or the Internet Archive already has every chapter's text, so it goes in at once, in the browser.
 
 Detection (`src/lib/book.ts`) looks for a run of same-site links numbered 1, 2, 3… in their text or addresses, anywhere on the page including its navigation, and needs one more sign that it is a contents list: numbered addresses, "Chapter"-style labels, a `rel="next"`/`rel="prev"` link into the run, or a navigation or contents container. The page is a chapter when it is in the run and the contents page when the run sits beneath its address. Every page of a book yields the same book id (from the first chapter's address), so chapters imported at different times or on different devices still meet. Sites that number chapters only with CSS, or that list them only after running JavaScript, are not detected.
 

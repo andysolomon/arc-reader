@@ -26,7 +26,8 @@ export interface Fetched {
   partOf?: string;
 }
 
-const PROXY = import.meta.env.VITE_FETCH_PROXY as string | undefined;
+// The server reads chapters with this module too, where there is no bundle environment.
+const PROXY = import.meta.env?.VITE_FETCH_PROXY as string | undefined;
 
 export function hostOf(url: string): string {
   try {
@@ -348,6 +349,16 @@ async function readResponse(r: Response, url: string, domain: string, signal?: A
     return { title: domain, text, domain, meta: { url }, links: ct.includes("markdown") ? linksInMarkdown(body, url) : linksInText(body) };
   }
   throw new Error("No readable text");
+}
+
+/**
+ * One chapter of a book already known, read off its own page alone. Unlike fetchReadable it asks
+ * no other page which book this is (the parts of a book in parts, the page above): a book of 25
+ * parts would otherwise cost every chapter 25 more pages.
+ */
+export async function readChapterPage(r: Response, url: string, signal?: AbortSignal): Promise<Fetched> {
+  const { partOf: _, ...page } = await readResponse(r, url, hostOf(url), signal);
+  return page;
 }
 
 /** A PDF chosen from the device, read by the server into the same shape as a fetched page. */

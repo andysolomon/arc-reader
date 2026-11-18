@@ -70,6 +70,7 @@ function validDoc(value: unknown): value is DocRecord {
       && typeof value.summary.model === "string" && value.summary.model.length <= 200
       && number(value.summary.version) && number(value.summary.createdAt)))
     && validDiagram(value.diagram)
+    && (value.transcript === undefined || (object(value.transcript) && number(value.transcript.seconds) && number(value.transcript.at)))
     && (value.favoritedAt === undefined || number(value.favoritedAt))
     && validMeta(value.meta) && validBook(value.book) && validCategory(value.category) && validPremium(value.premium);
 }
@@ -137,6 +138,16 @@ export class LibraryService {
       }
       return { docs, missing };
     });
+  }
+
+  /** Every document, as stored now. */
+  documents(): Promise<DocRecord[]> {
+    return this.serialized(async () => (await this.load()).docs);
+  }
+
+  /** Saves documents the server made itself, checked the way a client's are. */
+  async save(records: DocRecord[]): Promise<void> {
+    await this.sync({ changes: records.map((record) => ({ kind: "doc", record })) });
   }
 
   private serialized<T>(task: () => Promise<T>): Promise<T> {
@@ -231,8 +242,9 @@ export function libraryMiddleware(service: LibraryService): Connect.NextHandleFu
   };
 }
 
-export function sharedLibrary(env: Record<string, string>): Plugin {
-  const service = new LibraryService(resolve(env.LIBRARY_DATA_DIR || ".readaloud-library"));
+export const libraryService = (env: Record<string, string>) => new LibraryService(resolve(env.LIBRARY_DATA_DIR || ".readaloud-library"));
+
+export function sharedLibrary(env: Record<string, string>, service = libraryService(env)): Plugin {
   const middleware = libraryMiddleware(service);
   return {
     name: "readaloud:shared-library",
