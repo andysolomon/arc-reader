@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpen, ClipboardList, FileText, Globe } from "lucide-react";
+import { BookOpen, ClipboardList, FileText, Globe, Library as LibraryIcon } from "lucide-react";
 import { cn } from "@readaloud/ui";
 import type { DocRecord } from "../lib/db";
 
@@ -21,6 +21,15 @@ export function SourceMark({ rec, className }: { rec: Pick<DocRecord, "source" |
   return (
     <span className={cn(MARK, "bg-bg3 ring-1 ring-line", className)}>
       <SourceIcon rec={rec} />
+    </span>
+  );
+}
+
+/** The tile that leads a series, which stands in for its volumes. */
+export function SeriesMark({ className }: { className?: string }) {
+  return (
+    <span aria-hidden className={cn(MARK, "bg-[color-mix(in_oklch,var(--accent)_18%,transparent)] text-accent", className)}>
+      <LibraryIcon size={14} strokeWidth={1.75} />
     </span>
   );
 }

@@ -205,8 +205,12 @@ test("a link to an EPUB is read as the book, with the rest of its chapters on of
   await expect(rows.nth(2)).toContainText("3. The Harvest");
 });
 
-/** A small EPUB 3: a cover, a copyright page and three chapters, two of them in one file. */
-async function buildEpub(): Promise<Buffer> {
+/**
+ * A small EPUB 3: a cover, a copyright page and three chapters, two of them in one file. As a
+ * volume, its title page says which, and the record names only the work, as a series' files do.
+ */
+async function buildEpub(volume?: { subtitle: string; chapters: [string, string, string] }): Promise<Buffer> {
+  const [first, second, third] = volume?.chapters ?? ["Old Major", "The Rebellion", "The Harvest"];
   const { strToU8, zipSync } = await import("fflate");
   const prose = (about: string) => Array.from({ length: 4 }, (_, p) => `<p>${Array.from({ length: 5 }, (_, i) => `${about} ${p + 1} went on in sentence ${i + 1}, long enough that the paragraph reads as prose.`).join(" ")}</p>`).join("");
   const page = (body: string) => `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>The Farmyard</title></head><body>${body}</body></html>`;
@@ -216,11 +220,11 @@ async function buildEpub(): Promise<Buffer> {
     "OEBPS/content.opf": `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>The Farmyard</dc:title><dc:creator>Jane Example</dc:creator></metadata>
       <manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="copy" href="copyright.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/><item id="c23" href="ch2-3.xhtml" media-type="application/xhtml+xml"/></manifest>
       <spine><itemref idref="cover"/><itemref idref="copy"/><itemref idref="c1"/><itemref idref="c23"/></spine></package>`,
-    "OEBPS/nav.xhtml": page(`<nav epub:type="toc"><ol><li><a href="cover.xhtml">Cover</a></li><li><a href="copyright.xhtml">Copyright</a></li><li><a href="ch1.xhtml">Old Major</a></li><li><a href="ch2-3.xhtml#c2">The Rebellion</a></li><li><a href="ch2-3.xhtml#c3">The Harvest</a></li></ol></nav>`),
-    "OEBPS/cover.xhtml": page(`<p>Cover picture</p>`),
+    "OEBPS/nav.xhtml": page(`<nav epub:type="toc"><ol><li><a href="cover.xhtml">Cover</a></li><li><a href="copyright.xhtml">Copyright</a></li><li><a href="ch1.xhtml">${first}</a></li><li><a href="ch2-3.xhtml#c2">${second}</a></li><li><a href="ch2-3.xhtml#c3">${third}</a></li></ol></nav>`),
+    "OEBPS/cover.xhtml": page(volume ? `<section epub:type="titlepage"><h1>The Farmyard</h1><p class="subtitle">${volume.subtitle}</p></section>` : `<p>Cover picture</p>`),
     "OEBPS/copyright.xhtml": page(`<p>Copyright notice, all rights reserved.</p>`),
-    "OEBPS/ch1.xhtml": page(`<section><header><h2>Old Major</h2></header>${prose("The meeting")}</section>`),
-    "OEBPS/ch2-3.xhtml": page(`<section id="c2"><h2>The Rebellion</h2>${prose("The rebellion")}</section><section id="c3"><h2>The Harvest</h2>${prose("The harvest")}</section>`),
+    "OEBPS/ch1.xhtml": page(`<section><header><h2>${first}</h2></header>${prose("The meeting")}</section>`),
+    "OEBPS/ch2-3.xhtml": page(`<section id="c2"><h2>${second}</h2>${prose("The rebellion")}</section><section id="c3"><h2>${third}</h2>${prose("The harvest")}</section>`),
   };
   return Buffer.from(zipSync(Object.fromEntries(Object.entries(files).map(([name, text]) => [name, strToU8(text)]))));
 }
@@ -253,4 +257,39 @@ test("an EPUB chosen from the device goes into the Library as a book, every chap
   await expect(page.getByText("Chapter 1 of 3")).toBeVisible();
   await page.getByRole("link", { name: "Library", exact: true }).click();
   await expect(page.locator('li[data-book="The Farmyard"]')).toContainText("3 chapters");
+});
+
+test("volumes of one work are kept together as a series, and reading runs on from one into the next", async ({ page }) => {
+  const volumes = [
+    { name: "farmyard-vol1.epub", mimeType: "application/epub+zip", buffer: await buildEpub({ subtitle: "Volume 1 — Spring", chapters: ["Old Major", "The Rebellion", "The Harvest"] }) },
+    { name: "farmyard-vol2.epub", mimeType: "application/epub+zip", buffer: await buildEpub({ subtitle: "Volume 2 — Winter", chapters: ["Snowball", "The Windmill", "The Storm"] }) },
+  ];
+  // The later volume goes in first: the series still lists them in order.
+  for (const [n, file] of [[2, volumes[1]], [1, volumes[0]]] as const) {
+    await page.goto("/");
+    await page.locator('input[type="file"]').setInputFiles(file);
+    await expect(page.getByRole("status").filter({ hasText: `Added 3 chapters of The Farmyard: Volume ${n}` })).toBeVisible();
+  }
+
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const series = page.locator('li[data-series="The Farmyard"]');
+  await expect(series).toContainText("2 volumes");
+  await expect(series).toContainText("6 chapters");
+  await expect(page.locator("li[data-book]")).toHaveCount(0);
+  await series.getByRole("button", { name: "Show volumes of The Farmyard" }).click();
+  const books = page.getByRole("list", { name: "Volumes of The Farmyard" }).locator("li[data-book]");
+  await expect(books).toHaveCount(2);
+  await expect(books.nth(0)).toContainText("Volume 1 — Spring");
+  await expect(books.nth(1)).toContainText("Volume 2 — Winter");
+  await books.nth(0).getByRole("button", { name: /^Show chapters of/ }).click();
+  await expect(books.nth(0).getByRole("listitem")).toHaveCount(3);
+
+  // The last chapter of the first volume leads into the first of the second.
+  await books.nth(0).getByRole("listitem").nth(2).getByText("The Harvest").click();
+  await page.waitForURL(/\/read\/[a-z0-9-]+$/);
+  const next = page.getByRole("navigation", { name: "Chapters" }).getByRole("button", { name: /Next volume · Chapter 1/ });
+  await expect(next).toContainText("Snowball");
+  await next.click();
+  await expect(page.getByRole("region", { name: "Document text" }).locator("article").getByRole("heading", { name: "Snowball" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Chapters" }).getByRole("button", { name: /Previous volume · Chapter 3/ })).toContainText("The Harvest");
 });

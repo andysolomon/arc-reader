@@ -3,13 +3,13 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AudioLines, Check, ChevronRight, Search } from "lucide-react";
 import { cn, fmtTime } from "@readaloud/ui";
 import { searchable, useLibrary, type LibraryItem } from "../state/library";
-import { entriesOf, finished, type Shelf } from "../state/books";
+import { entriesOf, finished, type Series, type Shelf } from "../state/books";
 import { usePlayer } from "../state/player";
 import { agoLabel } from "../lib/dates";
 import { partNames } from "../lib/book";
 import { openDocument } from "../lib/openDoc";
 import { catalogue } from "../lib/postTitle";
-import { BookMark, SourceMark } from "./SourceMark";
+import { BookMark, SeriesMark, SourceMark } from "./SourceMark";
 import { PreparationDetails, PrepareDialog, PreparedSummary, ShelfSummary, type Reading } from "./LibraryPreparation";
 import { useSettings } from "../state/settings";
 
@@ -90,7 +90,7 @@ export function SidebarLibrary() {
     );
   };
 
-  const book = (shelf: Shelf, duration: number) => {
+  const book = (shelf: Shelf, duration = shelf.items.reduce((sum, it) => sum + it.duration, 0), title = shelf.title) => {
     const { many, One } = partNames(shelf);
     // The book that holds the open chapter shows it without being asked.
     const open = openBooks.has(shelf.id) || shelf.items.some((it) => it.rec.id === current);
@@ -107,7 +107,7 @@ export function SidebarLibrary() {
         >
           <BookMark className="mt-0.5 size-5 rounded-md" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] leading-5 text-fg">{shelf.title}</span>
+            <span className="block truncate text-[13px] leading-5 text-fg">{title}</span>
             <span className="block truncate text-[12px] leading-4 text-fg2">{shelf.items.length} {many} · {fmtTime(duration)}</span>
           </span>
           <ChevronRight size={14} strokeWidth={1.5} className={cn("mt-[3px] shrink-0 text-fg3 transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
@@ -123,6 +123,38 @@ export function SidebarLibrary() {
     );
   };
 
+  const series = (group: Series, duration: number) => {
+    const items = group.volumes.flatMap(({ shelf }) => shelf.items);
+    // The series that holds the open chapter shows its volumes without being asked.
+    const open = openBooks.has(group.id) || items.some((it) => it.rec.id === current);
+    const panel = `rail-series-${group.id.replace(/\W/g, "-")}`;
+    return (
+      <li key={group.id}>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={open ? panel : undefined}
+          onClick={() => toggle(group.id)}
+          title={group.title}
+          className="flex w-full items-start gap-2.5 rounded-control border-0 bg-transparent py-1.5 pl-2 pr-2 text-left transition-colors duration-fast hover:bg-bg2"
+        >
+          <SeriesMark className="mt-0.5 size-5 rounded-md" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] leading-5 text-fg">{group.title}</span>
+            <span className="block truncate text-[12px] leading-4 text-fg2">{group.volumes.length} volumes · {fmtTime(duration)}</span>
+          </span>
+          <ChevronRight size={14} strokeWidth={1.5} className={cn("mt-[3px] shrink-0 text-fg3 transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
+        </button>
+        {!open && <ShelfSummary items={items} className="pb-2 pl-[38px] pr-2" />}
+        {open && (
+          <ul id={panel} aria-label={`Volumes of ${group.title}`} className="m-0 flex list-none flex-col gap-px p-0 pl-3">
+            {group.volumes.map(({ shelf, title }) => book(shelf, undefined, title))}
+          </ul>
+        )}
+      </li>
+    );
+  };
+
   return (
     <>
       <label className="mx-3 mb-2 flex h-8 shrink-0 items-center gap-2 rounded-control border border-line bg-bg2 px-2.5 text-fg2 focus-within:border-fg3">
@@ -130,7 +162,7 @@ export function SidebarLibrary() {
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a document" aria-label="Find a document" className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-fg outline-none placeholder:text-fg3" />
       </label>
       <ul aria-label="Documents" className="m-0 flex min-h-0 flex-1 list-none flex-col gap-px overflow-y-auto px-2 pb-2">
-        {entries.map((entry) => (entry.kind === "doc" ? row(entry.it) : book(entry.shelf, entry.duration)))}
+        {entries.map((entry) => (entry.kind === "doc" ? row(entry.it) : entry.kind === "book" ? book(entry.shelf, entry.duration) : series(entry.series, entry.duration)))}
         {loaded && entries.length === 0 && (
           <li className="px-2 py-3 text-[13px] leading-5 text-fg2">{items.length ? "No document matches." : "Documents you listen to appear here."}</li>
         )}
