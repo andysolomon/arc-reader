@@ -6,28 +6,8 @@ const axe = async (page: Page) => {
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 };
 
-const SITE = "https://book.example";
-const CHAPTERS = [
-  ["01-http", "HTTP & CORS", "<h2>Why HTTP</h2><p>It carries every request and every response.</p>"],
-  ["02-routing", "Routing", `<h2>Static routes</h2><p>A route names a resource on the server. The router matches each request to one.</p>
-    <aside class="callout"><p>Mental model</p><p>Methods say what, routes say where.</p></aside>
-    <table><thead><tr><th>Part</th><th>Meaning</th></tr></thead><tbody><tr><td>Path</td><td>Which resource</td></tr></tbody></table>
-    <h3>Dynamic routes</h3><p>A parameter stands in for part of the path. That keeps one route for every user.</p>`],
-  ["03-databases", "Databases", "<h2>Why databases exist</h2><p>They persist data across sessions. Disk is roomy and cheap.</p>"],
-];
-const nav = `<nav aria-label="All chapters"><a href="/">Overview</a><ol>${CHAPTERS.map(([slug, title], i) => `<li><a href="/${slug}/"><span>0${i + 1}</span><span>${title}</span></a></li>`).join("")}</ol></nav>`;
-const pages: Record<string, string> = {
-  "/": `<title>Backend Basics — a three-chapter reference</title>${nav}<main><h1>Backend Basics</h1><p>Every chapter is a field manual for one part of the backend.</p></main>`,
-  ...Object.fromEntries(CHAPTERS.map(([slug, title, body], i) => [`/${slug}/`, `<title>${title} · Chapter 0${i + 1} · Backend Basics</title>${nav}<main><article>${body}</article></main>`])),
-};
-
-/** The book's site, readable straight from the browser. */
-async function serveBook(page: Page) {
-  await page.route(`${SITE}/**`, (route) => {
-    const html = pages[new URL(route.request().url()).pathname];
-    return html ? route.fulfill({ contentType: "text/html; charset=utf-8", headers: { "access-control-allow-origin": "*" }, body: `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}</body></html>` }) : route.fulfill({ status: 404, body: "Not found" });
-  });
-}
+/** The book's site, from tests/stub-site.mjs: the app server fetches chapters itself, so the browser can't fake them. */
+const SITE = `http://127.0.0.1:${process.env.E2E_SITE_PORT || 3996}`;
 
 async function readLink(page: Page, url: string) {
   await page.goto("/");
@@ -37,7 +17,6 @@ async function readLink(page: Page, url: string) {
 }
 
 test("a contents page becomes a book read chapter by chapter", async ({ page }) => {
-  await serveBook(page);
   await readLink(page, `${SITE}/`);
   const contentsUrl = page.url();
   const offer = page.getByRole("complementary", { name: "Book" });
@@ -93,7 +72,6 @@ test("a contents page becomes a book read chapter by chapter", async ({ page }) 
 });
 
 test("a single chapter offers the rest of its book, then and later", async ({ page }) => {
-  await serveBook(page);
   await readLink(page, `${SITE}/02-routing/`);
   const offer = page.getByRole("complementary", { name: "Book" });
   await expect(offer).toContainText("This is chapter 2 of 3 in Backend Basics");
@@ -201,6 +179,30 @@ test("a book the Internet Archive only lends is not imported, and says why", asy
   expect(requested).toEqual(["metadata/countofmontecris0000alex_k5l0"]);
   await page.getByRole("link", { name: "Library", exact: true }).click();
   await expect(page.getByText("The Count of Monte Cristo")).toHaveCount(0);
+});
+
+test("a link to an EPUB is read as the book, with the rest of its chapters on offer", async ({ page }) => {
+  const link = "https://books.example/releases/latest/download/the-farmyard.epub";
+  const epub = await buildEpub();
+  // Sent as a plain download, the way release files are.
+  await page.route("https://books.example/**", (route) => route.fulfill({ contentType: "application/octet-stream", headers: { "access-control-allow-origin": "*", "content-disposition": "attachment; filename=the-farmyard.epub" }, body: epub }));
+  await readLink(page, link);
+  const offer = page.getByRole("complementary", { name: "Book" });
+  await expect(offer).toContainText("This is chapter 1 of 3 in The Farmyard");
+  const text = page.getByRole("region", { name: "Document text" }).locator("article");
+  await expect(text.getByRole("heading", { name: "Old Major" })).toBeVisible();
+  await expect(text).toContainText("The meeting 4 went on");
+  await expect(text).not.toContainText("Copyright");
+
+  await offer.getByRole("button", { name: "Add the other 2 chapters" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Added 2 chapters of The Farmyard" })).toBeVisible();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const book = page.locator('li[data-book="The Farmyard"]');
+  await expect(book).toContainText("3 chapters");
+  await book.getByRole("button", { name: "Show chapters of The Farmyard" }).click();
+  const rows = page.getByRole("list", { name: "Chapters of The Farmyard" }).getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(2)).toContainText("3. The Harvest");
 });
 
 /** A small EPUB 3: a cover, a copyright page and three chapters, two of them in one file. */

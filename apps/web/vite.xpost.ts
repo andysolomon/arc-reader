@@ -3,18 +3,15 @@
  * boilerplate instead of the post. FxTwitter's public API returns the post,
  * including long-form X Articles, as JSON; this turns it into a small HTML
  * page the reader's normal extraction understands (title, author, date,
- * headings, lists, captioned images, links).
+ * headings, lists, captioned images, links). A post's video is shown by its poster frame;
+ * what is said in it is transcribed on request (vite.transcribe.ts).
  */
 
-const X_HOSTS = /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/i;
+import { videoLength, xPostId } from "./src/lib/videoTranscript";
+
+export { xPostId };
 
 export const FXTWITTER_API = "https://api.fxtwitter.com";
-
-/** The status id of an x.com / twitter.com post link, or null for anything else. */
-export function xPostId(url: URL): string | null {
-  if (!X_HOSTS.test(url.hostname)) return null;
-  return url.pathname.match(/^\/(?:[\w]+|i(?:\/web)?)\/status(?:es)?\/(\d+)/)?.[1] ?? null;
-}
 
 interface Block { type: string; text: string; entityRanges?: { key: number | string; offset: number; length: number }[] }
 interface Entity { type: string; data?: Record<string, unknown> }
@@ -27,12 +24,21 @@ interface Article {
   content?: { blocks?: Block[]; entityMap?: Record<string, Entity> | { key: string; value: Entity }[] };
 }
 interface Photo { url?: string; altText?: string }
+interface Video {
+  url?: string;
+  thumbnail_url?: string;
+  /** Seconds */
+  duration?: number;
+  /** "gif" for a silent loop */
+  type?: string;
+  formats?: { url?: string; bitrate?: number; container?: string }[];
+}
 export interface FxTweet {
   url?: string;
   text?: string;
   created_timestamp?: number;
   author?: { name?: string; screen_name?: string };
-  media?: { photos?: Photo[]; videos?: { thumbnail_url?: string }[] };
+  media?: { photos?: Photo[]; videos?: Video[] };
   quote?: FxTweet;
   article?: Article;
 }
@@ -111,12 +117,41 @@ function articleBody(article: Article): string {
   return out.join("");
 }
 
+/** Where X serves video files from: the only host a video is ever downloaded from. */
+const VIDEO_HOST = "video.twimg.com";
+
+export interface XVideo {
+  /** The smallest MP4 of it: the sound is the same in every size */
+  url: string;
+  seconds: number;
+}
+
+const isVideo = (video: Video) => video.type !== "gif" && (video.duration ?? 0) > 0;
+
+function videoFile(input: string | undefined): string {
+  try {
+    const url = new URL(input ?? "");
+    return url.protocol === "https:" && url.hostname === VIDEO_HOST && /\.mp4$/i.test(url.pathname) ? url.href : "";
+  } catch { return ""; }
+}
+
+/** The post's own video with sound, when it has one; the first of several. */
+export function xPostVideo(tweet: FxTweet): XVideo | null {
+  const video = (tweet.media?.videos ?? []).find(isVideo);
+  if (!video) return null;
+  const sizes = (video.formats ?? []).filter((f) => f.container === "mp4" && videoFile(f.url)).sort((a, b) => (a.bitrate ?? Infinity) - (b.bitrate ?? Infinity));
+  const url = videoFile(sizes[0]?.url) || videoFile(video.url);
+  return url ? { url, seconds: video.duration! } : null;
+}
+
 function postBody(tweet: FxTweet): string {
   const paragraphs = (tweet.text ?? "").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
     .map((p) => `<p>${escape(p).replace(/\n/g, "<br>")}</p>`);
   const photos = (tweet.media?.photos ?? []).map((p) => figure(p.url ?? "", "", p.altText ?? ""));
+  // The poster frame stands for the video; without it a post that is only a video has nothing to open.
+  const videos = (tweet.media?.videos ?? []).filter(isVideo).map((v) => figure(v.thumbnail_url ?? "", `Video, ${videoLength(v.duration!)}`));
   const quote = tweet.quote ? `<blockquote><p>${escape(tweet.quote.author?.name ?? "Quoted post")}:</p>${postBody(tweet.quote)}</blockquote>` : "";
-  return paragraphs.join("") + photos.join("") + quote;
+  return paragraphs.join("") + photos.join("") + videos.join("") + quote;
 }
 
 export function xPostHtml(tweet: FxTweet): string {

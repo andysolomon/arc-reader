@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { fetchReadable, htmlToText, isWebAddress, looksLikeUrl, markdownToText, publishedDate, readPdfFile } from "./fetchUrl";
+import { strToU8, zipSync } from "fflate";
+import { DRM, epubBook } from "./bookFile";
 import { segment } from "./segment";
 import { placeLinks } from "./linkPlaces";
 
@@ -251,6 +253,52 @@ describe("telling a pasted link from pasted text", () => {
     expect(isWebAddress("https://")).toBe(false);
     expect(isWebAddress("Read https://example.com later")).toBe(false);
     expect(isWebAddress("https://example.com\nand some notes")).toBe(false);
+  });
+});
+
+describe("EPUB links", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const xhtml = (body: string) => `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Page</title></head><body>${body}</body></html>`;
+  const prose = (about: string) => Array.from({ length: 3 }, (_, p) => `<p>${Array.from({ length: 5 }, (_, i) => `${about} ${p + 1} went on in sentence ${i + 1}, long enough that the paragraph reads as prose.`).join(" ")}</p>`).join("");
+  const files = (encrypted = false): Record<string, string> => ({
+    mimetype: "application/epub+zip",
+    "META-INF/container.xml": `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`,
+    ...(encrypted ? { "META-INF/encryption.xml": `<encryption><EncryptedData><CipherData><CipherReference URI="c1.xhtml"/></CipherData></EncryptedData></encryption>` } : {}),
+    "content.opf": `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>The Farmyard</dc:title><dc:creator>Jane Example</dc:creator></metadata>
+      <manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/></manifest>
+      <spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>`,
+    "nav.xhtml": xhtml(`<nav epub:type="toc"><ol><li><a href="c1.xhtml">Old Major</a></li><li><a href="c2.xhtml">The Rebellion</a></li></ol></nav>`),
+    "c1.xhtml": xhtml(`<h1>Old Major</h1>${prose("The meeting")}`),
+    "c2.xhtml": xhtml(`<h1>The Rebellion</h1>${prose("The rebellion")}`),
+  });
+  const epub = (encrypted = false) => zipSync(Object.fromEntries(Object.entries(files(encrypted)).map(([name, text]) => [name, strToU8(text)])));
+  const url = "https://github.com/jane/farmyard/releases/latest/download/the-farmyard.epub";
+  const viaServer = `/api/fetch?url=${encodeURIComponent(url)}`;
+
+  it("reads a link to an EPUB as the book, its chapters shelved under the link", async () => {
+    // The site sends no CORS headers; the server passes the file on as the download it was sent as.
+    const fetched = vi.fn(async (input: string) => {
+      if (input === url) throw new TypeError("CORS");
+      return new Response(epub(), { headers: { "content-type": "application/octet-stream" } });
+    });
+    vi.stubGlobal("fetch", fetched);
+    const result = await fetchReadable(url);
+    expect(fetched.mock.calls.map(([input]) => input)).toEqual([url, viaServer]);
+    expect(result).toMatchObject({ title: "The Farmyard", domain: "github.com", meta: { url, author: "Jane Example" } });
+    expect(result.text).toContain("The meeting 1 went on");
+    expect(result.book).toMatchObject({ title: "The Farmyard", index: 0, meta: { url, author: "Jane Example" } });
+    expect(result.book!.file).toBeUndefined();
+    expect(result.book!.chapters.map((c) => [c.title, c.url])).toEqual([["Old Major", url], ["The Rebellion", url]]);
+    expect(result.book!.chapters[1].text).toContain("The rebellion 3 went on");
+    // The same book chosen from the device is the same book.
+    expect(result.book!.id).toBe(epubBook("the-farmyard.epub", epub()).book!.id);
+  });
+
+  it("says why a copy-protected EPUB can't be read, instead of importing its bytes", async () => {
+    const fetched = vi.fn(async () => new Response(epub(true), { headers: { "content-type": "application/epub+zip" } }));
+    vi.stubGlobal("fetch", fetched);
+    await expect(fetchReadable(url)).rejects.toThrow(DRM);
+    expect(fetched).toHaveBeenCalledTimes(1);
   });
 });
 

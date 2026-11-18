@@ -51,6 +51,14 @@ export class SpeechActivity {
     }
   }
 
+  /**
+   * Resolves once nothing is in flight on `target`, with no grace period: for work someone is
+   * waiting on (transcribing a video), which takes turns with a listener instead of standing aside.
+   */
+  async free(target: string): Promise<void> {
+    while (this.inflight.get(SpeechActivity.key(target))) await new Promise<void>((resolve) => { this.waiters.add(resolve); });
+  }
+
   static key(target: string) { return target.replace(/\/$/, ""); }
 }
 

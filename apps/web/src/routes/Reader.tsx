@@ -23,6 +23,7 @@ import { hasDiagram } from "../lib/articleDiagram";
 import { useDiagrams } from "../state/diagrams";
 import { DocumentDetails } from "../components/DocumentDetails";
 import { DocumentLinks } from "../components/DocumentLinks";
+import { VideoTranscript } from "../components/VideoTranscript";
 import { docLinks, linksRead } from "../state/links";
 import { BookOffer, ChapterNav, MissingChapters, chapterLabel, useOpenChapter } from "../components/BookChapters";
 import { neighbours } from "../state/books";
@@ -229,6 +230,7 @@ export function Reader() {
         )}
         <motion.div layoutId="doc-surface" className="mx-auto" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
           {detailsRecord && !focus && !readingSummary && <BookOffer record={detailsRecord} />}
+          {detailsRecord && !focus && !readingSummary && <VideoTranscript record={detailsRecord} />}
           {ready && !focus && (
             <div className="mb-10 border-b border-line pb-7">
               <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-medium uppercase tracking-[0.16em] text-fg2">
