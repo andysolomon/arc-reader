@@ -14,7 +14,7 @@ async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null
     await new Promise<void>((resolve, reject) => {
       const tx = database.transaction("docs", "readwrite");
       for (const [index, voice] of voices.entries()) {
-        const id = ["First", "Second", "Third", "Fourth"][index];
+        const id = ["First", "Second", "Third", "Fourth"][index] ?? `Extra ${index + 1}`;
         tx.objectStore("docs").put({
           id, title: `${id} document`, text: `${id} paragraph.\n\nMore ${id.toLowerCase()} text.`, voice,
           source: "paste", domain: "Pasted text", chars: 40, createdAt: 1, updatedAt: 1,
@@ -556,4 +556,24 @@ test("a row opens its document wherever it is clicked, and Back returns to the L
   await expect(page.locator('[data-screen="reader"] h1')).toHaveText("Third document");
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page).toHaveURL(/\/library$/);
+});
+
+test("a long Library offers a way back to the top once a screen has scrolled away", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 520 });
+  await seedLibrary(page, Array(12).fill("local"));
+  const library = page.locator('[data-screen="library"]');
+  const toTop = page.getByRole("button", { name: "Back to top" });
+  await expect(toTop).toHaveCount(0);
+
+  // A little scrolling keeps the top close enough to reach by hand.
+  await library.evaluate((el) => el.scrollTo(0, 80));
+  await expect.poll(() => library.evaluate((el) => el.scrollTop)).toBe(80);
+  await expect(toTop).toHaveCount(0);
+
+  await library.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await expect(toTop).toBeVisible();
+  await toTop.click();
+  await expect.poll(() => library.evaluate((el) => el.scrollTop)).toBe(0);
+  await expect(toTop).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeFocused();
 });
