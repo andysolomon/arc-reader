@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { DocRecord } from "../lib/db";
 import type { LibraryItem } from "./library";
-import { finished, neighbours, nextUnread, placeIn, shelves } from "./books";
+import { entriesOf, finished, neighbours, nextInSeries, nextUnread, placeIn, seriesOf, shelves } from "./books";
 
 const BOOK = { id: "book:1", title: "Backend Basics" };
 const item = (id: string, chapter: number | null, state: Partial<Pick<LibraryItem, "progress" | "reads">> = {}, createdAt = chapter ?? 0): LibraryItem => ({
@@ -48,5 +48,48 @@ describe("a book's chapters in the library", () => {
     const lecture = item("l1", 1);
     lecture.rec.book = placeIn(course, 0);
     expect(shelves([lecture]).get("book:2")).toMatchObject({ kind: "course", contents: "https://cs101.example/" });
+  });
+});
+
+describe("the volumes of a series", () => {
+  const volume = (n: number, name: string) => ({ id: `vol:${n}`, title: `Field Notes: Volume ${n} — ${name}` });
+  const chapter = (id: string, book: { id: string; title: string }, n: number, state: Partial<Pick<LibraryItem, "progress" | "reads">> = {}): LibraryItem => ({
+    ...item(id, null, state, n), rec: { ...item(id, null, {}, n).rec, book: { ...book, chapter: n, chapters: 2 } },
+  });
+  const [one, two, three] = [volume(1, "Soil"), volume(2, "Water"), volume(3, "Light")];
+  // Newest first: volume 3 came last, and only its first chapter is in the library.
+  const items = [chapter("v3c1", three, 1), chapter("v2c2", two, 2), chapter("v2c1", two, 1), item("article", null), item("c2", 2), item("c1", 1), chapter("v1c2", one, 2, { reads: 1 }), chapter("v1c1", one, 1, { reads: 1 })];
+
+  it("groups the books whose titles differ only after the series' name, in volume order", () => {
+    const series = seriesOf(shelves(items)).get("vol:2")!;
+    expect(series.title).toBe("Field Notes");
+    expect(series.volumes.map((v) => [v.volume, v.title, v.shelf.id])).toEqual([[1, "Volume 1 — Soil", "vol:1"], [2, "Volume 2 — Water", "vol:2"], [3, "Volume 3 — Light", "vol:3"]]);
+    expect(seriesOf(shelves(items)).has("book:1")).toBe(false);
+  });
+
+  it("takes two volumes to make a series", () => {
+    expect(seriesOf(shelves(items.filter((it) => it.rec.book?.id !== "vol:1" && it.rec.book?.id !== "vol:3"))).size).toBe(0);
+  });
+
+  it("lists the series once, where its newest chapter is, with a lone chapter of a volume inside it", () => {
+    const entries = entriesOf(items);
+    expect(entries.map((entry) => entry.kind)).toEqual(["series", "doc", "book"]);
+    expect(entries[0]).toMatchObject({ kind: "series", duration: 5 * 600 });
+  });
+
+  it("reads on from the end of one volume into the next", () => {
+    const at = (id: string) => neighbours(items, items.find((it) => it.rec.id === id)!.rec);
+    expect(at("v1c2").next?.rec.id).toBe("v2c1");
+    expect(at("v2c1").previous?.rec.id).toBe("v1c2");
+    expect(at("v2c1").next?.rec.id).toBe("v2c2");
+    expect(at("v3c1").next).toBeUndefined();
+    expect(at("v1c1").previous).toBeUndefined();
+  });
+
+  it("picks the series up in the first volume with something left to read", () => {
+    const series = seriesOf(shelves(items)).get("vol:1")!;
+    expect(nextInSeries(series).rec.id).toBe("v2c1");
+    const done = items.map((it) => ({ ...it, reads: 1 }));
+    expect(nextInSeries(seriesOf(shelves(done)).get("vol:1")!).rec.id).toBe("v1c1");
   });
 });

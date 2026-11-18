@@ -25,8 +25,8 @@ import { estimatePremium, type PremiumEstimate } from "../lib/premiumEstimate";
 import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
 import { catalogue } from "../lib/postTitle";
-import { entriesOf, finished, nextUnread, shelves, useBooks, type LibraryEntry, type Shelf } from "../state/books";
-import { BookMark, SourceMark } from "../components/SourceMark";
+import { entriesOf, finished, nextInSeries, nextUnread, seriesOf, shelves, useBooks, type LibraryEntry, type Series, type Shelf } from "../state/books";
+import { BookMark, SeriesMark, SourceMark } from "../components/SourceMark";
 import { partNames } from "../lib/book";
 
 /** Category filter value for documents not yet on a shelf */
@@ -136,6 +136,7 @@ export function LibraryPage() {
     });
   }, [items, q, vf, cf, favoritesOnly, defaultVoice]);
   const library = useMemo(() => shelves(items), [items]);
+  const librarySeries = useMemo(() => seriesOf(library), [library]);
   const entries = useMemo(() => {
     const list = entriesOf(filtered);
     // Items arrive newest first; equal durations keep that order.
@@ -207,6 +208,11 @@ export function LibraryPage() {
     },
   };
 
+  /** A series as the whole library has it, whatever the filters leave of it. */
+  const seriesProps = (series: Series) => {
+    const whole = librarySeries.get(series.volumes[0].shelf.id) ?? series;
+    return { series, whole, grid, open: openBooks.has(series.id), onToggle: () => toggleBook(series.id), onContinue: () => act.resume(nextInSeries(whole)) };
+  };
   const bookProps = (shelf: Shelf) => {
     const whole = library.get(shelf.id) ?? shelf;
     const source = whole.items.find((it) => it.rec.book?.contents) ?? whole.items.find((it) => it.rec.meta?.url);
@@ -218,6 +224,16 @@ export function LibraryPage() {
       onComplete: source ? () => void useBooks.getState().complete(source.rec) : undefined,
     };
   };
+
+  const row = (it: LibraryItem, inBook = false) => grid
+    ? <CardItem key={it.rec.id} it={it} inBook={inBook} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
+    : <Row key={it.rec.id} it={it} inBook={inBook} touch={touch} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />;
+  /** A book's chapters under its name; a volume goes by the part of its title its series doesn't already say. */
+  const book = (shelf: Shelf, title?: string) => (
+    <BookGroup key={shelf.id} {...bookProps(shelf)} title={title}>
+      {shelf.items.map((it) => row(it, true))}
+    </BookGroup>
+  );
 
   return (
     <section ref={scrollRef} onScroll={(e) => { left.top = e.currentTarget.scrollTop; }} data-screen="library" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
@@ -367,27 +383,19 @@ export function LibraryPage() {
         )}
         {filtered.length > 0 && !grid && (
           <ul className="m-0 -mx-5 flex list-none flex-col border-t border-line p-0 sm:-mx-4">
-            {entries.map((entry) => entry.kind === "doc" ? (
-              <Row key={entry.it.rec.id} it={entry.it} touch={touch} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
-            ) : (
-              <BookGroup key={entry.shelf.id} {...bookProps(entry.shelf)}>
-                {entry.shelf.items.map((it) => (
-                  <Row key={it.rec.id} it={it} inBook touch={touch} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
-                ))}
-              </BookGroup>
+            {entries.map((entry) => entry.kind === "doc" ? row(entry.it) : entry.kind === "book" ? book(entry.shelf) : (
+              <SeriesGroup key={entry.series.id} {...seriesProps(entry.series)}>
+                {entry.series.volumes.map(({ shelf, title }) => book(shelf, title))}
+              </SeriesGroup>
             ))}
           </ul>
         )}
         {filtered.length > 0 && grid && (
           <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 p-0">
-            {entries.map((entry) => entry.kind === "doc" ? (
-              <CardItem key={entry.it.rec.id} it={entry.it} defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(entry.it.rec.id)} estimate={estimates.get(entry.it.rec.id)} {...act} />
-            ) : (
-              <BookGroup key={entry.shelf.id} {...bookProps(entry.shelf)}>
-                {entry.shelf.items.map((it) => (
-                  <CardItem key={it.rec.id} it={it} inBook defaultVoice={defaultVoice} selecting={selecting} selected={selected.has(it.rec.id)} estimate={estimates.get(it.rec.id)} {...act} />
-                ))}
-              </BookGroup>
+            {entries.map((entry) => entry.kind === "doc" ? row(entry.it) : entry.kind === "book" ? book(entry.shelf) : (
+              <SeriesGroup key={entry.series.id} {...seriesProps(entry.series)}>
+                {entry.series.volumes.map(({ shelf, title }) => book(shelf, title))}
+              </SeriesGroup>
             ))}
           </ul>
         )}
@@ -508,9 +516,11 @@ const rowTitle = ({ it, inBook }: Pick<ItemProps, "it" | "inBook">) => `${inBook
  * A book's chapters behind one row: how far through the book you are, with the chapters
  * a press away. Continue picks up at the first chapter you haven't finished.
  */
-function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, onComplete, children }: {
+function BookGroup({ shelf, whole, title = shelf.title, grid, open, onToggle, onContinue, onPrepare, onComplete, children }: {
   /** The chapters that pass the current filters */
   shelf: Shelf;
+  /** What to call it where a series above already names the work */
+  title?: string;
   /** Every chapter in the library */
   whole: Shelf;
   grid: boolean;
@@ -540,7 +550,7 @@ function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, 
         className={cn("grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 transition-colors duration-fast", grid ? "p-4" : "px-5 py-3.5 active:bg-bg2 sm:px-4 [@media(hover:hover)]:hover:bg-bg2")}
       >
         <BookMark />
-        <div className={cn(TITLE, "min-w-0")}>{shelf.title}</div>
+        <div className={cn(TITLE, "min-w-0")}>{title}</div>
         <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} ${many} of ${shelf.title}`} onClick={onToggle} className="-mr-1 grid size-[22px] shrink-0 place-items-center rounded-control border-0 bg-transparent text-fg3 hover:text-fg">
           <ChevronRight size={16} strokeWidth={1.5} className={cn("transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
         </button>
@@ -566,6 +576,62 @@ function BookGroup({ shelf, whole, grid, open, onToggle, onContinue, onPrepare, 
       </div>
       {open && (
         <ul id={panel} aria-label={`${One}s of ${shelf.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5 bg-bg p-4" : "flex flex-col [&>li:last-child]:border-b-0")}>
+          {children}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function SeriesGroup({ series, whole, grid, open, onToggle, onContinue, children }: {
+  /** The volumes that pass the current filters */
+  series: Series;
+  /** Every volume in the library */
+  whole: Series;
+  grid: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onContinue: () => void;
+  children: ReactNode;
+}) {
+  const items = whole.volumes.flatMap(({ shelf }) => shelf.items);
+  const total = items.reduce((sum, it) => sum + it.duration, 0);
+  const heard = items.reduce((sum, it) => sum + it.duration * (finished(it) ? 1 : it.progress), 0);
+  const read = items.filter(finished).length;
+  const have = whole.volumes.reduce((sum, { shelf }) => sum + new Set(shelf.items.map((it) => it.rec.book!.chapter)).size, 0);
+  const chapters = whole.volumes.reduce((sum, { shelf }) => sum + shelf.chapters, 0);
+  const started = heard > 0;
+  const panel = `series-${series.id.replace(/\W/g, "-")}`;
+  return (
+    <li data-series={series.title} className={cn(grid ? "col-span-full overflow-hidden rounded-card border border-line bg-bg2" : "border-b border-line")}>
+      <div
+        onClick={(e) => { if (opensDocument(e)) onToggle(); }}
+        className={cn("grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 transition-colors duration-fast", grid ? "p-4" : "px-5 py-3.5 active:bg-bg2 sm:px-4 [@media(hover:hover)]:hover:bg-bg2")}
+      >
+        <SeriesMark />
+        <div className={cn(TITLE, "min-w-0")}>{series.title}</div>
+        <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} volumes of ${series.title}`} onClick={onToggle} className="-mr-1 grid size-[22px] shrink-0 place-items-center rounded-control border-0 bg-transparent text-fg3 hover:text-fg">
+          <ChevronRight size={16} strokeWidth={1.5} className={cn("transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
+        </button>
+        <div className="col-span-2 col-start-2 mt-0.5 min-w-0 overflow-hidden text-[13px] leading-5 text-fg2">
+          <div className="-ml-4 flex flex-wrap items-center gap-y-0.5">
+            <Fact>Series</Fact>
+            <Fact className="tabular-nums">{whole.volumes.length} volumes</Fact>
+            <Fact className="tabular-nums">{have < chapters ? `${have} of ${chapters} chapters` : `${have} chapters`}</Fact>
+            <Fact className="tabular-nums">{fmtTime(total)}</Fact>
+            {read > 0 && <Fact className="tabular-nums text-accent">{read === have ? "All read" : `${read} read`}</Fact>}
+            {series.volumes.length < whole.volumes.length && <Fact className="tabular-nums">{series.volumes.length} shown</Fact>}
+          </div>
+        </div>
+        <div className="col-span-2 col-start-2 mt-1 flex items-start justify-between gap-3">
+          <div className="-ml-2 flex flex-wrap items-center gap-x-1 text-[13px] text-fg2">
+            <Button variant="ghost" className="px-2" aria-label={`${started ? "Continue" : "Start"} ${series.title}`} leading={<Play size={15} strokeWidth={1.5} />} onClick={onContinue}>{started ? "Continue" : "Start"}</Button>
+          </div>
+          <Progress value={total ? heard / total : 0} className="h-[34px]" />
+        </div>
+      </div>
+      {open && (
+        <ul id={panel} aria-label={`Volumes of ${series.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "flex flex-col gap-3.5 bg-bg p-4" : "flex flex-col pl-5 sm:pl-4 [&>li:last-child]:border-b-0")}>
           {children}
         </ul>
       )}
