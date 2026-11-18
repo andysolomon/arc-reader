@@ -7,6 +7,8 @@ import type { DocMeta } from "./db";
 import { absoluteUrl, linksInMarkdown, linksInText, uniqueLinks, type DocLink } from "./links";
 import { bookContents, breadcrumbParent, openedAt, pageKey, sectionsOf, withSections, type BookChapter, type BookContents } from "./book";
 import { fetchArchiveBook } from "./archive";
+import { epubBook } from "./bookFile";
+import { isEpubFile } from "./epubType";
 import { ReadError } from "./readError";
 
 /** Fetch a web page and extract readable text. Direct fetch first, then the built-in /api/fetch route, then an optional readability proxy. */
@@ -301,6 +303,29 @@ async function pageStylesheets(html: string, url: string, signal?: AbortSignal):
   return new Map(links.map((href, i) => [href, texts[i]] as const).filter(([, css]) => css));
 }
 
+/** The name a file was sent under, or the one at the end of its address. */
+function fileName(r: Response, url: string): string {
+  const sent = r.headers.get("content-disposition")?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i)?.[1];
+  let last = "";
+  try { last = new URL(url).pathname.split("/").filter(Boolean).pop() ?? ""; } catch { /* No address to name it by. */ }
+  for (const name of [sent, last]) {
+    if (!name) continue;
+    try { return decodeURIComponent(name); } catch { return name; }
+  }
+  return "";
+}
+
+/**
+ * A book file behind a link, shelved like any book fetched from a site: its chapters carry the
+ * link, and the first opens with an offer to add the rest.
+ */
+function linkedBook(page: Fetched, url: string, domain: string): Fetched {
+  const meta = { ...page.meta, url };
+  if (!page.book) return { ...page, domain, meta };
+  const { file: _, ...book } = page.book;
+  return { ...page, domain, meta, book: { ...book, meta, chapters: book.chapters.map((chapter) => ({ ...chapter, url })) } };
+}
+
 async function readResponse(r: Response, url: string, domain: string, signal?: AbortSignal): Promise<Fetched> {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const ct = r.headers.get("content-type") ?? "";
@@ -309,7 +334,11 @@ async function readResponse(r: Response, url: string, domain: string, signal?: A
     void r.body?.cancel().catch(() => {});
     throw new Error("PDF");
   }
-  const body = await r.text();
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  const name = fileName(r, url);
+  // A link to an EPUB is a link to a whole book. One that can't be opened says why.
+  if (isEpubFile(bytes, ct, name)) return linkedBook(epubBook(name, bytes), url, domain);
+  const body = new TextDecoder().decode(bytes);
   if (body.startsWith("%PDF-")) throw new Error("PDF");
   if (ct.includes("html")) {
     const f = htmlToText(body, url, await pageStylesheets(body, url, signal));
@@ -427,12 +456,12 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
   try {
     return await withPartSections(await withParentBook(await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain, signal), signal), signal);
   } catch (e) {
-    if (signal?.aborted) throw e;
+    if (e instanceof ReadError || signal?.aborted) throw e;
   }
   try {
     return await withPartSections(await withParentBook(await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain, signal), signal), signal);
   } catch (e) {
-    if (!PROXY || signal?.aborted) throw e;
+    if (!PROXY || e instanceof ReadError || signal?.aborted) throw e;
   }
   const r = await fetch(PROXY.replace("{url}", url), { signal, headers: { Accept: "text/plain" } });
   if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);

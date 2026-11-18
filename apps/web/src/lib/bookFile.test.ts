@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { strToU8, zipSync } from "fflate";
 import { DRM, epubBook, textBook } from "./bookFile";
+import { isEpubFile } from "./epubType";
 import { ReadError } from "./readError";
 
 const para = (about: string) => Array.from({ length: 5 }, (_, i) => `${about} went on in sentence ${i + 1}, long enough that the paragraph reads as prose.`).join(" ");
@@ -115,6 +116,47 @@ describe("EPUB books", () => {
     });
     expect(() => epubBook("x.epub", locked)).toThrow(DRM);
     expect(() => epubBook("x.epub", strToU8("not a zip"))).toThrow(ReadError);
+  });
+
+  /** One volume of a set: every volume has the set's title, and its own only on the title page. */
+  const volume = (n: number, name: string, meta = "") => epub({
+    "OEBPS/content.opf": opf([["nav", "nav.xhtml", 'properties="nav"'], ["title", "title.xhtml"], ["c1", "c1.xhtml"], ["c2", "c2.xhtml"]], ["title", "c1", "c2"], meta),
+    "OEBPS/nav.xhtml": xhtml(`<nav epub:type="toc"><ol><li><a href="c1.xhtml">${name} begins</a></li><li><a href="c2.xhtml">${name} ends</a></li></ol></nav>`),
+    "OEBPS/title.xhtml": xhtml(`<section epub:type="titlepage" class="titlepage"><h1 class="title">The Farmyard</h1><p class="subtitle">Volume ${n} — ${name}</p><p class="author">Jane Example</p></section>`),
+    "OEBPS/c1.xhtml": xhtml(`<h1>${name} begins</h1>${prose(`${name} one`)}`),
+    "OEBPS/c2.xhtml": xhtml(`<h1>${name} ends</h1>${prose(`${name} two`)}`),
+  });
+
+  it("names the volumes of a set apart by the subtitle on each one's title page", () => {
+    const one = epubBook("vol1.epub", volume(1, "Spring"));
+    const two = epubBook("vol2.epub", volume(2, "Harvest"));
+    expect([one.book!.title, two.book!.title]).toEqual(["The Farmyard: Volume 1 — Spring", "The Farmyard: Volume 2 — Harvest"]);
+    expect(one.title).toBe(one.book!.title);
+    expect(one.book!.id).not.toBe(two.book!.id);
+    // The title page is still not a chapter.
+    expect(one.book!.chapters.map((c) => c.title)).toEqual(["Spring begins", "Spring ends"]);
+    // A page that merely has a subtitle class somewhere is not a title page.
+    expect(epubBook("farmyard.epub", THREE).title).toBe("The Farmyard");
+  });
+
+  it("takes a subtitle the book's record marks as one, without becoming a different book", () => {
+    const marked = `<dc:title id="t2">A Fable</dc:title><meta refines="#t2" property="title-type">subtitle</meta>`;
+    const bare = volume(1, "Spring").slice();
+    const withRecord = epubBook("vol1.epub", volume(1, "Spring", marked));
+    expect(withRecord.title).toBe("The Farmyard: A Fable");
+    expect(withRecord.book!.id).toBe(epubBook("vol1.epub", bare).book!.id);
+  });
+
+  it("knows an EPUB by its bytes, whatever it is served as", () => {
+    // As the format asks: the type comes first in the archive, and is stored as written.
+    const strict = zipSync({ mimetype: [strToU8("application/epub+zip"), { level: 0 }], "META-INF/container.xml": strToU8(CONTAINER) });
+    expect(isEpubFile(strict, "application/octet-stream", "download")).toBe(true);
+    const loose = zipSync({ "META-INF/container.xml": strToU8(CONTAINER), mimetype: strToU8("application/epub+zip") });
+    expect(isEpubFile(loose)).toBe(false);
+    expect(isEpubFile(loose, "", "book.epub")).toBe(true);
+    expect(isEpubFile(loose, "application/epub+zip")).toBe(true);
+    expect(isEpubFile(zipSync({ "a.txt": strToU8("some text") }), "application/zip", "notes.zip")).toBe(false);
+    expect(isEpubFile(strToU8("<html>book.epub</html>"), "application/epub+zip", "book.epub")).toBe(false);
   });
 });
 

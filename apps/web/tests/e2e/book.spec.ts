@@ -203,6 +203,30 @@ test("a book the Internet Archive only lends is not imported, and says why", asy
   await expect(page.getByText("The Count of Monte Cristo")).toHaveCount(0);
 });
 
+test("a link to an EPUB is read as the book, with the rest of its chapters on offer", async ({ page }) => {
+  const link = "https://books.example/releases/latest/download/the-farmyard.epub";
+  const epub = await buildEpub();
+  // Sent as a plain download, the way release files are.
+  await page.route("https://books.example/**", (route) => route.fulfill({ contentType: "application/octet-stream", headers: { "access-control-allow-origin": "*", "content-disposition": "attachment; filename=the-farmyard.epub" }, body: epub }));
+  await readLink(page, link);
+  const offer = page.getByRole("complementary", { name: "Book" });
+  await expect(offer).toContainText("This is chapter 1 of 3 in The Farmyard");
+  const text = page.getByRole("region", { name: "Document text" }).locator("article");
+  await expect(text.getByRole("heading", { name: "Old Major" })).toBeVisible();
+  await expect(text).toContainText("The meeting 4 went on");
+  await expect(text).not.toContainText("Copyright");
+
+  await offer.getByRole("button", { name: "Add the other 2 chapters" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Added 2 chapters of The Farmyard" })).toBeVisible();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const book = page.locator('li[data-book="The Farmyard"]');
+  await expect(book).toContainText("3 chapters");
+  await book.getByRole("button", { name: "Show chapters of The Farmyard" }).click();
+  const rows = page.getByRole("list", { name: "Chapters of The Farmyard" }).getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(2)).toContainText("3. The Harvest");
+});
+
 /** A small EPUB 3: a cover, a copyright page and three chapters, two of them in one file. */
 async function buildEpub(): Promise<Buffer> {
   const { strToU8, zipSync } = await import("fflate");

@@ -4,6 +4,7 @@ import type { Connect, Plugin } from "vite";
 import { FXTWITTER_API, xPostHtml, xPostId, type FxTweet } from "./vite.xpost";
 import { MAX_PDF_BYTES, isPdf, isPdfType, pdfPage, type SlidePictures } from "./vite.pdf";
 import { SLIDE_ROUTE, SlideStore, slideMiddleware } from "./vite.slides";
+import { MAX_BOOK_BYTES, isEpubFile } from "./src/lib/epubType";
 
 /**
  * GET /api/fetch?url=… fetches a web page server-side and returns it as-is.
@@ -12,7 +13,8 @@ import { SLIDE_ROUTE, SlideStore, slideMiddleware } from "./vite.slides";
  * X posts come from FxTwitter's API as HTML, since x.com itself serves only a script shell.
  * A PDF, up to 60 MB, comes back as an HTML page of its text; POST /api/fetch/pdf does the
  * same for a PDF file sent as the request body. A deck's slides that show more than text come
- * with pictures, served from /api/slides.
+ * with pictures, served from /api/slides. An EPUB, up to 60 MB, comes back as the file it is,
+ * for the browser to cut into chapters.
  */
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -56,6 +58,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, pictures?: Slid
     }
     const buf = Buffer.from(await r.arrayBuffer());
     if (isPdf(buf, type)) return sendPdf(res, buf, r.url || url.href, pictures);
+    if (isEpubFile(buf, type, url.pathname)) {
+      if (buf.byteLength > MAX_BOOK_BYTES) return send(res, 413, JSON.stringify({ error: "too_large" }));
+      const name = r.headers.get("content-disposition");
+      res.writeHead(200, { "content-type": "application/epub+zip", "cache-control": "no-store", ...(name ? { "content-disposition": name } : {}) });
+      return void res.end(buf);
+    }
     if (buf.byteLength > MAX_BYTES) return send(res, 413, JSON.stringify({ error: "too_large" }));
     send(res, 200, buf.toString("utf8"), type || "text/plain");
   } catch (e) {
