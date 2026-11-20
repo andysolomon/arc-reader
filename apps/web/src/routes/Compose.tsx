@@ -187,14 +187,14 @@ export function Compose() {
     }
   };
 
-  /** A whole book goes into the Library at once, every chapter, and opens at its first. */
+  /** A whole book goes into the Library at once, every chapter, and opens paused at its first: uploading is not asking to listen. */
   const shelveBook = async (f: Fetched) => {
     const book = f.book!;
     let opened = false;
     const { added } = await useBooks.getState().add(book, {
       async onFirst(first) {
         opened = true;
-        await openDocument(first, navigate, { autoplay: true, resume: false });
+        await openDocument(first, navigate, { autoplay: false, resume: false });
       },
     });
     if (added || opened) return;
@@ -203,7 +203,7 @@ export function Compose() {
     const shelf = shelves(useLibrary.getState().items).get(book.id);
     if (!shelf) return;
     const next = nextUnread(shelf);
-    await openDocument(next.rec, navigate, { autoplay: true, resume: !finished(next) });
+    await openDocument(next.rec, navigate, { autoplay: false, resume: !finished(next) });
   };
 
   /** An EPUB, or a text file with chapters, becomes a book; any other text file opens in the text box. */
@@ -216,7 +216,7 @@ export function Compose() {
       if (f?.book) return await shelveBook(f);
       if (f) {
         const rec = await create({ text: f.text, title: f.title, source: "file", domain: f.domain, meta: f.meta });
-        return await openDocument(rec, navigate, { autoplay: true, resume: false });
+        return await openDocument(rec, navigate, { autoplay: false, resume: false });
       }
       setText(await file.text());
       setTitle(file.name.replace(/\.txt$/i, ""));

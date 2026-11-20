@@ -236,6 +236,9 @@ test("an EPUB chosen from the device goes into the Library as a book, every chap
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   await expect(page.getByRole("status").filter({ hasText: "Added 3 chapters of The Farmyard" })).toBeVisible();
   await expect(page.getByText("Chapter 1 of 3")).toBeVisible();
+  // Uploading a book is not asking to listen: it opens paused.
+  await expect(page.getByRole("status").filter({ hasText: "Ready to listen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pause" })).toHaveCount(0);
   const text = page.getByRole("region", { name: "Document text" }).locator("article");
   await expect(text.getByRole("heading", { name: "Old Major" })).toBeVisible();
   await expect(text).toContainText("The meeting 4 went on");
@@ -255,6 +258,7 @@ test("an EPUB chosen from the device goes into the Library as a book, every chap
   await page.locator('input[type="file"]').setInputFiles(epub);
   await page.waitForURL(/\/read\/[a-z0-9-]+$/);
   await expect(page.getByText("Chapter 1 of 3")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pause" })).toHaveCount(0);
   await page.getByRole("link", { name: "Library", exact: true }).click();
   await expect(page.locator('li[data-book="The Farmyard"]')).toContainText("3 chapters");
 });
