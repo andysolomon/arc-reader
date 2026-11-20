@@ -36,3 +36,17 @@ test("favorites a document, estimates a premium read, and has Jev judge it", asy
   await expect(page.getByRole("button", { name: "Filter by voice" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Favorites", exact: true })).toHaveCount(0);
 });
+
+test("favorites the open document from the reader's toolbar", async ({ page }) => {
+  await composeAndListen(page);
+  await page.keyboard.press("Space"); // pause
+  const star = page.locator("header").getByRole("button", { name: "Favorite", exact: true });
+  await star.click();
+  await expect(star).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Details" }).click();
+  await expect(page.getByRole("region", { name: "Details" }).getByRole("button", { name: "Favorited" })).toBeVisible();
+
+  await star.click();
+  await expect(star).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("region", { name: "Details" })).toContainText("Favorite this to estimate a premium read");
+});

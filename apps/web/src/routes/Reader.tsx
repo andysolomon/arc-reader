@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Headphones, Code2, Check, ImageIcon, Workflow, X } from "lucide-react";
+import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Star, Headphones, Code2, Check, ImageIcon, Workflow, X } from "lucide-react";
 import { IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
@@ -28,6 +28,7 @@ import { docLinks, linksRead } from "../state/links";
 import { BookOffer, ChapterNav, MissingChapters, chapterLabel, useOpenChapter } from "../components/BookChapters";
 import { neighbours } from "../state/books";
 import { useLibrary } from "../state/library";
+import { useFavorites } from "../state/favorites";
 
 export function Reader() {
   const { id } = useParams();
@@ -107,6 +108,12 @@ export function Reader() {
     set("showDiagram", !showDiagram);
   };
   const detailsRecord = ready && record?.id === id ? record : null;
+  const favorited = !!detailsRecord?.favoritedAt;
+  const toggleFavorite = () => {
+    if (!detailsRecord) return;
+    void useFavorites.getState().toggle(detailsRecord);
+    toast(favorited ? "Removed from favorites" : "Added to favorites · estimating a premium read");
+  };
   const hasLinks = !!ready && links.length > 0;
   const showLinks = hasLinks && linksOpen && !focus;
   const chapter = detailsRecord?.book && !readingSummary ? detailsRecord : null;
@@ -148,6 +155,11 @@ export function Reader() {
           <h1 className="min-w-0 flex-1 truncate px-1.5 text-[13px] font-normal text-fg2" title={title}>
             {title}
           </h1>
+          {detailsRecord && !readingSummary && (
+            <IconButton label="Favorite" active={favorited} onClick={toggleFavorite}>
+              <Star size={20} strokeWidth={1.5} fill={favorited ? "currentColor" : "none"} className={favorited ? "text-accent" : undefined} />
+            </IconButton>
+          )}
           {detailsRecord && !readingSummary && (
             <IconButton label={details ? "Hide details" : "Details"} active={details} onClick={() => setDetails(!details)}>
               <Library size={20} strokeWidth={1.5} />
