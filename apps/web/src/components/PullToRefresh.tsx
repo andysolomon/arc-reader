@@ -93,7 +93,7 @@ export function PullToRefresh({ target }: { target: RefObject<HTMLElement | null
         if (ok) return location.reload();
         setReloading(false);
         set(0);
-        toast("Can't reach ReadAloud right now. Check Tailscale, then pull again.", 5000);
+        toast("Can't reach ReadAloud. If Tailscale is on, turn it off and on, then pull again.", 5000);
       });
     };
 

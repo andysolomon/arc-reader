@@ -29,7 +29,7 @@ describe("iOS shell loading from a server", () => {
     const html = unreachablePage("https://host.tailnet.ts.net:10000", undefined, "https://host.tailnet.ts.net:10000/?access=t");
     expect(html).toContain('var server = "https://host.tailnet.ts.net:10000";');
     expect(html).toContain('var start = "https://host.tailnet.ts.net:10000/?access=t";');
-    expect(html).toContain("Check that this iPhone is online.");
+    expect(html).toContain("Check that this iPhone is online. If Tailscale is on, turn it off and on.");
     expect(html).not.toContain("Tailscale is connected");
     expect(unreachablePage("https://host.tailnet.ts.net:8449")).toContain("Tailscale is connected");
   });
