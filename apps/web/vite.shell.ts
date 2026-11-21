@@ -18,8 +18,13 @@ const TIMING = { retryMs: 4000, giveUpMs: 10000 };
 /** Colors are the dark theme's (packages/tokens): the shell paints that behind the web view. */
 export function unreachablePage(serverUrl: string, timing = TIMING, startUrl = serverUrl): string {
   const host = escapeHtml(new URL(serverUrl).host);
-  // With an access token the shell uses the public address, which needs no Tailscale.
-  const hint = startUrl === serverUrl ? "Check that Tailscale is connected on this iPhone." : "Check that this iPhone is online.";
+  // With an access token the shell uses the public address, which needs no Tailscale. While
+  // Tailscale is on, though, MagicDNS sends even that address through the tunnel, so a stalled
+  // tunnel still breaks it.
+  const hint =
+    startUrl === serverUrl
+      ? "Check that Tailscale is connected on this iPhone."
+      : "Check that this iPhone is online. If Tailscale is on, turn it off and on.";
   return `<!doctype html>
 <html lang="en">
 <head>
