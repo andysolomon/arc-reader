@@ -17,6 +17,9 @@ import { AuthPage } from "./routes/Auth";
 import { syncStatusBar } from "./lib/native";
 import { useThemeId } from "./state/settings";
 import { useLibrary } from "./state/library";
+import { toast } from "./state/toast";
+import { audioCache } from "./lib/db";
+import { audioNoticeMessage } from "./lib/storage";
 import { useVoices } from "./state/voices";
 import { startLibrarySync } from "./lib/librarySync";
 import { useBooks } from "./state/books";
@@ -60,7 +63,9 @@ export default function App() {
       void useLibrary.getState().refresh();
       void usePreparation.getState().refreshShared().then(() => useLibrary.getState().refresh());
     });
-    return () => { document.removeEventListener("visibilitychange", reloadVoices); document.removeEventListener("visibilitychange", watchBooks); stopSync(); };
+    // Saved audio is managed behind playback; say when that changed what is kept on this device.
+    const stopNotices = audioCache.onNotice((notice) => toast(audioNoticeMessage(notice), 6000));
+    return () => { document.removeEventListener("visibilitychange", reloadVoices); document.removeEventListener("visibilitychange", watchBooks); stopSync(); stopNotices(); };
   }, []);
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}>

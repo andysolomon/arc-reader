@@ -3,6 +3,7 @@ import { readsOf, type LibraryChange, type PendingChange } from "./libraryProtoc
 import { uid } from "./hash";
 import type { DocLink } from "./links";
 import type { SavedDiagram } from "./articleDiagram";
+import { deviceStorage } from "./storage";
 
 export type DocSource = "paste" | "url" | "file" | "share" | "sample";
 
@@ -128,6 +129,8 @@ export interface AudioRecord {
   /** See Chunk.voiced; absent on clips stored before it was measured. */
   voiced?: number;
   createdAt: number;
+  /** Size of `blob`; absent on clips stored before sizes were recorded. */
+  bytes?: number;
 }
 
 interface Schema extends DBSchema {
@@ -235,9 +238,86 @@ export const positions = {
   },
 };
 
-const AUDIO_CACHE_MAX = 2000;
+/** Downloaded audio kept on this device. Past it, the oldest clips make room for new ones. */
+export const AUDIO_CACHE_BYTES = 1024 ** 3;
+/** Making room stops this far below the limit, so a full cache is not trimmed on every save. */
+const AUDIO_CACHE_ROOM = 0.9;
+
+export interface AudioUsage { clips: number; bytes: number }
+/** Something the person should hear about: older clips made room, or the device refused a save. */
+export type AudioNotice = { kind: "trimmed"; clips: number; limit: number } | { kind: "full" };
+
 const audioListeners = new Set<() => void>();
 const notifyAudio = () => audioListeners.forEach((listener) => listener());
+const noticeListeners = new Set<(notice: AudioNotice) => void>();
+const announce = (notice: AudioNotice) => noticeListeners.forEach((listener) => listener(notice));
+
+/** Bytes of audio believed stored: measured, then added to by this tab's saves. Null means measure first. */
+let stored: number | null = null;
+/** Saves since the last measure. Another tab's saves are only seen by measuring, so measure again after this many. */
+let unmeasured = 0;
+const REMEASURE_AFTER = 200;
+/** The limit when it was last worked out. */
+let limit: number | null = null;
+let upkeep: Promise<void> | null = null;
+let fullAnnounced = false;
+
+const sizeOf = (rec: AudioRecord) => rec.bytes ?? rec.blob?.size ?? 0;
+
+/** The limit on downloaded audio: AUDIO_CACHE_BYTES, or half of what the browser allows this site when that is less. */
+export const audioLimitFor = (allowed?: number) => (allowed ? Math.min(AUDIO_CACHE_BYTES, Math.floor(allowed / 2)) : AUDIO_CACHE_BYTES);
+
+async function audioLimit(): Promise<number> {
+  limit = audioLimitFor((await deviceStorage()).allowed);
+  return limit;
+}
+
+async function measureAudio(): Promise<AudioUsage> {
+  let clips = 0, bytes = 0;
+  for (let cur = await (await db()).transaction("audio").store.openCursor(); cur; cur = await cur.continue()) {
+    clips++;
+    bytes += sizeOf(cur.value);
+  }
+  stored = bytes;
+  unmeasured = 0;
+  return { clips, bytes };
+}
+
+/** Delete the oldest clips until at most `target` bytes remain. Returns how many went. */
+async function trimAudio(target: number): Promise<number> {
+  let { bytes } = await measureAudio();
+  let removed = 0;
+  const tx = (await db()).transaction("audio", "readwrite");
+  for (let cur = await tx.store.index("createdAt").openCursor(); cur && bytes > target; cur = await cur.continue()) {
+    bytes -= sizeOf(cur.value);
+    await cur.delete();
+    removed++;
+  }
+  await tx.done;
+  stored = bytes;
+  return removed;
+}
+
+/** Measure once per visit, then make room whenever the audio outgrows its limit. Runs behind playback, one pass at a time. */
+function keepWithinLimit(): Promise<void> {
+  upkeep ??= (async () => {
+    try {
+      const max = await audioLimit();
+      if (stored === null) await measureAudio();
+      if ((stored ?? 0) <= max) return;
+      const clips = await trimAudio(max * AUDIO_CACHE_ROOM);
+      if (clips) {
+        notifyAudio();
+        announce({ kind: "trimmed", clips, limit: max });
+      }
+    } catch {
+      /* storage unavailable: the next save tries again */
+    } finally {
+      upkeep = null;
+    }
+  })();
+  return upkeep;
+}
 
 export const audioCache = {
   get: async (key: string) => (await db()).get("audio", key),
@@ -247,25 +327,37 @@ export const audioCache = {
     audioListeners.add(listener);
     return () => { audioListeners.delete(listener); };
   },
+  /** Hear when older clips were removed to make room, or when the device refused a save. */
+  onNotice(listener: (notice: AudioNotice) => void) {
+    noticeListeners.add(listener);
+    return () => { noticeListeners.delete(listener); };
+  },
   async put(rec: AudioRecord) {
-    const d = await db();
-    await d.put("audio", rec);
-    // Evict oldest beyond cap (cheap, occasional)
-    if (Math.random() < 0.02) {
-      const n = await d.count("audio");
-      if (n > AUDIO_CACHE_MAX) {
-        let cur = await d.transaction("audio", "readwrite").store.index("createdAt").openCursor();
-        let toDelete = n - AUDIO_CACHE_MAX;
-        while (cur && toDelete-- > 0) {
-          await cur.delete();
-          cur = await cur.continue();
-        }
+    const bytes = rec.blob.size;
+    try {
+      await (await db()).put("audio", { ...rec, bytes });
+    } catch (error) {
+      // The device is out of room for this site. Say so once, not for every passage.
+      if ((error as { name?: string } | null)?.name === "QuotaExceededError" && !fullAnnounced) {
+        fullAnnounced = true;
+        announce({ kind: "full" });
       }
+      throw error;
     }
+    if (stored !== null) stored += bytes;
+    if (++unmeasured >= REMEASURE_AFTER) stored = null;
+    if (stored === null || limit === null || stored > limit) void keepWithinLimit();
     notifyAudio();
+  },
+  /** What is stored now, after any pass that is making room has finished. */
+  async usage(): Promise<AudioUsage> {
+    await upkeep;
+    return measureAudio();
   },
   async clear() {
     await (await db()).clear("audio");
+    stored = 0;
+    fullAnnounced = false;
     notifyAudio();
   },
 };

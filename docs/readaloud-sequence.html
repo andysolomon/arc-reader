@@ -203,11 +203,11 @@ const SRC = "apps/web/src/";
 /* Participants, left to right. */
 const P = {
   U: { n: "Listener", kind: "actor", d: "The person using the app: pastes, shares, presses play, picks voices." },
-  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:65", SRC + "routes/Compose.tsx:122", SRC + "routes/ReadNew.tsx:15"] },
+  UI: { n: "Screens", s: "Compose · ReadNew · Reader", d: "React Router routes: Compose (/), ReadNew (/read/new, the Web Share Target) and Reader (/read/:id). Library and Settings are left out here.", code: [SRC + "App.tsx:70", SRC + "routes/Compose.tsx:122", SRC + "routes/ReadNew.tsx:15"] },
   PL: { n: "usePlayer", s: "state/player.ts", d: "The Zustand player store. It owns the single PlaybackEngine, resolves the voice, rewrites Patois, restores the saved place, and turns engine callbacks into UI state (speechError, offline, toasts).", code: [SRC + "state/player.ts:105", SRC + "state/player.ts:162"] },
   EN: { n: "PlaybackEngine", s: "engine/engine.ts", d: "Plain TypeScript, no React. Owns the loaded document, the passage plan, one <audio> element per passage, the requestAnimationFrame clock, prefetch, and saving the position.", code: [SRC + "engine/engine.ts:102"] },
   PR: { n: "synthesize()", s: "providers.ts · preparation.ts", d: "The provider chain — cache → older sentence clips → server-prepared clip → speech API → browser voice — and the background-preparation client.", code: [SRC + "engine/providers.ts:459", SRC + "engine/preparation.ts:245"] },
-  DB: { n: "IndexedDB", s: "docs · positions · audio", kind: "db", d: "The readaloud database (idb). docs: Library documents. positions: one per document. audio: clips keyed by engine + voice + text, up to 2000, oldest evicted first.", code: [SRC + "lib/db.ts:148", SRC + "lib/db.ts:238"] },
+  DB: { n: "IndexedDB", s: "docs · positions · audio", kind: "db", d: "The readaloud database (idb). docs: Library documents. positions: one per document. audio: clips keyed by engine + voice + text, up to 1 GB (less when the browser allows this site little), oldest removed first. Settings → Storage shows the size and removes it.", code: [SRC + "lib/db.ts:151", SRC + "lib/db.ts:322"] },
   SV: { n: "App server", s: "Vite plugins · /api/*", d: "Node-side plugins of the Vite dev and preview servers (the Docker image runs preview on :4179). /api/fetch fetches pages; /api/vs, /api/phonon, /api/oa and /api/fish proxy speech APIs with keys from server-side env, so keys never reach the bundle; /api/preparations is the background job service.", code: ["apps/web/vite.config.ts:22", "apps/web/vite.fetch.ts:79", "apps/web/vite.proxy.ts:44", "apps/web/vite.prepare.ts:501"] },
   DK: { n: "Disk", s: "preparations · library.json", kind: "db", d: "Server-side files on volumes. Preparations: PREPARATION_DATA_DIR (default .readaloud-preparations) — job JSON written atomically, clips as <key>.bin + <key>.json (shared-<key> for clips uploaded by devices), restored after a restart and deleted after 7 days. Library: LIBRARY_DATA_DIR/library.json.", code: ["apps/web/vite.prepare.ts:61", "apps/web/vite.library.ts:191", "compose.yaml:76", "compose.yaml:78"] },
   VS: { n: "VoiceStudio", s: "Mac mini · container overflow", d: "Self-hosted TTS with an OpenAI-compatible API (/v1/audio/speech, /v1/audio/transcriptions). One worker that queues at most one more request; a third concurrent request gets 429. KittenTTS is fast on CPU; OmniVoice clones and designed voices are ~10× slower than real time on CPU, so the Mac (GPU) is preferred.", code: ["compose.yaml:58"] },
@@ -263,7 +263,7 @@ const SEQS = {
           d: "Walks <article> or <main>, dropping scripts, nav, headers, footers and forms. Headings stay as Markdown headings, callouts are kept and tables are read row by row. A numbered chapter list anywhere on the page names the book it belongs to; so does a track, a page its breadcrumbs end on that is little more than one undated list of the site’s notes. A note that lists nothing but names a parent in its breadcrumbs is looked up on that parent page. Code stays as fenced blocks; images and SVGs become visual blocks with their captions; links, author, published date and site are collected.", code: [SRC + "lib/fetchUrl.ts:168"] },
       ] },
       { f: "UI", to: "DB", t: "call", n: "useLibrary.create() → docs.put", say: "The text becomes a Library document in IndexedDB.",
-        d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing; the app server adds those (/api/books/import), saving each straight into the shared library, so they keep arriving with the app closed. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts:87", SRC + "lib/db.ts:148"] },
+        d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing; the app server adds those (/api/books/import), saving each straight into the shared library, so they keep arriving with the app closed. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts:87", SRC + "lib/db.ts:151"] },
       { f: "DB", to: "UI", t: "ret", n: "DocRecord" },
       { f: "UI", to: "PL", t: "call", n: "openDocument → open(rec, {autoplay})", say: "The document is handed to the player; the Reader opens at /read/:id.",
         d: "open() resolves the voice: the document’s own, else the default from Settings. Autoplay is only set after a user gesture (Listen, Fetch, a Library tap); a pasted link opens paused; shared readings follow the “Auto-play on share” setting.",
@@ -384,7 +384,7 @@ const SEQS = {
           ] },
         ] },
       ] },
-      { f: "EN", to: "DB", t: "async", n: "positions.put (finished, reads + 1)", say: "Reading finished: one more read is counted, the Library shows it complete, and the clips stay cached, so it replays offline.", code: [SRC + "state/player.ts:125", SRC + "lib/db.ts:222"] },
+      { f: "EN", to: "DB", t: "async", n: "positions.put (finished, reads + 1)", say: "Reading finished: one more read is counted, the Library shows it complete, and the clips stay cached, so it replays offline.", code: [SRC + "state/player.ts:125", SRC + "lib/db.ts:225"] },
     ],
     scenarios: [
       { id: "paste", n: "Paste text and listen", pick: {}, calls: { refSynth: "miss" } },
@@ -506,7 +506,7 @@ const SEQS = {
               ] },
               { f: "PR", to: "PR", t: "self", n: "locateSentences(): starts · silences · loudness", say: "Pauses in the audio (or the word timings) locate each sentence’s start, so the highlight can follow inside one clip.",
                 d: "Lead/tail silence and RMS loudness are measured too, for joining clips smoothly.", code: [SRC + "engine/providers.ts:372", "packages/practice/src/pcm.ts:65"] },
-              { f: "PR", to: "DB", t: "call", n: "toCache(clip + timings)", say: "Saved to IndexedDB for next time.", d: "Quota errors are ignored. Past 2000 clips, the oldest are evicted.", code: [SRC + "engine/providers.ts:325"] },
+              { f: "PR", to: "DB", t: "call", n: "toCache(clip + timings)", say: "Saved to IndexedDB for next time.", d: "A save the device refuses does not stop playback; a full device is announced once. Past 1 GB of audio, the oldest clips are removed and a toast says how many.", code: [SRC + "engine/providers.ts:325"] },
               { f: "DB", to: "PR", t: "ret", n: "saved" },
               { f: "PR", to: "EN", t: "ret", n: "Chunk {source: api, renderSeconds}", say: "Back to the engine with a fresh clip.",
                 d: "renderSeconds is used to warn when a voice renders 1.5× or more slower than it plays." },
@@ -542,7 +542,7 @@ const SEQS = {
     ],
     rows: [
       { f: "PL", to: "EN", t: "call", n: "prerender() → engine.prepare()", say: "Preparation starts only when asked for: from the player menu or from the Library’s queue.",
-        d: "The Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:318", SRC + "engine/engine.ts:389", SRC + "state/preparation.ts:174"] },
+        d: "The Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:318", SRC + "engine/engine.ts:389", SRC + "state/preparation.ts:177"] },
       { f: "EN", to: "PR", t: "call", n: "prepareInBackground(passages, start)", say: "Every passage is listed, starting from the listener’s current one.", code: [SRC + "engine/providers.ts:415"] },
       { op: "loop", id: "check", g: "each passage", rows: [
         { f: "PR", to: "DB", t: "call", n: "fromCache()", say: "Passages already on this device are marked cached, so the server skips them." },
@@ -673,7 +673,7 @@ const SEQS = {
     ],
     rows: [
       { f: "UI", to: "DB", t: "call", n: "docs.put(record)", say: "A document is saved — created, edited, favorited or filed on a shelf.",
-        d: "The player’s positions.put works the same way, adding one to reads when a reading was completed.", code: [SRC + "lib/db.ts:195", SRC + "lib/db.ts:222"] },
+        d: "The player’s positions.put works the same way, adding one to reads when a reading was completed.", code: [SRC + "lib/db.ts:198", SRC + "lib/db.ts:225"] },
       { f: "DB", to: "DB", t: "self", n: "docs + outbox, one transaction", say: "The record and an outbox entry are written together." },
       { f: "DB", to: "UI", t: "ret", n: "saved" },
       { f: "DB", to: "LS", t: "async", n: "notifyLibrary() → sync in 400 ms", say: "The sync loop wakes 400 ms later. It also runs every 5 s while visible, and on coming online or focus.", code: [SRC + "lib/librarySync.ts:181", SRC + "lib/librarySync.ts:184"] },
@@ -704,7 +704,7 @@ const SEQS = {
       ] },
       { f: "LS", to: "LS", t: "self", n: "compare document IDs with the server", say: "With nothing pending, both sides must have the same documents.", code: [SRC + "lib/librarySync.ts:155"] },
       { f: "LS", to: "UI", t: "async", n: "status: synced · refresh the Library", say: "Synced. Other devices pick the change up within 5 s." },
-      { f: "LS", to: "PR", t: "call", n: "refresh shared preparations", say: "The shared catalogue of prepared readings is refreshed too.", code: [SRC + "App.tsx:59", SRC + "engine/preparation.ts:62"] },
+      { f: "LS", to: "PR", t: "call", n: "refresh shared preparations", say: "The shared catalogue of prepared readings is refreshed too.", code: [SRC + "App.tsx:62", SRC + "engine/preparation.ts:62"] },
       { f: "PR", to: "SV", t: "call", n: "GET /api/preparations", d: "10 s timeout.", code: ["apps/web/vite.prepare.ts:268"] },
       { f: "SV", to: "PR", t: "ret", n: "available · device-only keys" },
       { op: "opt", id: "upload", g: "this device holds clips the server lacks", rows: [
