@@ -8,6 +8,7 @@ import { isTransientPreparationError, prioritizePreparation, refreshPreparationC
 import { baseFor, cacheKey, hasOwnServer, hasPreparationServer, prepareInBackground, preparesOnServer, synthesize } from "../engine/providers";
 import { ApiBusy, ApiUnreachable, LOCAL_ENGINE } from "../engine/types";
 import { audioCache, docs } from "../lib/db";
+import { keepStorage } from "../lib/storage";
 import { prepareCodeSummaries } from "../lib/codeSummaries";
 import { preparePatois } from "../lib/patois";
 import { planPassages, segment } from "../lib/segment";
@@ -112,6 +113,8 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
       jobs.push({ id: crypto.randomUUID(), docId: doc.id, title: doc.title, voice: { ...voice }, openaiModel: settings.openaiModel, wordTimings: settings.wordTimings, status: "queued", done: 0, total: 0, createdAt: Date.now() });
     }
     set({ jobs: [...get().jobs.filter((job) => isPreparing(job) || !jobs.some((next) => next.docId === job.docId && next.voice.id === job.voice.id)), ...jobs] });
+    // Audio prepared for offline use should outlast a device that runs low on space.
+    if (jobs.length) void keepStorage();
     drain();
     return jobs.length;
   },

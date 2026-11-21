@@ -9,6 +9,7 @@ import { useSettings, useThemeId } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { toast } from "../state/toast";
 import { ApiUsage } from "../components/ApiUsage";
+import { StorageSettings } from "../components/StorageSettings";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
 import { studioJson, jsonBody } from "../lib/studio";
 import { DEFAULT_ENGINE, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL, hasApi, hasOpenAI } from "../engine/providers";
@@ -271,6 +272,10 @@ export function SettingsPage() {
           ) : (
             <div className="text-[13px] text-fg2">No local speech server configured. Cloud voices use their own engine; choose one from Voices.</div>
           )}
+        </Section>
+
+        <Section title="Storage">
+          <StorageSettings />
         </Section>
 
         <Section title="API usage & spending">

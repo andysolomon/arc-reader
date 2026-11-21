@@ -330,7 +330,7 @@ export async function toCache(req: TtsRequest, chunk: Chunk) {
       starts: chunk.starts, lead: chunk.lead, tail: chunk.tail, loudness: chunk.loudness, voiced: chunk.voiced, createdAt: Date.now(),
     });
   } catch {
-    /* quota or private mode: ignore */
+    /* Playback goes on without a saved copy. A full device is announced by the cache (audioCache.onNotice). */
   }
 }
 
