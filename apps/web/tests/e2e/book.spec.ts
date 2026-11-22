@@ -66,6 +66,16 @@ test("a contents page becomes a book read chapter by chapter", async ({ page }) 
   await expect(rows.nth(2)).toContainText("3. Databases");
   await axe(page);
 
+  // Preparing the book reports how much of the whole is ready, not only each chapter.
+  await book.getByRole("button", { name: "Prepare audio for Backend Basics" }).click();
+  const prepare = page.getByRole("dialog", { name: "Prepare audio", exact: true });
+  await prepare.getByRole("button", { name: /^Prepare \d+ readings?$/ }).click();
+  const queue = page.getByRole("region", { name: "Audio preparation queue" });
+  await expect(queue.getByRole("list", { name: "Books being prepared" })).toContainText(/Backend Basics.*\d+% of the book · \d of 3 chapters/);
+  await expect(queue).toBeHidden({ timeout: 30_000 });
+  await expect(book.getByRole("group", { name: "Audio made" })).toContainText("100% · 3/3");
+  await expect(book.getByRole("group", { name: "Audio made" }).locator("[title]").first()).toHaveAttribute("title", /: 100% of the book · 3 of 3 chapters prepared$/);
+
   // Continue resumes at the first chapter that isn't finished.
   await book.getByRole("button", { name: "Continue Backend Basics" }).click();
   await expect(page.getByText("Chapter 2 of 3")).toBeVisible();
