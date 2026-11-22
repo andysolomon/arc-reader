@@ -20,7 +20,18 @@ export interface PreparationWorker {
   name: string;
   target: string;
   key: string;
+  /** Readings it prepares at once, one passage each. */
+  slots: number;
+  /** It runs on the computer this server runs on, so it gives way when that computer is busy. */
+  local: boolean;
 }
+/** Kubernetes and Compose services answer to a bare name; another computer has a dotted one. */
+export const sharesHost = (target: string) => {
+  const host = new URL(target).hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || !host.includes(".");
+};
+const machine = (id: string, name: string, target: string, key: string, slots = 1): PreparationWorker =>
+  ({ id, name, target, key, slots, local: sharesHost(target) });
 /** Phonon is a speech server of its own: it renders its voices and nothing else. */
 export const PHONON_ENGINE = "phonon";
 export const PHONON_WORKER = "phonon";
@@ -38,14 +49,15 @@ export class PreparationWorkers {
 
   constructor(env: Record<string, string>) {
     const target = (env.VOICESTUDIO_URL || "http://127.0.0.1:3900").replace(/\/$/, "");
-    this.workers = [{ id: "primary", name: env.VOICESTUDIO_NAME || "VoiceStudio", target, key: env.VOICESTUDIO_API_KEY || "" }];
+    this.workers = [machine("primary", env.VOICESTUDIO_NAME || "VoiceStudio", target, env.VOICESTUDIO_API_KEY || "")];
     const secondary = env.VOICESTUDIO_SECONDARY_URL?.replace(/\/$/, "");
-    if (secondary && secondary !== target) this.workers.push({
-      id: "secondary", name: env.VOICESTUDIO_SECONDARY_NAME || "Omarchy", target: secondary,
-      key: env.VOICESTUDIO_SECONDARY_API_KEY || env.VOICESTUDIO_API_KEY || "",
-    });
+    if (secondary && secondary !== target) this.workers.push(machine("secondary", env.VOICESTUDIO_SECONDARY_NAME || "Omarchy",
+      secondary, env.VOICESTUDIO_SECONDARY_API_KEY || env.VOICESTUDIO_API_KEY || ""));
+    // Phonon refuses a request beyond PTTS_MAX_CONCURRENT_REQUESTS (1 unless raised), so more
+    // slots need that raised to match, plus one for someone listening.
     const phonon = env.PHONON_URL?.replace(/\/$/, "");
-    if (phonon) this.workers.push({ id: PHONON_WORKER, name: "Phonon", target: phonon, key: env.PHONON_API_KEY || "" });
+    if (phonon) this.workers.push(machine(PHONON_WORKER, "Phonon", phonon, env.PHONON_API_KEY || "",
+      Math.max(1, Math.floor(Number(env.PHONON_PREPARATION_SLOTS)) || 1)));
   }
 
   /** The one machine that can take a reading, when its engine has a server of its own. */

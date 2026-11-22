@@ -28,6 +28,11 @@ services:
     environment:
       PTTS_LANG: en
       PTTS_QUANT: q8
+      # One thread per request (the default spins a thread per CPU for no gain), one request
+      # per preparation slot plus one for a listener, and a ceiling on the whole server.
+      RAYON_NUM_THREADS: "1"
+      PTTS_MAX_CONCURRENT_REQUESTS: "3"
+    cpus: 4
     volumes:
       # The model (about 65 MB) is downloaded from Hugging Face on first start.
       - phonon-data:/home/phonon/.cache/huggingface
@@ -62,13 +67,14 @@ services:
       VOICESTUDIO_API_KEY: ${VOICESTUDIO_API_KEY}
       VOICESTUDIO_NAME: ${VOICESTUDIO_NAME:-VoiceStudio}
       # When the primary is remote, the local container can prepare a second
-      # compatible reading. Each machine gets one whole reading at a time.
+      # compatible reading. Each VoiceStudio gets one whole reading at a time.
       VOICESTUDIO_SECONDARY_URL: ${VOICESTUDIO_SECONDARY_REMOTE_URL:-${VOICESTUDIO_REMOTE_URL:+http://voicestudio:3900}}
       VOICESTUDIO_SECONDARY_NAME: ${VOICESTUDIO_SECONDARY_NAME:-Omarchy}
       VOICESTUDIO_SECONDARY_API_KEY: ${VOICESTUDIO_SECONDARY_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       FISH_API_KEY: ${FISH_API_KEY:-}
       PHONON_URL: http://phonon:8880
+      PHONON_PREPARATION_SLOTS: "2"
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_URL: ${LLM_URL:-https://opencode.ai/zen/go}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
