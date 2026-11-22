@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { announcePreparation, hasActivePreparation, prepareAudio, preparedAudio, refreshPreparationCatalog, serverPreparedKeys, type PreparationRequest } from "./preparation";
+import { announcePreparation, hasActivePreparation, isTransientPreparationError, prepareAudio, preparedAudio, refreshPreparationCatalog, serverPreparedKeys, type PreparationRequest } from "./preparation";
 
 const requests: PreparationRequest[] = ["first", "second"].map((text) => ({ key: text, text, engine: "kittentts", voice: "v", protocol: "openai" }));
 const response = (data: unknown) => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
@@ -29,6 +29,22 @@ describe("background preparation client", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/preparations/job-id/audio/1");
     // Once submitted, later passages do not wait.
     expect(await (await preparedAudio("joined one"))!.text()).toBeDefined();
+  });
+
+  it("gives up on a prepared clip whose connection stalls, so the reading is retried instead of held forever", async () => {
+    const stalled: PreparationRequest[] = ["asleep one", "asleep two"].map((text) => ({ ...requests[0], key: text, text }));
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!url.includes("/audio/")) return response(status(init?.method === "POST" ? "running" : "done", init?.method === "POST" ? 0 : 2));
+      // A phone that slept mid-download: the request neither answers nor fails until aborted.
+      return new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
+    });
+    await prepareAudio(stalled, 0);
+    vi.useFakeTimers();
+    const clip = preparedAudio("asleep one").catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    const error = await clip;
+    expect((error as Error).name).toBe("TimeoutError");
+    expect(isTransientPreparationError(error)).toBe(true);
   });
 
   it("stops waiting for a submission that does not arrive, so ordinary generation can start", async () => {

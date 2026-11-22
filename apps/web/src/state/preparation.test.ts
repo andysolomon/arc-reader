@@ -8,7 +8,7 @@ import { prioritizePreparation } from "../engine/preparation";
 import { audioCache, db, docs, type DocRecord } from "../lib/db";
 import { codeKey } from "../lib/codeBlocks";
 import { preparePatois } from "../lib/patois";
-import { isPreparing, READY_LINGER_MS, usePreparation, type PreparationJob } from "./preparation";
+import { isPreparing, PREPARATION_QUEUE_LIMIT, READY_LINGER_MS, SAVE_CONCURRENCY, usePreparation, type PreparationJob } from "./preparation";
 
 vi.hoisted(() => {
   const storage = new Map<string, string>();
@@ -169,9 +169,42 @@ describe("Library preparation queue", () => {
     usePreparation.getState().enqueue([record("a")], [bella]);
     await settled();
     stop();
-    expect(steps.at(0)).toEqual({ done: 0, total: 2 });
+    // It waits for a place to save before it counts anything.
+    expect(steps.at(0)).toBeUndefined();
+    expect(steps.find(Boolean)).toEqual({ done: 0, total: 2 });
     expect(steps.at(-1)).toEqual({ done: 2, total: 2 });
     expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "ready", done: 2, total: 2 });
+  });
+
+  it("sends more readings to the server while this device saves the ones it made, a few at a time", async () => {
+    const records = Array.from({ length: PREPARATION_QUEUE_LIMIT + 2 }, (_, i) => record(`doc${i}`));
+    await Promise.all(records.map((rec) => docs.put(rec)));
+    const pending = holdBackgroundJobs();
+    const downloads: (() => void)[] = [];
+    vi.mocked(synthesize).mockImplementation((req) => new Promise((resolve, reject) => {
+      req.signal?.addEventListener("abort", () => reject(req.signal!.reason), { once: true });
+      downloads.push(async () => {
+        const audio = new Blob(["audio"]);
+        await audioCache.put({ key: cacheKey(req), blob: audio, mime: "audio/mpeg", duration: 1, createdAt: 0 });
+        resolve({ source: "api", audio, duration: 1 });
+      });
+    }));
+    usePreparation.getState().enqueue(records, [bella]);
+    await vi.waitFor(() => expect(pending).toHaveLength(PREPARATION_QUEUE_LIMIT));
+    // The server makes every reading it has; their saves stall, as on a phone that went to sleep.
+    pending.forEach((job) => job.release());
+    await vi.waitFor(() => expect(pending).toHaveLength(PREPARATION_QUEUE_LIMIT + 2));
+    const saving = () => usePreparation.getState().jobs.filter((job) => job.status === "saving");
+    await vi.waitFor(() => expect(saving()).toHaveLength(PREPARATION_QUEUE_LIMIT));
+    expect(saving().filter((job) => job.step)).toHaveLength(SAVE_CONCURRENCY);
+    expect(downloads).toHaveLength(SAVE_CONCURRENCY);
+    expect(saving().filter((job) => !job.step).every((job) => job.message === "Waiting to save on this device")).toBe(true);
+    // Finishing one reading's passages hands its place to the next reading waiting to save.
+    await downloads[0]();
+    await vi.waitFor(() => expect(downloads).toHaveLength(SAVE_CONCURRENCY + 1));
+    await downloads[SAVE_CONCURRENCY]();
+    await vi.waitFor(() => expect(usePreparation.getState().jobs.filter((job) => job.status === "ready")).toHaveLength(1));
+    expect(downloads).toHaveLength(SAVE_CONCURRENCY + 2);
   });
 
   it("submits local readings to the machine queue and reports the actual assignment", async () => {
