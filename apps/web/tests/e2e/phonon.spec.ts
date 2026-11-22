@@ -18,7 +18,7 @@ test.describe("Phonon voices (stub server)", () => {
     await page.getByRole("button", { name: "Preview Hugh" }).click();
     const r = await speech;
     expect(r.status()).toBe(200);
-    expect(JSON.parse(r.request().postData() ?? "{}")).toMatchObject({ model: "gradium/phonon-31m-en", voice: "Hugh", speed: 1, response_format: "mp3" });
+    expect(JSON.parse(r.request().postData() ?? "{}")).toMatchObject({ model: "gradium/phonon-31m-en", voice: "Hugh", speed: 1, response_format: "opus" });
     await expect.poll(() => page.evaluate(() => {
       const rows = JSON.parse(localStorage.getItem("readaloud:usage") ?? "{}").rows ?? [];
       return rows.filter((row: { provider: string }) => row.provider === "phonon").length;
