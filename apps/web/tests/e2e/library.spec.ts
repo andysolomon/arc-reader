@@ -268,8 +268,9 @@ test("shows one reading per machine, waiting readings, and restores their assign
   await page.route("**/api/preparations", async (route) => {
     if (route.request().method() !== "POST") return route.fallback();
     const index = jobs.length;
+    // The last readings submitted get the machines, so the queue has to move them up.
     const job = { id: `00000000-0000-0000-0000-${String(index).padStart(12, "0")}`, state: "running", done: 0, total: 2,
-      queued: index >= 2, ...(index < 2 ? { worker: ["Mac", "Omarchy"][index] } : {}) };
+      queued: index < 2, ...(index >= 2 ? { worker: ["Mac", "Omarchy"][index - 2] } : {}) };
     jobs.push(job);
     await route.fulfill({ status: 202, json: job });
   });
@@ -288,6 +289,11 @@ test("shows one reading per machine, waiting readings, and restores their assign
   await expect(queue).toContainText("2 active · 2 queued");
   await expect(queue).toContainText("Preparing on Mac");
   await expect(queue).toContainText("Preparing on Omarchy");
+  // Readings being made lead the list.
+  const rows = queue.getByRole("listitem");
+  await expect(rows.nth(0)).toContainText("Preparing on");
+  await expect(rows.nth(1)).toContainText("Preparing on");
+  await expect(rows.nth(2)).toContainText("Queued");
   await page.reload();
   await expect(queue).toContainText("2 active · 2 queued");
   await expect(queue).toContainText("Preparing on Mac");

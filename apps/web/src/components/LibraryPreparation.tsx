@@ -256,6 +256,9 @@ export function PrepareDialog({ documents, onClose, onQueued }: { documents: Lib
   );
 }
 
+/** Readings being made or saved lead the queue, then those waiting, then finished ones. */
+const queueRank = (job: PreparationJob) => job.status === "preparing" || job.status === "saving" ? 0 : job.status === "queued" ? 1 : 2;
+
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 /** How far the step a reading is on has got, as a bar shows it: null while it can't be counted, and no bar while it only waits. */
@@ -402,6 +405,8 @@ export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading)
   const saving = pending.filter((job) => job.status === "saving").length;
   const queued = pending.filter((job) => job.status === "queued").length;
   const finished = jobs.length - pending.length;
+  // Display order only: the store's order still decides what starts next.
+  const shown = [...jobs].sort((a, b) => queueRank(a) - queueRank(b));
   return (
     <div className="overflow-hidden rounded-card border border-line bg-bg2" role="region" aria-label="Audio preparation queue">
       {sharedError && <p className="m-0 border-b border-line px-4 py-2.5 text-[13px] text-fg2" role="status">Server audio status unavailable: {sharedError}</p>}
@@ -414,7 +419,7 @@ export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading)
       </div>
       {jobs.length > 0 && (
         <ul className="m-0 max-h-64 list-none divide-y divide-line overflow-y-auto border-t border-line p-0">
-          {jobs.map((job) => (
+          {shown.map((job) => (
             <li key={job.id} className="flex min-h-12 items-center gap-3 px-4 py-2 text-[12px]">
               <span aria-hidden className="shrink-0"><ProgressRing value={job.status === "ready" ? 1 : job.total > 0 ? job.done / job.total : 0} size={18} stroke={2} /></span>
               <button type="button" disabled={!onDetails} title="Preparation details" aria-haspopup="dialog" onClick={() => onDetails?.({ docId: job.docId, voiceId: job.voice.id, engine: job.voice.engine })} className="block min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-left text-[12px] disabled:cursor-default">
