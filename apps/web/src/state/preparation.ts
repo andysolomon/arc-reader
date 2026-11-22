@@ -45,6 +45,9 @@ export interface PreparationJob {
 }
 
 export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "saving"].includes(job.status);
+/** Whether audio for any of these documents is being made right now, not only waiting its turn. */
+export const useWorking = (docIds: readonly string[]) =>
+  usePreparation((s) => s.jobs.some((job) => (job.status === "preparing" || job.status === "saving") && docIds.includes(job.docId)));
 // Cloud providers keep bounded parallelism. VoiceStudio and Phonon submissions join
 // the durable server queue, which reserves whole readings per machine: one on VoiceStudio,
 // as many as the Phonon server is set to take.

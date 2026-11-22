@@ -105,7 +105,7 @@ export function SidebarLibrary() {
           title={shelf.title}
           className="flex w-full items-start gap-2.5 rounded-control border-0 bg-transparent py-1.5 pl-2 pr-2 text-left transition-colors duration-fast hover:bg-bg2"
         >
-          <BookMark className="mt-0.5 size-5 rounded-md" />
+          <BookMark docIds={shelf.items.map((it) => it.rec.id)} className="mt-0.5 size-5 rounded-md" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] leading-5 text-fg">{title}</span>
             <span className="block truncate text-[12px] leading-4 text-fg2">{shelf.items.length} {many} · {fmtTime(duration)}</span>
@@ -138,7 +138,7 @@ export function SidebarLibrary() {
           title={group.title}
           className="flex w-full items-start gap-2.5 rounded-control border-0 bg-transparent py-1.5 pl-2 pr-2 text-left transition-colors duration-fast hover:bg-bg2"
         >
-          <SeriesMark className="mt-0.5 size-5 rounded-md" />
+          <SeriesMark docIds={items.map((it) => it.rec.id)} className="mt-0.5 size-5 rounded-md" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] leading-5 text-fg">{group.title}</span>
             <span className="block truncate text-[12px] leading-4 text-fg2">{group.volumes.length} volumes · {fmtTime(duration)}</span>
