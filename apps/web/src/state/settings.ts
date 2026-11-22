@@ -7,6 +7,7 @@ import { DEFAULT_ENGINE, OPENAI_MODEL, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODE
 import { DEFAULT_VOICE_ID } from "../data/voices";
 import { setSpeechEndpoint } from "../lib/speechServer";
 import { DEFAULT_SUMMARY_MODEL, isSummaryModel, type SummaryModel } from "../lib/summary";
+import { DEFAULT_AUDIO_LIMIT, isAudioLimitChoice, type AudioLimitChoice } from "../lib/audioLimit";
 
 export type PlayerStyle = "capsule" | "bar";
 export type ComposeLayout = "centered" | "editorial";
@@ -51,6 +52,8 @@ export interface Settings {
   speechServer: string;
   /** VoiceStudio key sent only with an absolute speech-server URL. */
   speechServerKey: string;
+  /** How much downloaded audio this device keeps before removing the oldest */
+  audioLimit: AudioLimitChoice;
 }
 
 export const LIBRARY_SORTS = ["created", "shortest", "longest"] as const;
@@ -123,6 +126,7 @@ export const useSettings = create<Settings & Actions>()(
       email: null,
       speechServer: "",
       speechServerKey: "",
+      audioLimit: DEFAULT_AUDIO_LIMIT,
       set: (k, v) => set({ [k]: v } as Partial<Settings>),
       patch: (p) => set(p),
     }),
@@ -139,7 +143,8 @@ export const useSettings = create<Settings & Actions>()(
         const openaiModel = p.openaiModel === OPENAI_STEADY_MODEL || p.openaiModel === OPENAI_STANDARD_MODEL ? p.openaiModel : current.openaiModel;
         const summaryModel = isSummaryModel(p.summaryModel) ? p.summaryModel : current.summaryModel;
         const libSort = LIBRARY_SORTS.includes(p.libSort as LibrarySort) ? p.libSort! : current.libSort;
-        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null, openaiModel, summaryModel, libSort };
+        const audioLimit = isAudioLimitChoice(p.audioLimit) ? p.audioLimit : current.audioLimit;
+        return { ...current, ...p, theme: isThemeId(p.theme) ? p.theme : null, openaiModel, summaryModel, libSort, audioLimit };
       },
     },
   ),
