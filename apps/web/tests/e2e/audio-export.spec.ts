@@ -79,7 +79,7 @@ test("a fully prepared reading saves as an audiobook", async ({ page }) => {
   // Chromium on Linux has no AAC encoder, and the stub speaks WAV, which only an M4B can re-encode.
   if (await dialog.getByText(/can’t make M4B files/).isVisible()) {
     await dialog.getByRole("button", { name: "Make audiobook" }).click();
-    await expect(page.getByText(/isn't MP3, so this browser can't join it\. Try Safari or the iPhone app\./)).toBeVisible();
+    await expect(page.getByText(/is neither MP3 nor Opus, so this browser can't join it\. Try Safari or the iPhone app\./)).toBeVisible();
     return;
   }
   await dialog.getByRole("button", { name: "Make audiobook" }).click();

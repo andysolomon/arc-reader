@@ -5,11 +5,13 @@ import { planReading } from "./prepared";
 import { catalogue } from "./postTitle";
 import { muxM4b, aacConfig, audioSpecificConfig, type BookTags, type Chapter } from "./mp4";
 import { id3Chapters, mp3Audio, type Mp3Chapter } from "./mp3";
+import { joinWebmOpus } from "./webmOpus";
 
 /**
  * One voice's saved audio for a document, a book or a series, as a single audiobook file with a
  * chapter per document. Where the browser can encode AAC (Safari, the iPhone app, Chrome on Mac
- * and Windows) it is an M4B; elsewhere the MP3 clips are joined as they are, with ID3 chapters.
+ * and Windows) it is an M4B. Elsewhere the clips are joined as they are: MP3 with ID3 chapters, or
+ * Opus clips as one WebM, which has no chapter list.
  */
 
 export interface BookChapter { rec: DocRecord; title: string; clips: AudioRecord[] }
@@ -92,12 +94,13 @@ export interface AudiobookOptions {
   onProgress?: (done: number, total: number) => void;
 }
 
-export interface Audiobook { file: Blob; extension: "m4b" | "mp3" }
+export interface Audiobook { file: Blob; extension: "m4b" | "mp3" | "webm" }
 
 export async function makeAudiobook(chapters: BookChapter[], opts: AudiobookOptions): Promise<Audiobook> {
   if (!chapters.length) throw new Error("No chapter has all its audio saved in this voice");
   const config = await aacEncoding();
-  return config ? { file: await encodeM4b(chapters, config, opts), extension: "m4b" } : { file: await joinMp3(chapters, opts), extension: "mp3" };
+  if (config) return { file: await encodeM4b(chapters, config, opts), extension: "m4b" };
+  return chapters.every((c) => c.clips.every((clip) => /webm/.test(clip.mime || clip.blob.type))) ? { file: await joinWebm(chapters, opts), extension: "webm" } : { file: await joinMp3(chapters, opts), extension: "mp3" };
 }
 
 // Playback's own polish, so the book sounds as it does in the app: passages start just before the
@@ -193,6 +196,20 @@ async function encodeM4b(chapters: BookChapter[], config: AudioEncoderConfig, op
   return muxM4b({ sampleRate: rate, channels: 1, config: description ? audioSpecificConfig(description) : aacConfig(rate, 1), data: new Blob(blobs), sizes, bitrate: config.bitrate ?? 64000 }, starts, opts.tags);
 }
 
+/** Opus clips joined packet by packet into one WebM. Read whole, so this suits a browser on a computer. */
+async function joinWebm(chapters: BookChapter[], opts: AudiobookOptions): Promise<Blob> {
+  const clips = chapters.flatMap((c) => c.clips);
+  const bytes: Uint8Array[] = [];
+  for (const clip of clips) {
+    opts.signal?.throwIfAborted();
+    bytes.push(new Uint8Array(await clip.blob.arrayBuffer()));
+    opts.onProgress?.(bytes.length, clips.length);
+  }
+  const joined = joinWebmOpus(bytes);
+  if (!joined) throw new Error("These passages can't be joined into one file in this browser. Try Safari or the iPhone app.");
+  return new Blob([joined as Uint8Array<ArrayBuffer>], { type: "audio/webm" });
+}
+
 async function joinMp3(chapters: BookChapter[], opts: AudiobookOptions): Promise<Blob> {
   const total = chapters.reduce((n, c) => n + c.clips.length, 0);
   const parts: Blob[] = [];
@@ -204,7 +221,7 @@ async function joinMp3(chapters: BookChapter[], opts: AudiobookOptions): Promise
     for (const clip of chapter.clips) {
       opts.signal?.throwIfAborted();
       const audio = mp3Audio(new Uint8Array(await clip.blob.arrayBuffer()));
-      if (!audio) throw new Error(`A passage of “${chapter.title}” isn't MP3, so this browser can't join it. Try Safari or the iPhone app.`);
+      if (!audio) throw new Error(`A passage of “${chapter.title}” is neither MP3 nor Opus, so this browser can't join it. Try Safari or the iPhone app.`);
       parts.push(clip.blob.slice(audio.start, audio.end));
       ms += (audio.samples / audio.sampleRate) * 1000;
       opts.onProgress?.(++done, total);

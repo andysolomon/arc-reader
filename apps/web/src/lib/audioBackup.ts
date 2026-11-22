@@ -11,7 +11,7 @@ import { crc32, readZip, zipEntry, ZipWriter, type ZipEntry } from "./zip";
  * had never left. A clip whose text, voice recording or passage boundaries have changed since
  * simply matches nothing, and that passage is made again.
  *
- * The file is a ZIP: the clips as MP3s a person can play anywhere, in folders by voice and
+ * The file is a ZIP: the clips as the MP3 or WebM files they were saved as, which play in most players, in folders by voice and
  * chapter, and readaloud.json with what playback needs to use them again (word timings,
  * sentence starts, silences, loudness) and the documents themselves.
  */
@@ -72,7 +72,7 @@ export function safeName(text: string, max = 80): string {
 }
 
 const pad = (n: number, width = 4) => String(n).padStart(width, "0");
-const extension = (mime: string) => mime.includes("mpeg") || mime.includes("mp3") ? "mp3" : mime.includes("wav") ? "wav" : mime.includes("ogg") ? "ogg" : mime.includes("mp4") || mime.includes("aac") ? "m4a" : "audio";
+const extension = (mime: string) => mime.includes("webm") ? "webm" : mime.includes("mpeg") || mime.includes("mp3") ? "mp3" : mime.includes("wav") ? "wav" : mime.includes("ogg") ? "ogg" : mime.includes("mp4") || mime.includes("aac") ? "m4a" : "audio";
 
 export interface PlannedClip { key: string; docId: string; /** Path without its extension, which follows the clip's type */ path: string }
 
@@ -144,7 +144,7 @@ const encoder = new TextEncoder();
 
 const README = (title: string) => `Audio from ReadAloud: ${title}
 
-The clips in audio/ play in any audio player. Each voice has a folder, each chapter or document a
+The clips in audio/ play in most audio players (WebM files in VLC or a web browser). Each voice has a folder, each chapter or document a
 folder inside it, and the files play in order by name.
 
 To put the audio back in ReadAloud, open Settings > Storage > Load audio from a file, and choose

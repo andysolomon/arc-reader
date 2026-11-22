@@ -9,6 +9,8 @@ import { audioCache, type DocRecord } from "./db";
 import { audiobookChapters, audiobookVoices, makeAudiobook } from "./audiobook";
 import { aacConfig, audioSpecificConfig, muxM4b } from "./mp4";
 import { id3Chapters, mp3Audio } from "./mp3";
+import { readFileSync } from "node:fs";
+import { oggToWebm, readWebmOpus } from "./webmOpus";
 
 /** MPEG-2 Layer III, 48 kbit/s, 24 kHz, mono: 144-byte frames of 576 samples. */
 const frame = () => { const f = new Uint8Array(144); f.set([0xff, 0xf3, 0x64, 0xc0]); return f; };
@@ -105,5 +107,14 @@ describe("audiobooks", () => {
     expect(book.extension).toBe("mp3");
     const bytes = new Uint8Array(await book.file.arrayBuffer());
     expect(mp3Audio(bytes)?.samples).toBe(3 * 576);
+  });
+
+  it("joins Opus clips into one WebM where the browser can't make an M4B", async () => {
+    const webm = oggToWebm(new Uint8Array(readFileSync("tests/fixtures/voiced.opus")))!;
+    const clip = { key: "k", blob: new Blob([webm as Uint8Array<ArrayBuffer>], { type: "audio/webm" }), mime: "audio/webm", duration: 1, createdAt: 1 };
+    const book = await makeAudiobook([{ rec: one, title: "One", clips: [clip] }, { rec: two, title: "Two", clips: [clip] }], { tags: { title: "Book" } });
+    expect(book.extension).toBe("webm");
+    const single = readWebmOpus(webm)!;
+    expect(readWebmOpus(new Uint8Array(await book.file.arrayBuffer()))?.packets).toHaveLength(single.packets.length * 2);
   });
 });

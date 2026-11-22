@@ -171,7 +171,7 @@ export function ExportAudioDialog({ title, author, album, documents, onClose }: 
           {tab === "backup" ? (
             <div className="flex flex-col gap-3">
               <p className="m-0 text-sm text-fg2">
-                One file with every voice’s audio, to keep wherever you like. Load it back from Settings → Storage and it plays here again without being made or paid for twice. The MP3s inside also play in any player.
+                One file with every voice’s audio, to keep wherever you like. Load it back from Settings → Storage and it plays here again without being made or paid for twice. The audio files inside also play in most players.
               </p>
               {progress}
               {!busy && !backup && <Button variant="primary" leading={<FileArchive size={15} />} onClick={() => void makeBackup()}>Make backup file · {plural(summary.clips, "passage")}</Button>}
@@ -193,7 +193,7 @@ export function ExportAudioDialog({ title, author, album, documents, onClose }: 
             <div className="flex flex-col gap-3">
               <p className="m-0 text-sm text-fg2">
                 {aac === false
-                  ? "One MP3 with a chapter for each document, for podcast and audiobook players. This browser can’t make M4B files; Safari and the iPhone app can."
+                  ? "One file for podcast and audiobook players: an MP3 with a chapter for each document, or a WebM without chapters for Opus audio. This browser can’t make M4B files; Safari and the iPhone app can."
                   : "One M4B file with a chapter for each document, for Apple Books and other audiobook players. It can’t be loaded back into ReadAloud; use a backup for that."}
               </p>
               {voices && voices.length === 0 && <p className="m-0 text-sm text-fg2">No voice has a whole document saved on this device yet. Prepare it fully first.</p>}
