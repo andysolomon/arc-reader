@@ -47,13 +47,19 @@ export interface PreparationJob {
 export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "saving"].includes(job.status);
 /** Whether audio for any of these documents is being made right now, not only waiting its turn. */
 export const useWorking = (docIds: readonly string[]) =>
-  usePreparation((s) => s.jobs.some((job) => (job.status === "preparing" || job.status === "saving") && docIds.includes(job.docId)));
+  usePreparation((s) => s.jobs.some((job) => (job.status === "preparing" || (job.status === "saving" && job.message !== WAITING_TO_SAVE)) && docIds.includes(job.docId)));
 // Cloud providers keep bounded parallelism. VoiceStudio and Phonon submissions join
 // the durable server queue, which reserves whole readings per machine: one on VoiceStudio,
-// as many as the Phonon server is set to take.
+// as many as the Phonon server is set to take. A server reading gives up its place once the
+// server has made it, so the server keeps working while this device saves what it made.
 export const PREPARATION_CONCURRENCY = 3;
 export const PREPARATION_QUEUE_LIMIT = 20;
-const active = new Map<string, { controller: AbortController; provider: string }>();
+/** Server readings saved onto this device at once; each downloads its passages one by one. */
+export const SAVE_CONCURRENCY = 2;
+const active = new Map<string, { controller: AbortController; provider: string; saving?: boolean }>();
+let savingNow = 0;
+const waitingToSave = new Set<() => void>();
+const WAITING_TO_SAVE = "Waiting to save on this device";
 /** Local readings moved up before the server knew of them; it is told once they are submitted. */
 const raised = new Map<string, { now: boolean; sent?: boolean }>();
 const SENDING = "Sending to the server…";
@@ -206,7 +212,7 @@ const update = (id: string, patch: Partial<PreparationJob>) => {
  * own pools and never occupy a machine's reservation; Phonon readings queue for the Phonon server. */
 function drain() {
   const counts = new Map<string, number>();
-  for (const { provider } of active.values()) counts.set(provider, (counts.get(provider) || 0) + 1);
+  for (const { provider, saving } of active.values()) if (!saving) counts.set(provider, (counts.get(provider) || 0) + 1);
   for (const job of usePreparation.getState().jobs) {
     if (job.remote) continue;
     const provider = providerFor(job);
@@ -224,6 +230,26 @@ function drain() {
       drain();
     });
   }
+}
+
+/** Wait for one of the SAVE_CONCURRENCY places to save a reading onto this device. */
+async function saveTurn(signal: AbortSignal): Promise<() => void> {
+  while (savingNow >= SAVE_CONCURRENCY) {
+    await new Promise<void>((resolve) => {
+      const wake = () => { waitingToSave.delete(wake); signal.removeEventListener("abort", wake); resolve(); };
+      waitingToSave.add(wake);
+      signal.addEventListener("abort", wake, { once: true });
+    });
+    signal.throwIfAborted();
+  }
+  savingNow++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    savingNow--;
+    waitingToSave.values().next().value?.();
+  };
 }
 
 async function run(job: PreparationJob, signal: AbortSignal) {
@@ -276,23 +302,33 @@ async function run(job: PreparationJob, signal: AbortSignal) {
         });
       }, signal);
       signal.throwIfAborted();
-      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined, message: undefined, step: { done: 0, total: passages.length }, ahead: undefined, busy: undefined, prioritized: undefined });
+      // The server is done with it: its place goes to the next reading while this one saves.
+      const entry = active.get(job.id);
+      if (entry) entry.saving = true;
+      drain();
+      update(job.id, { status: "saving", worker: undefined, waitingFor: undefined, message: WAITING_TO_SAVE, ahead: undefined, busy: undefined, prioritized: undefined });
     }
-    for (const passage of passages) {
-      signal.throwIfAborted();
-      const req = {
-        text: passage.text, voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel, docId: job.docId,
-        profile: job.voice.kind === "profile", wordTimings: job.wordTimings,
-        words: passage.parts.flat(), parts: passage.parts,
-        sentences: sentences.slice(passage.start, passage.end).map((s) => s.text),
-        fallbackLocal: false, signal,
-      };
-      const chunk = await synthesize(req);
-      signal.throwIfAborted();
-      if (!chunk.audio) throw new Error("This voice did not return audio to prepare.");
-      // Older sentence clips can be joined in memory; those are already safely cached.
-      if (chunk.source !== "cache" && !(await audioCache.get(cacheKey(req)))) throw new Error("Could not save prepared audio. Free some storage and retry.");
-      update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, passage.index + 1), ...(onServer ? { step: { done: passage.index + 1, total: passages.length } } : {}) });
+    const release = onServer ? await saveTurn(signal) : undefined;
+    try {
+      if (onServer) update(job.id, { message: undefined, step: { done: 0, total: passages.length } });
+      for (const passage of passages) {
+        signal.throwIfAborted();
+        const req = {
+          text: passage.text, voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel, docId: job.docId,
+          profile: job.voice.kind === "profile", wordTimings: job.wordTimings,
+          words: passage.parts.flat(), parts: passage.parts,
+          sentences: sentences.slice(passage.start, passage.end).map((s) => s.text),
+          fallbackLocal: false, signal,
+        };
+        const chunk = await synthesize(req);
+        signal.throwIfAborted();
+        if (!chunk.audio) throw new Error("This voice did not return audio to prepare.");
+        // Older sentence clips can be joined in memory; those are already safely cached.
+        if (chunk.source !== "cache" && !(await audioCache.get(cacheKey(req)))) throw new Error("Could not save prepared audio. Free some storage and retry.");
+        update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, passage.index + 1), ...(onServer ? { step: { done: passage.index + 1, total: passages.length } } : {}) });
+      }
+    } finally {
+      release?.();
     }
     signal.throwIfAborted();
     update(job.id, { status: "ready" });

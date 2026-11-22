@@ -278,7 +278,8 @@ function stepProgress(job: PreparationJob | undefined): { key: string; done: num
   }
   if (job.status === "preparing" && job.total > 0) return { key: `${job.id}:passages:${job.total}`, done: job.done, total: job.total, text: `${job.done} of ${plural(job.total, "passage")}` };
   // Waiting its turn, or for the server to answer again, is not progress.
-  const working = job.status !== "queued" || (!!job.message && !/^(Waiting|Can.t reach)/.test(job.message));
+  const waiting = !!job.message && /^(Waiting|Can.t reach)/.test(job.message);
+  const working = !waiting && (job.status !== "queued" || !!job.message);
   return working ? null : undefined;
 }
 
@@ -528,7 +529,7 @@ export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading)
                   <VoiceServiceName source={voiceSource(job.voice)} className="shrink-0">{job.voice.name}</VoiceServiceName>
                   <span aria-hidden className="text-fg3">·</span>
                   <span className={cn("truncate", job.status === "error" && "text-danger", job.status === "preparing" && "text-accent")}>
-                    {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? `Queued · waiting for ${job.waitingFor ?? "a free machine"}`}
+                    {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? job.message ?? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? `Queued · waiting for ${job.waitingFor ?? "a free machine"}`}
                   </span>
                 </div>
               </button>
