@@ -14,6 +14,7 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { writeClipboardText } from "../lib/clipboard";
 import { useBreakpoint } from "../hooks/useMedia";
+import { downloadFile } from "../lib/webmOpus";
 
 function safeName(s: string) {
   return s.replace(/[^\w\- ]+/g, "").trim().slice(0, 60) || "readaloud";
@@ -49,10 +50,14 @@ export function PlayerHost() {
       toast("Download needs a cloud voice — the local voice has no audio file");
       return;
     }
-    const out = new Blob(blobs as Blob[], { type: (blobs[0] as Blob).type || "audio/mpeg" });
+    const file = await downloadFile(blobs as Blob[]);
+    if (!file) {
+      toast("Download needs this reading prepared again: some passages are in the older audio format");
+      return;
+    }
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(out);
-    a.download = `${safeName(d.title)}.mp3`;
+    a.href = URL.createObjectURL(file.blob);
+    a.download = `${safeName(d.title)}.${file.extension}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
   }, [p.doc]);

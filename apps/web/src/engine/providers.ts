@@ -12,6 +12,7 @@ import { isBundledApp, isNativeApp } from "../lib/native";
 import { resolveApiBase, speechEndpoint, withSpeechAuth } from "../lib/speechServer";
 import { announcePreparation, hasActivePreparation, prepareAudio, preparedAudio, type PreparationRequest, type PreparationStatus } from "./preparation";
 import { voiceRevision } from "./voiceRevisions";
+import { canPlayWebmOpus, isOggOpus, oggToWebm } from "../lib/webmOpus";
 
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 export const API_KIND: "openai" | "readaloud" = (import.meta.env.VITE_TTS_PROVIDER as string | undefined) === "readaloud" ? "readaloud" : "openai";
@@ -129,14 +130,28 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
   const omniVoice = req.engine === "omnivoice" || req.engine === "omnivoice-subprocess";
   // Only gpt-4o-mini-tts follows `instructions`; an accent voice adds its own on top of the steady delivery.
   const instructions = steerable ? (accent ? `${accent.instructions} ${STEADY_NARRATION}` : STEADY_NARRATION) : accent?.instructions;
-  const r = await doFetch(`${base}/v1/audio/speech`, {
+  // VoiceStudio and Phonon send Opus, about 40% smaller than MP3, which is kept in WebM
+  // (see lib/webmOpus.ts). OpenAI stays MP3, as does a device that cannot play WebM.
+  const opus = req.engine !== OPENAI_ENGINE && canPlayWebmOpus();
+  const speak = (format: "opus" | "mp3") => doFetch(`${base}/v1/audio/speech`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: streamUsage ? "text/event-stream, audio/mpeg" : "audio/mpeg, audio/*" },
-    body: JSON.stringify({ model, input: req.text, voice: phonon ? req.voice.replace(/^phonon:/, "") : accent?.voice ?? req.voice, instructions, response_format: "mp3", speed: 1, ...(omniVoice ? { num_step: 16 } : {}), ...(streamUsage ? { stream_format: "sse" } : {}) }),
+    headers: { "Content-Type": "application/json", Accept: streamUsage ? "text/event-stream, audio/mpeg" : format === "opus" ? "audio/ogg, audio/opus, audio/*" : "audio/mpeg, audio/*" },
+    body: JSON.stringify({ model, input: req.text, voice: phonon ? req.voice.replace(/^phonon:/, "") : accent?.voice ?? req.voice, instructions, response_format: format, speed: 1, ...(omniVoice ? { num_step: 16 } : {}), ...(streamUsage ? { stream_format: "sse" } : {}) }),
     signal: req.signal,
   });
+  let r = await speak(opus ? "opus" : "mp3");
   const streamed = r.headers.get("content-type")?.includes("text/event-stream") ? await readSpeechStream(r) : null;
-  const blob = streamed?.audio ?? await r.blob();
+  let blob = streamed?.audio ?? await r.blob();
+  const bytes = opus && blob.size ? new Uint8Array(await blob.arrayBuffer()) : undefined;
+  if (bytes && isOggOpus(blob.type || r.headers.get("content-type") || "", bytes)) {
+    const webm = oggToWebm(bytes);
+    if (webm) blob = new Blob([webm as Uint8Array<ArrayBuffer>], { type: "audio/webm" });
+    else {
+      // An Ogg file that can't be read: ask again for the MP3 every server can send.
+      r = await speak("mp3");
+      blob = await r.blob();
+    }
+  }
   if (blob.size === 0) throw new ApiRejected(502, "Empty audio from the speech server");
   if (blob.type && !blob.type.startsWith("audio/") && blob.type !== "application/octet-stream") throw new ApiRejected(502, "Invalid audio from the speech server");
   const est = estimateDuration(splitWords(req.text));
@@ -476,9 +491,10 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
     if (prepared) {
       // Feed stored responses through the same parsers as fresh speech, including
       // the legacy JSON contract, without issuing another synthesis request.
-      chunk = await preparedChunk(prepared, opts);
+      // A device that cannot play the server's Opus generates its own MP3 instead.
+      chunk = await preparedChunk(prepared, opts) ?? await apiSynthesize(opts);
       // The web server checks what it prepares; this catches clips it stored before it did.
-      if (checksVoicing(opts.engine) && chunk.audio) {
+      if (chunk.source === "cache" && checksVoicing(opts.engine) && chunk.audio) {
         chunk.voiced = await clipVoicedShare(chunk.audio);
         if (garbled(chunk.voiced)) chunk = await apiSynthesize(opts);
       }
@@ -507,8 +523,12 @@ export async function synthesize(opts: SynthOptions): Promise<Chunk> {
   }
 }
 
-async function preparedChunk(response: Response, req: TtsRequest): Promise<Chunk> {
+async function preparedChunk(response: Response, req: TtsRequest): Promise<Chunk | null> {
   const estimate = estimateDuration(splitWords(req.text));
+  if (response.headers.get("content-type")?.includes("webm") && !canPlayWebmOpus()) {
+    await response.body?.cancel();
+    return null;
+  }
   if (response.headers.get("content-type")?.includes("json")) {
     const data = await response.json() as { audio: string; mime?: string; duration?: number; words?: unknown };
     const mime = data.mime || "audio/mpeg";
@@ -527,7 +547,7 @@ async function preparedChunk(response: Response, req: TtsRequest): Promise<Chunk
 export async function fetchWordTimings(audio: Blob, words: string[], signal?: AbortSignal): Promise<WordTiming[] | null> {
   if (!hasApi() || API_KIND !== "openai" || !words.length) return null;
   const form = new FormData();
-  form.append("file", audio, "passage.mp3");
+  form.append("file", audio, /webm/.test(audio.type) ? "passage.webm" : "passage.mp3");
   form.append("model", "whisper-1");
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "word");

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { Route } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { composeAndListen, TEXT, composeText, prepareFromPlayer } from "./helpers";
@@ -12,9 +13,25 @@ test.describe("VoiceStudio provider (stub server)", () => {
     expect(r.status()).toBe(200);
     expect(r.headers()["content-type"]).toContain("audio/");
     const body = JSON.parse(r.request().postData() ?? "{}");
-    expect(body).toMatchObject({ model: "kittentts", voice: "expr-voice-2-f", response_format: "mp3", speed: 1 });
+    expect(body).toMatchObject({ model: "kittentts", voice: "expr-voice-2-f", response_format: "opus", speed: 1 });
     await expect(page.getByRole("button", { name: /^(Play|Pause)/ })).toHaveAttribute("data-playing", "true");
     await expect(page.getByRole("status").filter({ hasText: /browser voice/ })).toHaveCount(0);
+  });
+
+  test("keeps VoiceStudio's Opus as WebM, plays it, and caches it", async ({ page }) => {
+    const ogg = readFileSync(new URL("../fixtures/voiced.opus", import.meta.url));
+    await page.route("**/api/vs/v1/audio/speech", (route) => route.fulfill({ status: 200, contentType: "audio/ogg", body: ogg }));
+    await page.goto("/");
+    await composeText(page, TEXT);
+    await page.getByTestId("listen").click();
+    await expect(page.getByRole("button", { name: /^(Play|Pause)/ })).toHaveAttribute("data-playing", "true");
+    await expect(page.getByRole("status").filter({ hasText: /browser voice/ })).toHaveCount(0);
+    await expect.poll(() => page.evaluate(async () => {
+      const d = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open("readaloud"); r.onsuccess = () => resolve(r.result); });
+      const rows = await new Promise<{ blob: Blob; mime: string }[]>((resolve) => { const q = d.transaction("audio").objectStore("audio").getAll(); q.onsuccess = () => resolve(q.result); });
+      d.close();
+      return rows.map((row) => `${row.mime} ${row.blob.type}`);
+    })).toContain("audio/webm audio/webm");
   });
 
   test("the API key never reaches the browser", async ({ page }) => {

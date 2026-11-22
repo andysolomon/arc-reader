@@ -8,9 +8,10 @@ import { PreparationService } from "./vite.prepare";
 import { PreparationWorkers } from "./vite.preparation-workers";
 import { SpeechActivity } from "./vite.speech-activity";
 import type { PreparationRequest } from "./src/engine/preparation";
-import { mp3VoicedShare } from "./vite.voicing";
+import { mp3VoicedShare, opusVoicedShare } from "./vite.voicing";
+import { readOggOpus, readWebmOpus } from "./src/lib/webmOpus";
 
-vi.mock("./vite.voicing", () => ({ mp3VoicedShare: vi.fn(async () => undefined) }));
+vi.mock("./vite.voicing", () => ({ mp3VoicedShare: vi.fn(async () => undefined), opusVoicedShare: vi.fn(async () => undefined) }));
 
 const item = (text: string): PreparationRequest => ({ key: text, text, voice: "v", engine: "kittentts", protocol: "openai" });
 const deferred = () => {
@@ -26,6 +27,8 @@ describe("server-owned audio preparation", () => {
   let rejectSpeech: boolean;
   let refuseOnce: Set<unknown>;
   let unavailable: boolean;
+  /** What the speech server sends for an Opus request; MP3 when unset, as a server that ignores the format would. */
+  let opusReply: { type: string; body: Buffer } | undefined;
   let activeSpeech: number, peakSpeech: number;
   let secondary: Server | undefined;
   let secondaryGate: ReturnType<typeof deferred> | undefined;
@@ -84,6 +87,7 @@ describe("server-owned audio preparation", () => {
     primaryAssignmentGate = undefined;
     secondaryUnavailable = false; secondaryDiscoveries = 0;
     phonon = undefined; phononGate = undefined; phononCalls = []; phononActive = 0; phononPeak = 0;
+    opusReply = undefined;
     directory = await mkdtemp(join(tmpdir(), "readaloud-preparation-"));
     upstream = createServer(async (req, res) => {
       const buffers: Buffer[] = [];
@@ -105,6 +109,10 @@ describe("server-owned audio preparation", () => {
       if (rejectSpeech || refuseOnce.delete(calls.at(-1)!.body.input)) {
         res.writeHead(400, { "content-type": "application/json" });
         return res.end(JSON.stringify({ detail: "Model terms need acceptance" }));
+      }
+      if (opusReply && calls.at(-1)!.body.response_format === "opus") {
+        res.writeHead(200, { "content-type": opusReply.type });
+        return res.end(opusReply.body);
       }
       res.writeHead(200, { "content-type": "audio/mpeg", "x-duration": "2" });
       res.end(`audio:${calls.at(-1)!.body.input || calls.at(-1)!.body.text}`);
@@ -252,6 +260,32 @@ describe("server-owned audio preparation", () => {
     await expect.poll(async () => (await service.get(second.id)).state).toBe("done");
     expect(calls.map((call) => call.body.input)).toEqual(["a1", "c1", "a2", "a3", "b1", "b2"]);
     expect(peakSpeech).toBe(1);
+  });
+
+  it("keeps the speech server's Opus, repackaged as WebM, and checks it for garbled speech", async () => {
+    const ogg = await readFile(new URL("./tests/fixtures/voiced.opus", import.meta.url));
+    opusReply = { type: "audio/ogg", body: ogg };
+    const service = new PreparationService(env, directory);
+    const job = await service.submit({ requests: [item("first")], start: 0 });
+    await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.response_format)).toEqual(["opus"]);
+    const audio = await new PreparationService(env, directory).audio(job.id, 0);
+    expect(audio.type).toBe("audio/webm");
+    // The same Opus packets, moved from one file to the other.
+    const packets = (stream: ReturnType<typeof readOggOpus>) => stream!.packets.map((packet) => Buffer.from(packet).toString("base64"));
+    expect(packets(readWebmOpus(audio.body))).toEqual(packets(readOggOpus(ogg)));
+    expect(vi.mocked(opusVoicedShare)).toHaveBeenCalledWith(audio.body, "ffmpeg");
+  });
+
+  it("asks for MP3 when the speech server's Opus can't be read", async () => {
+    opusReply = { type: "audio/ogg", body: Buffer.from("not an ogg file") };
+    const service = new PreparationService(env, directory);
+    const job = await service.submit({ requests: [item("first")], start: 0 });
+    await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(calls.map((call) => call.body.response_format)).toEqual(["opus", "mp3"]);
+    const audio = await service.audio(job.id, 0);
+    expect(audio).toMatchObject({ type: "audio/mpeg" });
+    expect(audio.body.toString()).toBe("audio:first");
   });
 
   it("serves cached audio immediately while another voice is rendering", async () => {
@@ -533,7 +567,7 @@ describe("server-owned audio preparation", () => {
     await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
     expect(await service.get(job.id)).toMatchObject({ done: 2, total: 2, worker: "Phonon" });
     expect(phononCalls.map((call) => [call.path, call.body])).toEqual(["first", "second"].map((input) => [
-      "/v1/audio/speech", { model: "gradium/phonon-test", input, voice: "Captain Silas Blackwater", response_format: "mp3" },
+      "/v1/audio/speech", { model: "gradium/phonon-test", input, voice: "Captain Silas Blackwater", response_format: "opus" },
     ]));
     // VoiceStudio's key never leaves for another server, and VoiceStudio hears nothing.
     expect(phononCalls.every((call) => !call.authorization)).toBe(true);

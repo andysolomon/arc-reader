@@ -7,7 +7,8 @@ import type { PreparationRequest, PreparationStatus, SharedPreparation } from ".
 import { PHONON_ENGINE, PHONON_WORKER, forPhonon, PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
 import { SpeechActivity } from "./vite.speech-activity";
 import { HostPressure } from "./vite.host-pressure";
-import { mp3VoicedShare } from "./vite.voicing";
+import { mp3VoicedShare, opusVoicedShare } from "./vite.voicing";
+import { isOggOpus, oggToWebm } from "./src/lib/webmOpus";
 import { sendJson } from "./vite.json";
 import { GARBLED_BELOW, GARBLED_RETRIES } from "./src/engine/voicing";
 
@@ -27,6 +28,7 @@ class HttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 class RetryableError extends Error {}
+type SpeechFormat = "opus" | "mp3";
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 /** Times a refused passage is asked for again in a reading the speech server has already rendered part of. */
 const REFUSAL_RETRIES = 3;
@@ -56,12 +58,14 @@ export class PreparationService {
   private uploaded = new Set<string>();
   private discovery: PreparationWorkers;
   private phononModel: string;
+  private ffmpeg: string;
   private ready: Promise<void>;
   constructor(env: Record<string, string>, private directory = resolve(env.PREPARATION_DATA_DIR || ".readaloud-preparations"), private activity = new SpeechActivity()) {
     this.discovery = new PreparationWorkers(env);
     this.pressure = HostPressure.from(env);
     // The same model the bundle was built with, so prepared audio matches the device's cache keys.
     this.phononModel = env.VITE_PHONON_TTS_MODEL || "gradium/phonon-31m-en";
+    this.ffmpeg = env.FFMPEG_PATH || "ffmpeg";
     this.ready = this.restore();
   }
 
@@ -432,14 +436,24 @@ export class PreparationService {
         if (![...consumers].some((isAllowed) => isAllowed())) throw new HttpError(410, "Audio preparation was cancelled or expired.");
         // A garbled take (see src/engine/voicing.ts) is asked for again; the best take is kept.
         let best: { body: Buffer; metadata: Omit<Audio, "body">; voiced?: number } | undefined;
+        // Opus in WebM takes about 40% less space than MP3 for the same speech. The
+        // legacy contract stays MP3.
+        let format: SpeechFormat = item.protocol === "readaloud" ? "mp3" : "opus";
         for (let take = 0; ; take++) {
-          const response = await this.synthesize(item, worker);
-          const body = Buffer.from(await response.arrayBuffer());
-          const type = response.headers.get("content-type") || "audio/mpeg";
+          const response = await this.synthesize(item, worker, format);
+          let body = Buffer.from(await response.arrayBuffer());
+          let type = response.headers.get("content-type") || "audio/mpeg";
           if (!body.length || (!type.startsWith("audio/") && type !== "application/octet-stream" && !(item.protocol === "readaloud" && type.includes("json")))) {
             throw new HttpError(502, "The speech server returned no playable audio.");
           }
-          const voiced = type.includes("mpeg") ? await mp3VoicedShare(body) : undefined;
+          // An Ogg file that can't be read is asked for again as MP3; other audio is kept as it came.
+          if (format === "opus" && isOggOpus(type, body)) {
+            const webm = oggToWebm(body);
+            if (!webm) { format = "mp3"; take--; continue; }
+            body = Buffer.from(webm);
+            type = "audio/webm";
+          }
+          const voiced = type.includes("mpeg") ? await mp3VoicedShare(body) : type.includes("webm") ? await opusVoicedShare(body, this.ffmpeg) : undefined;
           const metadata = { type, duration: response.headers.get("x-duration") || undefined, words: response.headers.get("x-word-timings") || undefined };
           if (!best || (voiced ?? 1) > (best.voiced ?? 1)) best = { body, metadata, voiced };
           if (voiced === undefined || voiced >= GARBLED_BELOW || take >= GARBLED_RETRIES) break;
@@ -524,10 +538,10 @@ export class PreparationService {
     }
   }
 
-  private async synthesize(item: PreparationRequest, worker: PreparationWorker) {
+  private async synthesize(item: PreparationRequest, worker: PreparationWorker, format: SpeechFormat) {
     if (worker.id === PHONON_WORKER) {
       // The device's voice id is `phonon:<name>`; the server knows the bare name.
-      return this.upstream(worker, "/v1/audio/speech", { model: this.phononModel, input: item.text, voice: item.voice.replace(/^phonon:/, ""), response_format: "mp3" });
+      return this.upstream(worker, "/v1/audio/speech", { model: this.phononModel, input: item.text, voice: item.voice.replace(/^phonon:/, ""), response_format: format });
     }
     if (item.protocol === "readaloud") return this.upstream(worker, "/tts", { text: item.text, voice: item.voice, provider: item.engine, format: "mp3" });
     if (item.profile) {
@@ -539,7 +553,7 @@ export class PreparationService {
     }
     return this.upstream(worker, "/v1/audio/speech", {
       model: item.profile || ALIAS.test(item.voice) ? "tts-1" : item.engine,
-      input: item.text, voice: item.voice, response_format: "mp3", speed: 1,
+      input: item.text, voice: item.voice, response_format: format, speed: 1,
       ...(["omnivoice", "omnivoice-subprocess"].includes(item.engine) ? { num_step: 16 } : {}),
     });
   }

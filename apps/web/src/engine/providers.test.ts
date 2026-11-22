@@ -6,11 +6,17 @@ import { addUsage } from "../lib/usage";
 import { audioCache } from "../lib/db";
 import { preparedAudio } from "./preparation";
 import { setVoiceRevision, setVoiceRevisions, voiceIdOfKeyPart } from "./voiceRevisions";
+import { readFileSync } from "node:fs";
+import { canPlayWebmOpus, oggToWebm, readOggOpus, readWebmOpus } from "../lib/webmOpus";
 
 vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
 vi.mock("./preparation", () => ({ preparedAudio: vi.fn(async () => null) }));
 vi.mock("./audio", async (importOriginal) => ({ ...await importOriginal<typeof import("./audio")>(), joinClips: vi.fn(async () => null), clipVoicedShare: vi.fn(async () => undefined) }));
 vi.mock("../lib/usage", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/usage")>(), addUsage: vi.fn() }));
+// Node has no audio element, so devices here can't play WebM unless a test says so.
+vi.mock("../lib/webmOpus", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/webmOpus")>(), canPlayWebmOpus: vi.fn(() => false) }));
+
+const voicedOgg = readFileSync(new URL("../../tests/fixtures/voiced.opus", import.meta.url));
 
 // VITE_API_BASE=/api/vs comes from vitest.config.ts
 describe("openaiSpeechSynthesize", () => {
@@ -31,6 +37,36 @@ describe("openaiSpeechSynthesize", () => {
     expect(c.source).toBe("api");
     expect(c.mime).toBe("audio/mpeg");
     expect(c.duration).toBeCloseTo((3 + 1.2) / 2.83);
+  });
+
+  it("asks VoiceStudio for Opus and keeps it as WebM on a device that plays WebM", async () => {
+    vi.mocked(canPlayWebmOpus).mockReturnValueOnce(true);
+    fetchMock.mockResolvedValueOnce(new Response(voicedOgg, { status: 200, headers: { "content-type": "audio/ogg" } }));
+    const c = await openaiSpeechSynthesize({ text: "Hello there.", voice: "expr-voice-2-f", engine: "kittentts" });
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toMatchObject({ response_format: "opus" });
+    expect(c.mime).toBe("audio/webm");
+    const packets = (stream: ReturnType<typeof readOggOpus>) => stream!.packets.map((p) => Buffer.from(p).toString("base64"));
+    expect(packets(readWebmOpus(new Uint8Array(await c.audio!.arrayBuffer())))).toEqual(packets(readOggOpus(voicedOgg)));
+  });
+
+  it("asks again for MP3 when the Opus reply is not an Ogg file", async () => {
+    vi.mocked(canPlayWebmOpus).mockReturnValueOnce(true);
+    fetchMock.mockResolvedValueOnce(new Response("not ogg", { status: 200, headers: { "content-type": "audio/ogg" } }))
+      .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    const c = await openaiSpeechSynthesize({ text: "Hello there.", voice: "expr-voice-2-f", engine: "kittentts" });
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)).response_format)).toEqual(["opus", "mp3"]);
+    expect(c.mime).toBe("audio/mpeg");
+  });
+
+  it("keeps OpenAI on MP3 even on a device that plays WebM", async () => {
+    vi.mocked(canPlayWebmOpus).mockReturnValue(true);
+    try {
+      fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+      await openaiSpeechSynthesize({ text: "Hello there.", voice: "nova", engine: "openai", openaiModel: "tts-1" });
+      expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toMatchObject({ response_format: "mp3" });
+    } finally {
+      vi.mocked(canPlayWebmOpus).mockReturnValue(false);
+    }
   });
 
   it("sends cloned profiles with the active-engine alias", async () => {
@@ -282,6 +318,15 @@ describe("generation accounting", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(addUsage).not.toHaveBeenCalled();
     expect(audioCache.put).toHaveBeenCalledWith(expect.objectContaining({ key: cacheKey(local), duration: 3 }));
+  });
+
+  it("generates its own MP3 on a device that can't play the server's WebM", async () => {
+    const local = { text: "Prepared passage.", voice: "v", engine: "kittentts" };
+    vi.mocked(preparedAudio).mockResolvedValueOnce(new Response(oggToWebm(voicedOgg) as Uint8Array<ArrayBuffer>, { headers: { "content-type": "audio/webm" } }));
+    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+    const chunk = await synthesize(local);
+    expect(chunk).toMatchObject({ source: "api", mime: "audio/mpeg" });
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toMatchObject({ response_format: "mp3" });
   });
 
   it("records only a successful retry", async () => {
