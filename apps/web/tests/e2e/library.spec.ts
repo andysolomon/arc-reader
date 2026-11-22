@@ -120,7 +120,11 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   await expect(page.getByRole("toolbar", { name: "Selection" })).toHaveCount(0);
   try {
     await expect.poll(() => submissions).toBe(4);
-    await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("0 active · 4 queued");
+    const queue = page.getByRole("region", { name: "Audio preparation queue" });
+    await expect(queue).toContainText("0 active · 4 queued");
+    // Nothing is saved yet, so every reading estimates the space its audio will take.
+    await expect(queue).toContainText(/≈\d+ KB to save on this device/);
+    await expect(queue.getByRole("listitem").filter({ hasText: /≈\d+ KB to save on this device/ })).toHaveCount(4);
   } finally { release(); }
   // Internal navigation keeps the preparation queue alive.
   await page.getByRole("link", { name: "Compose", exact: true }).click();
