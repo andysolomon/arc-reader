@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Link, useNavigate, useNavigationType } from "react-router-dom";
-import { ArrowUp, Search, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, Speech, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X, CloudCheck, CloudOff, CloudUpload, RefreshCw, LoaderCircle } from "lucide-react";
+import { ArrowUp, Search, Play, RotateCw, Trash2, Zap, Check, Sparkles, Tag, Star, Speech, CalendarArrowDown, ArrowDownNarrowWide, ArrowDownWideNarrow, BookOpen, ChevronRight, ListPlus, ListChecks, X, HardDriveDownload, CloudCheck, CloudOff, CloudUpload, RefreshCw, LoaderCircle } from "lucide-react";
 import { Button, EmptyState, IconButton, Input, ProgressRing, VoiceServiceName, fmtTime, cn } from "@readaloud/ui";
 import { voiceSource } from "../data/voices";
 import { getVoice, useVoices } from "../state/voices";
@@ -28,6 +28,14 @@ import { catalogue } from "../lib/postTitle";
 import { entriesOf, finished, nextInSeries, nextUnread, seriesOf, shelves, useBooks, type LibraryEntry, type Series, type Shelf } from "../state/books";
 import { BookMark, SeriesMark, SourceMark } from "../components/SourceMark";
 import { partNames } from "../lib/book";
+import { ExportAudioDialog } from "../components/AudioExport";
+import type { DocRecord } from "../lib/db";
+
+/** The author the documents share, for an audiobook's tags. */
+const authorOf = (documents: DocRecord[]) => {
+  const authors = new Set(documents.map((rec) => catalogue(rec).author).filter(Boolean));
+  return authors.size === 1 ? [...authors][0] : undefined;
+};
 
 /** Category filter value for documents not yet on a shelf */
 const UNCATEGORIZED = "\u0000uncategorized";
@@ -71,6 +79,8 @@ export function LibraryPage() {
   const [prepareIds, setPrepareIds] = useState<string[] | null>(null);
   const closePrepare = useCallback(() => setPrepareIds(null), []);
   const [details, setDetails] = useState<Reading | null>(null);
+  const [exporting, setExporting] = useState<{ title: string; author?: string; album?: string; documents: DocRecord[] } | null>(null);
+  const closeExport = useCallback(() => setExporting(null), []);
   const closeDetails = useCallback(() => setDetails(null), []);
   const detailsItem = details ? items.find((it) => it.rec.id === details.docId) : undefined;
   const searchRef = useRef<HTMLInputElement>(null);
@@ -224,7 +234,11 @@ export function LibraryPage() {
   /** A series as the whole library has it, whatever the filters leave of it. */
   const seriesProps = (series: Series) => {
     const whole = librarySeries.get(series.volumes[0].shelf.id) ?? series;
-    return { series, whole, grid, open: openBooks.has(series.id), onToggle: () => toggleBook(series.id), onContinue: () => act.resume(nextInSeries(whole)) };
+    const documents = whole.volumes.flatMap(({ shelf }) => shelf.items.map((it) => it.rec));
+    return {
+      series, whole, grid, open: openBooks.has(series.id), onToggle: () => toggleBook(series.id), onContinue: () => act.resume(nextInSeries(whole)),
+      onExport: () => setExporting({ title: whole.title, author: authorOf(documents), documents }),
+    };
   };
   const bookProps = (shelf: Shelf) => {
     const whole = library.get(shelf.id) ?? shelf;
@@ -234,6 +248,11 @@ export function LibraryPage() {
       onToggle: () => toggleBook(shelf.id),
       onContinue: () => act.resume(nextUnread(whole)),
       onPrepare: () => setPrepareIds(whole.items.map((it) => it.rec.id)),
+      onExport: () => {
+        const documents = whole.items.map((it) => it.rec);
+        const series = [...librarySeries.values()].find((sr) => sr.volumes.some((v) => v.shelf.id === whole.id));
+        setExporting({ title: whole.title, author: authorOf(documents), album: series?.title, documents });
+      },
       onComplete: source ? () => void useBooks.getState().complete(source.rec) : undefined,
     };
   };
@@ -375,8 +394,12 @@ export function LibraryPage() {
             <IconButton label="Done selecting" onClick={stopSelecting}>
               <X size={18} strokeWidth={1.5} />
             </IconButton>
-            <span className="min-w-0 flex-1 truncate text-[13px] text-fg" role="status">{selectedItems.length > 0 ? `${selectedItems.length} selected` : "Choose documents to prepare together"}</span>
+            <span className="min-w-0 flex-1 truncate text-[13px] text-fg" role="status">{selectedItems.length > 0 ? `${selectedItems.length} selected` : "Choose documents to prepare or save together"}</span>
             <Button variant="ghost" aria-pressed={allVisibleSelected} disabled={filtered.length === 0} onClick={toggleVisible}>Select {q || vf || cf || favoritesOnly ? "visible" : "all"}</Button>
+            <Button variant="ghost" leading={<HardDriveDownload size={15} />} disabled={selectedItems.length === 0} onClick={() => {
+              const documents = selectedItems.map((it) => it.rec);
+              setExporting({ title: documents.length === 1 ? catalogue(documents[0]).title : `${documents.length} documents`, author: authorOf(documents), documents });
+            }}>Save audio</Button>
             <Button variant="primary" leading={<Zap size={15} />} disabled={selectedItems.length === 0} onClick={() => setPrepareIds(selectedItems.map((it) => it.rec.id))}>Prepare selected</Button>
           </div>
         )}
@@ -414,7 +437,11 @@ export function LibraryPage() {
           </ul>
         )}
       </div>
-      {detailsItem && details && !prepareIds && <PreparationDetails it={detailsItem} reading={details} defaultVoice={defaultVoice} onClose={closeDetails} onChooseVoices={() => { setDetails(null); setPrepareIds([details.docId]); }} />}
+      {detailsItem && details && !prepareIds && !exporting && (
+        <PreparationDetails it={detailsItem} reading={details} defaultVoice={defaultVoice} onClose={closeDetails} onChooseVoices={() => { setDetails(null); setPrepareIds([details.docId]); }}
+          onSaveAudio={() => { setDetails(null); setExporting({ title: catalogue(detailsItem.rec).title, author: catalogue(detailsItem.rec).author, documents: [detailsItem.rec] }); }} />
+      )}
+      {exporting && <ExportAudioDialog {...exporting} onClose={closeExport} />}
       {prepareIds && <PrepareDialog documents={items.filter((it) => prepareIds.includes(it.rec.id))} onClose={closePrepare} onQueued={stopSelecting} />}
     </section>
     {/* Floats over the list's bottom corner, clear of the player when one is open. */}
@@ -539,7 +566,7 @@ const rowTitle = ({ it, inBook }: Pick<ItemProps, "it" | "inBook">) => `${inBook
  * A book's chapters behind one row: how far through the book you are, with the chapters
  * a press away. Continue picks up at the first chapter you haven't finished.
  */
-function BookGroup({ shelf, whole, title = shelf.title, grid, open, onToggle, onContinue, onPrepare, onComplete, children }: {
+function BookGroup({ shelf, whole, title = shelf.title, grid, open, onToggle, onContinue, onPrepare, onExport, onComplete, children }: {
   /** The chapters that pass the current filters */
   shelf: Shelf;
   /** What to call it where a series above already names the work */
@@ -551,6 +578,8 @@ function BookGroup({ shelf, whole, title = shelf.title, grid, open, onToggle, on
   onToggle: () => void;
   onContinue: () => void;
   onPrepare: () => void;
+  /** Save the book's audio to a file */
+  onExport: () => void;
   /** Fetch the chapters the library is missing */
   onComplete?: () => void;
   children: ReactNode;
@@ -591,6 +620,7 @@ function BookGroup({ shelf, whole, title = shelf.title, grid, open, onToggle, on
           <div className="-ml-2 flex flex-wrap items-center gap-x-1 text-[13px] text-fg2">
             <Button variant="ghost" className="px-2" aria-label={`${started ? "Continue" : "Start"} ${shelf.title}`} leading={<Play size={15} strokeWidth={1.5} />} onClick={onContinue}>{started ? "Continue" : "Start"}</Button>
             <Button variant="ghost" className="px-2" aria-label={`Prepare audio for ${shelf.title}`} leading={<Zap size={15} strokeWidth={1.5} />} onClick={onPrepare}>Prepare</Button>
+            <Button variant="ghost" className="px-2" aria-label={`Save audio of ${shelf.title}`} leading={<HardDriveDownload size={15} strokeWidth={1.5} />} onClick={onExport}>Save</Button>
             {adding
               ? <span role="status" className="px-2 tabular-nums">{adding.total ? `Adding ${many} · ${adding.done} of ${adding.total}` : `Checking for new ${many}…`}</span>
               : (missing > 0 || growing) && onComplete && <Button variant="ghost" className="px-2" leading={<ListPlus size={15} strokeWidth={1.5} />} onClick={onComplete}>{missing <= 0 ? `Check for new ${many}` : missing === 1 ? `Add the missing ${one}` : `Add the ${missing} missing ${many}`}</Button>}
@@ -607,7 +637,7 @@ function BookGroup({ shelf, whole, title = shelf.title, grid, open, onToggle, on
   );
 }
 
-function SeriesGroup({ series, whole, grid, open, onToggle, onContinue, children }: {
+function SeriesGroup({ series, whole, grid, open, onToggle, onContinue, onExport, children }: {
   /** The volumes that pass the current filters */
   series: Series;
   /** Every volume in the library */
@@ -616,6 +646,8 @@ function SeriesGroup({ series, whole, grid, open, onToggle, onContinue, children
   open: boolean;
   onToggle: () => void;
   onContinue: () => void;
+  /** Save the series' audio to a file */
+  onExport: () => void;
   children: ReactNode;
 }) {
   const items = whole.volumes.flatMap(({ shelf }) => shelf.items);
@@ -651,6 +683,7 @@ function SeriesGroup({ series, whole, grid, open, onToggle, onContinue, children
         <div className="col-span-2 col-start-2 mt-1 flex items-start justify-between gap-3">
           <div className="-ml-2 flex flex-wrap items-center gap-x-1 text-[13px] text-fg2">
             <Button variant="ghost" className="px-2" aria-label={`${started ? "Continue" : "Start"} ${series.title}`} leading={<Play size={15} strokeWidth={1.5} />} onClick={onContinue}>{started ? "Continue" : "Start"}</Button>
+            <Button variant="ghost" className="px-2" aria-label={`Save audio of ${series.title}`} leading={<HardDriveDownload size={15} strokeWidth={1.5} />} onClick={onExport}>Save</Button>
           </div>
           <Progress value={total ? heard / total : 0} className="h-[34px]" />
         </div>
