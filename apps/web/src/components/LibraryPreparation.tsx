@@ -2,7 +2,12 @@ import { useMemo, useRef, useState } from "react";
 import { Button, Dialog, Input, ProgressBar, ProgressRing, VoiceServiceName, cn } from "@readaloud/ui";
 import { ChevronsUp, Search, Volume2, Zap } from "lucide-react";
 import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
-import { FISH_ENGINE, FISH_MODEL, baseFor, isPaidEngine, openaiModelFor, preparesOnServer } from "../engine/providers";
+import { FISH_ENGINE, FISH_MODEL, baseFor, cacheKeyPrefix, isPaidEngine, openaiModelFor, preparesOnServer } from "../engine/providers";
+import { remainingBytes } from "../lib/audioSize";
+import { planReading } from "../lib/prepared";
+import { formatBytes } from "../lib/storage";
+import { useDeviceAudio } from "../state/deviceAudio";
+import { useLibrary } from "../state/library";
 import { readingCost } from "../lib/premiumEstimate";
 import { formatUsd } from "../lib/usage";
 import { usePremiumContext } from "../state/premium";
@@ -397,8 +402,30 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
   );
 }
 
+/** Space the readings still to be made would take on this device, each and together, once downloaded. */
+function useSpaceNeeded(jobs: PreparationJob[]) {
+  const device = useDeviceAudio(jobs.some(isPreparing));
+  const items = useLibrary((s) => s.items);
+  return useMemo(() => {
+    if (!device) return null;
+    const recs = new Map(items.map((it) => [it.rec.id, it.rec]));
+    const byJob = new Map<string, number>();
+    let total = 0;
+    for (const job of jobs) {
+      const rec = isPreparing(job) ? recs.get(job.docId) : undefined;
+      if (!rec) continue;
+      const prefix = cacheKeyPrefix({ voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel });
+      const bytes = remainingBytes(planReading(rec), job.voice.id === JAMAICAN_PATOIS_VOICE_ID, prefix, device.saved, device.rates);
+      byJob.set(job.id, bytes);
+      total += bytes;
+    }
+    return { byJob, total, used: device.used, limit: device.limit };
+  }, [device, items, jobs]);
+}
+
 export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading) => void }) {
   const { jobs, cancel, cancelAll, dismissFinished, sharedError, sharing } = usePreparation();
+  const space = useSpaceNeeded(jobs);
   if (!jobs.length && !sharedError && !sharing) return null;
   const pending = jobs.filter(isPreparing);
   const preparing = pending.filter((job) => job.status === "preparing").length;
@@ -407,13 +434,24 @@ export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading)
   const finished = jobs.length - pending.length;
   // Display order only: the store's order still decides what starts next.
   const shown = [...jobs].sort((a, b) => queueRank(a) - queueRank(b));
+  // The device keeps a limited amount of audio and removes the oldest past it.
+  const room = !space || space.used + space.total <= space.limit ? null
+    : space.total > space.limit ? `more than the ${formatBytes(space.limit)} this device keeps, so the first readings are removed before the last are saved`
+    : `past the ${formatBytes(space.limit)} this device keeps, so older audio is removed to make room`;
   return (
     <div className="overflow-hidden rounded-card border border-line bg-bg2" role="region" aria-label="Audio preparation queue">
       {sharedError && <p className="m-0 border-b border-line px-4 py-2.5 text-[13px] text-fg2" role="status">Server audio status unavailable: {sharedError}</p>}
       {sharing > 0 && <p className="m-0 border-b border-line px-4 py-2.5 text-[13px] text-fg2" role="status">Sharing saved audio · {sharing} clips remaining. Keep this app open to finish.</p>}
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
         <span className="grid size-7 shrink-0 place-items-center rounded-full bg-bg3 text-accent" aria-hidden><Zap size={14} /></span>
-        <span className="flex-1 text-sm font-medium" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}${saving ? ` · ${saving} saving` : ""}` : "Audio preparation finished"}</span>
+        <div className="min-w-0 flex-1">
+          <span className="block text-sm font-medium" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}${saving ? ` · ${saving} saving` : ""}` : "Audio preparation finished"}</span>
+          {pending.length > 0 && space && space.total > 0 && (
+            <span className="block text-[12px] text-fg2">
+              ≈{formatBytes(space.total)} to save on this device{room && <span className="text-danger"> · {room}</span>}
+            </span>
+          )}
+        </div>
         {pending.length > 0 && <Button size="sm" onClick={cancelAll}>Cancel all</Button>}
         {finished > 0 && <Button size="sm" variant="ghost" onClick={dismissFinished}>Clear finished</Button>}
       </div>
@@ -432,6 +470,9 @@ export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading)
                   </span>
                 </div>
               </button>
+              {!!space?.byJob.get(job.id) && (
+                <span className="shrink-0 tabular-nums text-fg2" title="Estimated space on this device">≈{formatBytes(space.byJob.get(job.id)!)}<span className="sr-only"> to save on this device</span></span>
+              )}
               {isPreparing(job) && <Button variant="ghost" size="sm" aria-label={`Cancel ${job.title} in ${job.voice.name}`} onClick={() => cancel(job.id)}>Cancel</Button>}
             </li>
           ))}

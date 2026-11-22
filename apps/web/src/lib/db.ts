@@ -349,6 +349,12 @@ export const audioCache = {
     if (stored === null || limit === null || stored > limit) void keepWithinLimit();
     notifyAudio();
   },
+  /** Each saved clip's size by key. */
+  async sizes(): Promise<Map<string, number>> {
+    const sizes = new Map<string, number>();
+    for (let cur = await (await db()).transaction("audio").store.openCursor(); cur; cur = await cur.continue()) sizes.set(cur.key, sizeOf(cur.value));
+    return sizes;
+  },
   /** What is stored now, after any pass that is making room has finished. */
   async usage(): Promise<AudioUsage> {
     await upkeep;
