@@ -8,7 +8,7 @@ import { prioritizePreparation } from "../engine/preparation";
 import { audioCache, db, docs, type DocRecord } from "../lib/db";
 import { codeKey } from "../lib/codeBlocks";
 import { preparePatois } from "../lib/patois";
-import { isPreparing, usePreparation, type PreparationJob } from "./preparation";
+import { isPreparing, READY_LINGER_MS, usePreparation, type PreparationJob } from "./preparation";
 
 vi.hoisted(() => {
   const storage = new Map<string, string>();
@@ -101,6 +101,18 @@ describe("Library preparation queue", () => {
     expect(persisted[0]).toMatchObject({ status: "ready", done: 2 });
     expect(persisted[0].message).toBeUndefined();
   });
+
+  it("clears a finished reading from the queue after a moment, and drops finished readings on restart", async () => {
+    usePreparation.getState().enqueue([record("a")], [bella]);
+    await settled();
+    expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["ready"]);
+    await vi.waitFor(() => expect(usePreparation.getState().jobs).toEqual([]), { timeout: READY_LINGER_MS + 2000 });
+
+    const ready: PreparationJob = { id: "done", docId: "a", title: "a", voice: bella, openaiModel: "tts-1", wordTimings: true, status: "ready", done: 2, total: 2 };
+    localStorage.setItem("readaloud:preparation-queue", JSON.stringify({ state: { jobs: [ready, { ...ready, id: "failed", status: "error", message: "Server refused" }] }, version: 0 }));
+    await usePreparation.persist.rehydrate();
+    expect(usePreparation.getState().jobs.map((j) => j.id)).toEqual(["failed"]);
+  }, READY_LINGER_MS + 10_000);
 
   it("resumes downloading after a restart and reuses passages already saved on the device", async () => {
     const generate = vi.mocked(synthesize).getMockImplementation()!;
