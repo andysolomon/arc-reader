@@ -15,10 +15,10 @@ import { SettingsPage } from "./routes/Settings";
 import { LinuxPage } from "./routes/Linux";
 import { AuthPage } from "./routes/Auth";
 import { syncStatusBar } from "./lib/native";
-import { useThemeId } from "./state/settings";
+import { useSettings, useThemeId } from "./state/settings";
 import { useLibrary } from "./state/library";
 import { toast } from "./state/toast";
-import { audioCache } from "./lib/db";
+import { audioCache, chooseAudioLimit } from "./lib/db";
 import { audioNoticeMessage } from "./lib/storage";
 import { useVoices } from "./state/voices";
 import { startLibrarySync } from "./lib/librarySync";
@@ -65,7 +65,10 @@ export default function App() {
     });
     // Saved audio is managed behind playback; say when that changed what is kept on this device.
     const stopNotices = audioCache.onNotice((notice) => toast(audioNoticeMessage(notice), 6000));
-    return () => { document.removeEventListener("visibilitychange", reloadVoices); document.removeEventListener("visibilitychange", watchBooks); stopSync(); stopNotices(); };
+    // Keep as much audio as chosen in Settings → Storage.
+    void chooseAudioLimit(useSettings.getState().audioLimit);
+    const stopLimit = useSettings.subscribe((state) => void chooseAudioLimit(state.audioLimit));
+    return () => { document.removeEventListener("visibilitychange", reloadVoices); document.removeEventListener("visibilitychange", watchBooks); stopSync(); stopNotices(); stopLimit(); };
   }, []);
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}>

@@ -2,14 +2,19 @@ import "fake-indexeddb/auto";
 import { beforeEach, expect, it, vi } from "vitest";
 
 // The browser allows this site 2000 bytes, so downloaded audio may take 1000.
-vi.mock("./storage", async (original) => ({ ...(await original<typeof import("./storage")>()), deviceStorage: async () => ({ allowed: 2000 }) }));
+const browser = vi.hoisted(() => ({ allowed: 2000 }));
+vi.mock("./storage", async (original) => ({ ...(await original<typeof import("./storage")>()), deviceStorage: async () => ({ allowed: browser.allowed }) }));
 
-import { audioCache, audioLimitFor, db, AUDIO_CACHE_BYTES, type AudioNotice, type AudioRecord } from "./db";
+import { audioCache, chooseAudioLimit, db, type AudioNotice, type AudioRecord } from "./db";
 
 const clip = (key: string, bytes: number, createdAt: number): AudioRecord =>
   ({ key, blob: new Blob([new Uint8Array(bytes)]), mime: "audio/mpeg", duration: 1, createdAt });
 
-beforeEach(async () => { await audioCache.clear(); });
+beforeEach(async () => {
+  browser.allowed = 2000;
+  await chooseAudioLimit(1);
+  await audioCache.clear();
+});
 
 it("measures the audio it holds, including clips saved before sizes were recorded", async () => {
   await audioCache.put(clip("new", 300, 2));
@@ -76,8 +81,16 @@ it("says once when the device refuses a save, and again only after audio is remo
   stop();
 });
 
-it("limits audio to 1 GB, or to half of what the browser allows when that is less", () => {
-  expect(audioLimitFor()).toBe(AUDIO_CACHE_BYTES);
-  expect(audioLimitFor(100 * 1024 ** 3)).toBe(AUDIO_CACHE_BYTES);
-  expect(audioLimitFor(300 * 1024 ** 2)).toBe(150 * 1024 ** 2);
+it("makes room as soon as a new amount is chosen, not at the next save", async () => {
+  const notices: AudioNotice[] = [];
+  const stop = audioCache.onNotice((notice) => notices.push(notice));
+  browser.allowed = 4000;
+  for (let i = 1; i <= 5; i++) await audioCache.put(clip(`k${i}`, 300, i));
+  expect(await audioCache.usage()).toEqual({ clips: 5, bytes: 1500 });
+  // Less room is allowed now; choosing "max" works the limit out again and trims straight away.
+  browser.allowed = 2000;
+  await chooseAudioLimit("max");
+  expect(await audioCache.usage()).toEqual({ clips: 3, bytes: 900 });
+  expect(notices).toEqual([{ kind: "trimmed", clips: 2, limit: 1000 }]);
+  stop();
 });
