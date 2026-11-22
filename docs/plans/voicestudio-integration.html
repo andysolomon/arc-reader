@@ -99,6 +99,53 @@
   .plan .diagram-container{max-width:100%;overflow-x:auto}
   .plan #arch{min-width:700px;display:block}
   @media (prefers-reduced-motion:reduce){.plan *{transition:none!important}}
+  /* A finger leaves :hover behind on whatever it last tapped. */
+  @media (hover:none){
+    .plan nav button:not([aria-selected="true"]):hover{color:var(--muted);background:transparent}
+    .plan .node:not(.on):hover rect{stroke:var(--line);stroke-width:1}
+    .plan .bar:hover{filter:none}
+  }
+  /* Any touch screen: controls a finger can hit. */
+  @media (pointer:coarse){
+    .plan nav{gap:6px}
+    .plan nav button{min-height:36px;padding:0 14px;font-size:14px}
+    .plan .seg button{padding:9px 12px;font-size:13px}
+    .plan .tbl-toggle{padding:8px 12px !important}
+    .plan .phase summary{padding:6px 0}
+    .plan .check{padding:11px 0}
+    .plan .check input,.plan .q input{width:18px;height:18px;flex:none}
+    .plan .q label{padding:5px 0}
+    .plan .note a,.plan p a{padding:4px 0}
+  }
+  /* ---- phone ----
+     One row of tabs that stays under the bar, charts that keep a readable size and scroll sideways,
+     and three-column tables stacked into rows. --docs-bar and --docs-gutter come from the ReadAloud
+     app when it serves this page (its bar's height, and the page's side padding); alone, both are 0. */
+  @media (max-width:700px){
+    .plan{font-size:15px}
+    .plan h1{font-size:23px;line-height:1.2;margin-bottom:6px}
+    .plan .meta{font-size:13px;gap:4px 14px}
+    .plan .note{font-size:13px}
+    .plan nav{position:sticky;top:var(--docs-bar,0px);z-index:5;flex-wrap:nowrap;gap:6px;margin:0 calc(-1 * var(--docs-gutter,0px)) 14px;padding:8px var(--docs-gutter,0px);background:var(--bg);overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .plan nav::-webkit-scrollbar,.plan .diagram-container::-webkit-scrollbar{display:none}
+    .plan nav button{flex:none;min-height:36px;padding:0 14px;font-size:15px;white-space:nowrap}
+    .plan section{scroll-margin-top:64px}
+    .plan .card{padding:14px;margin-bottom:12px}
+    .plan .kpis{grid-template-columns:1fr 1fr}
+    .plan code,.plan kbd{font-size:13px;overflow-wrap:anywhere}
+    .plan .diagram-container{margin:0 -14px;padding:0 14px;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+    .plan .diagram-container svg{min-width:600px;max-width:none}
+    .plan table.stack thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+    .plan table.stack,.plan table.stack tbody{display:block}
+    .plan table.stack tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--line)}
+    .plan table.stack tr:last-child{border-bottom:0;padding-bottom:0}
+    .plan table.stack tr:first-child{padding-top:4px}
+    .plan table.stack td{padding:0;border:0}
+    .plan table.stack td:first-child{font-weight:600}
+    .plan table.stack td:nth-child(3){grid-column:1/-1;color:var(--muted)}
+    .plan #langs-table:not([hidden]){display:block;overflow-x:auto}
+    .plan #langs-table td:last-child{min-width:220px}
+  }
 </style>
 </head>
 <body>
@@ -187,7 +234,7 @@
           <button aria-pressed="false" data-flow="down">VoiceStudio down</button>
         </div>
       </div>
-      <svg id="seq" viewBox="0 0 700 360" role="img" aria-label="Sequence diagram of a sentence request across the playback engine, cache, proxy and VoiceStudio"></svg>
+      <div class="diagram-container"><svg id="seq" viewBox="0 0 700 360" role="img" aria-label="Sequence diagram of a sentence request across the playback engine, cache, proxy and VoiceStudio"></svg></div>
       <p class="note">The browser calls <code>/api/vs/v1/audio/speech</code>; the web server strips <code>/api/vs</code> and adds the bearer key. Incoming requests pass through the ingress shown in Architecture. The sequence omits those transport hops.</p>
       <div class="panel" id="seq-panel"></div>
     </div>
@@ -198,7 +245,7 @@
     <div class="card">
       <h2>Nine days, five phases</h2>
       <p class="sub">Hover a bar for its tasks. Phase 4 is optional and can be dropped without affecting the rest.</p>
-      <svg id="gantt" viewBox="0 0 700 250" role="img" aria-label="Gantt chart of five phases across nine working days"></svg>
+      <div class="diagram-container"><svg id="gantt" viewBox="0 0 700 250" role="img" aria-label="Gantt chart of five phases across nine working days"></svg></div>
       <div class="legend"><span><i style="background:var(--s1)"></i>required</span><span><i style="background:var(--gray)"></i>optional</span></div>
     </div>
     <div class="card" id="phases"></div>
@@ -210,7 +257,7 @@
       <button class="tbl-toggle seg-like" id="tbl-toggle" aria-pressed="false" style="font:inherit;font-size:12px;background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer">Show table</button>
       <h2>Language coverage by engine</h2>
       <p class="sub">All four run on the CPU. KittenTTS is the recommended first engine: English only, but the smallest install and real-time on any CPU according to its guide.</p>
-      <svg id="langs" viewBox="0 0 700 190" role="img" aria-label="Bar chart: Supertonic-3 covers 31 languages, MOSS-TTS-Nano 20, PocketTTS 6, KittenTTS 1"></svg>
+      <div class="diagram-container"><svg id="langs" viewBox="0 0 700 190" role="img" aria-label="Bar chart: Supertonic-3 covers 31 languages, MOSS-TTS-Nano 20, PocketTTS 6, KittenTTS 1"></svg></div>
       <table id="langs-table" hidden>
         <thead><tr><th>Engine</th><th>Languages</th><th>Voices</th><th>Cloning</th><th>Weights licence</th><th>Fit for ReadAloud</th></tr></thead>
         <tbody>
@@ -224,7 +271,7 @@
     </div>
     <div class="card">
       <h2>What VoiceStudio gives us, and what it doesn't</h2>
-      <table>
+      <table class="stack">
         <thead><tr><th>Need</th><th>VoiceStudio</th><th>Plan</th></tr></thead>
         <tbody>
           <tr><td>Per-passage MP3</td><td><span class="st"><i style="background:var(--good)"></i>Yes</span></td><td><code>POST /v1/audio/speech</code>, up to 4096 characters, formats mp3, opus, wav, pcm.</td></tr>
@@ -242,7 +289,7 @@
   <section id="tab-risks" role="tabpanel" hidden>
     <div class="card">
       <h2>Risks and mitigations</h2>
-      <table>
+      <table class="stack">
         <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
         <tbody id="risks"></tbody>
       </table>
@@ -282,8 +329,17 @@
   // ---- tabs
   const tabs = $$('[role="tab"]');
   const show = (id) => { tabs.forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === id))); $$('[role="tabpanel"]').forEach(p => p.hidden = p.id !== "tab-" + id); store("plan:tab", id); };
-  tabs.forEach(t => t.addEventListener("click", () => show(t.dataset.tab)));
+  // The tabs stick to the top of a phone's screen: a new tab starts at its top, not where the last one was scrolled to.
+  const tabBar = $(".plan nav");
+  const open = (t) => {
+    const stuck = getComputedStyle(tabBar).position === "sticky" && tabBar.getBoundingClientRect().top <= parseFloat(getComputedStyle(tabBar).top) + 1;
+    show(t.dataset.tab);
+    t.scrollIntoView({ block: "nearest", inline: "center" });
+    if (stuck) $("#tab-" + t.dataset.tab).scrollIntoView({ block: "start" });
+  };
+  tabs.forEach(t => t.addEventListener("click", () => open(t)));
   show(store("plan:tab") || "overview");
+  tabBar.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "center" });
 
   // ---- tooltip
   const tip = $("#tip");

@@ -40,6 +40,20 @@ html {
     font-size: 16px;
   }
 }
+/* A finger needs more room than a small control shows. On touch screens `.hit-44` makes the
+   control answer across 44px of height without changing how it looks. */
+@media (pointer: coarse) {
+  .hit-44 {
+    position: relative;
+  }
+  .hit-44::after {
+    content: "";
+    position: absolute;
+    inset: 50% 0 auto;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+}
 body {
   background: var(--bg);
   color: var(--fg);

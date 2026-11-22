@@ -18,7 +18,7 @@ export function Switch({ checked, onChange, label, disabled, className }: Switch
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "flex h-[26px] w-11 shrink-0 items-center rounded-pill border-0 p-[3px] transition-colors duration-base disabled:opacity-50",
+        "hit-44 flex h-[26px] w-11 shrink-0 items-center rounded-pill border-0 p-[3px] transition-colors duration-base disabled:opacity-50",
         checked ? "bg-accent" : "bg-bg3",
         className,
       )}

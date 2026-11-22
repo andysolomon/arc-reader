@@ -80,7 +80,7 @@ export function AuthPage() {
             )}
           </div>
         )}
-        <Button variant="link" onClick={() => navigate("/")} className="self-center text-[13px]">
+        <Button variant="link" onClick={() => navigate("/")} className="hit-44 self-center text-[13px]">
           Continue without an account
         </Button>
       </div>

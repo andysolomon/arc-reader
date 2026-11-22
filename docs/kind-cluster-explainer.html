@@ -42,7 +42,7 @@
 }
 
 body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.5; }
-.page { max-width: 1184px; margin: 0 auto; padding: 40px 32px 96px; }
+.page { --gutter: 32px; max-width: 1184px; margin: 0 auto; padding: 40px max(var(--gutter), env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left)); }
 .theme-input { position: absolute; opacity: 0; pointer-events: none; }
 .eyebrow { margin: 0 0 8px; color: var(--muted); font: 500 11px/1.4 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
 h1 { margin: 0 0 12px; font: 400 clamp(1.75rem, 2.6vw + 1rem, 2.5rem)/1.15 var(--serif); letter-spacing: -.01em; }
@@ -55,7 +55,7 @@ code { font-family: var(--mono); font-size: .9em; }
 .meta, .note, figcaption { color: var(--muted); font-size: 14px; max-width: 72ch; }
 .note { margin: 12px 0 0; }
 figure { margin: 0 0 40px; }
-section { scroll-margin-top: 48px; padding-top: 40px; margin-top: 32px; border-top: 1px solid var(--rule); }
+section { scroll-margin-top: calc(var(--docs-bar, 0px) + 48px); padding-top: 40px; margin-top: 32px; border-top: 1px solid var(--rule); }
 .top { display: flex; gap: 24px; justify-content: space-between; align-items: flex-start; }
 .theme { display: flex; border: 1px solid var(--rule-solid); border-radius: 6px; padding: 2px; margin: 0; flex-shrink: 0; }
 .theme label { padding: 6px 12px; border-radius: 4px; font: 500 12px/1 var(--sans); color: var(--muted); cursor: pointer; }
@@ -63,7 +63,7 @@ section { scroll-margin-top: 48px; padding-top: 40px; margin-top: 32px; border-t
 :root:has(#theme-light:checked) .theme label[for="theme-light"],
 :root:has(#theme-dark:checked) .theme label[for="theme-dark"] { background: var(--ink); color: var(--paper); }
 :root:has(.theme-input:focus-visible) .theme { outline: 3px solid var(--accent); outline-offset: 2px; }
-.toc { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 4px 20px; padding: 12px 0; margin-top: 24px; background: var(--paper); border-bottom: 1px solid var(--rule); }
+.toc { position: sticky; top: var(--docs-bar, 0px); z-index: 2; display: flex; flex-wrap: wrap; gap: 4px 20px; padding: 12px 0; margin-top: 24px; background: var(--paper); border-bottom: 1px solid var(--rule); }
 .toc a { color: var(--muted); font: 500 12px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; text-decoration: none; }
 .toc a:hover, .toc a:focus-visible { color: var(--accent); }
 
@@ -167,6 +167,46 @@ html[data-motion="step"] [data-motion-item] { animation: none !important; transi
   [data-motion-item] { opacity: 1 !important; transform: none !important; }
   [data-motion-decorative] { display: none !important; }
   [data-motion-controls] { display: none !important; }
+}
+/* ---- narrower than the diagrams (a phone, or an iPad held upright): one row of sections to swipe,
+        and diagrams that keep their size and scroll sideways, out to both edges of the screen ---- */
+@media (max-width: 1040px) {
+  .toc { flex-wrap: nowrap; gap: 0; margin: 20px calc(-1 * var(--gutter)) 0; padding: 0 calc(var(--gutter) - 8px); overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .toc::-webkit-scrollbar, .diagram-container::-webkit-scrollbar { display: none; }
+  .toc a { flex: none; padding: 14px 8px; white-space: nowrap; }
+  /* The fade says there is more to the side. */
+  .diagram-container { width: auto; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+  .diagram-container[data-end] { -webkit-mask-image: none; mask-image: none; }
+  .diagram-container svg { padding-right: var(--gutter); box-sizing: content-box; }
+}
+/* ---- phone: a tighter page ---- */
+@media (max-width: 700px) {
+  .page { --gutter: 18px; padding-top: 20px; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .eyebrow { letter-spacing: .12em; }
+  .top { gap: 16px; }
+  .lede { font-size: 16px; line-height: 1.55; }
+  section { padding-top: 28px; margin-top: 24px; }
+  .toc + section { margin-top: 0; border-top: 0; }
+  h2 { font-size: 1.4rem; }
+  figure { margin-bottom: 28px; }
+  .cards { gap: 10px; margin-bottom: 28px; }
+  .card { padding: 14px 12px 12px; }
+  .card .dot { top: 16px; right: 12px; }
+  .card .big { font-size: 1.7rem; }
+  details.data { overflow-x: auto; }
+  [data-motion-controls] { gap: 6px; }
+  [data-motion-controls] button { flex: 1 1 0; min-width: 0; padding: 8px 2px; }
+  [data-motion-status-visible] { width: 100%; margin: 4px 0 0; }
+}
+/* ---- any touch screen: controls a finger can hit, and no talk of keys ---- */
+@media (pointer: coarse) {
+  .theme label { padding: 10px 14px; font-size: 13px; }
+  .toc a { padding: 14px 8px; }
+  .toc { gap: 0 4px; padding-top: 0; padding-bottom: 0; }
+  .switch > label { padding: 11px 14px; }
+  details.data summary { padding: 10px 0; }
+  .keyboard-help { display: none; }
 }
 @media print {
   .toc, .theme { display: none; }
@@ -292,6 +332,14 @@ html[data-motion="step"] [data-motion-item] { animation: none !important; transi
   <p class="meta">Sources: <code>crictl stats</code> and <code>du</code> inside the kind node, pod conditions, <code>/api/preparations</code>, and <code>.git/docker-rebuild.log</code>. CPU is cumulative since each container started.</p>
 </section>
 </div>
+<script data-diagram-scroll>
+    // A diagram wider than a phone scrolls sideways under a fade; lift the fade once its end is in view.
+    document.querySelectorAll('.diagram-container').forEach((box) => {
+      const mark = () => box.toggleAttribute('data-end', box.scrollLeft + box.clientWidth >= box.scrollWidth - 8);
+      box.addEventListener('scroll', mark, { passive: true });
+      new ResizeObserver(mark).observe(box);
+    });
+  </script>
 <script data-diagram-controls>
     (() => {
       const params = new URLSearchParams(location.search);
