@@ -300,7 +300,7 @@ function useTimeLeft(step: { key: string; done: number; total: number } | null |
 }
 
 /** What one voice has prepared for one document, and the controls to move it through the queue. */
-export function PreparationDetails({ it, reading, defaultVoice, onClose, onChooseVoices }: { it: LibraryItem; reading: Reading; defaultVoice: string; onClose: () => void; onChooseVoices: () => void }) {
+export function PreparationDetails({ it, reading, defaultVoice, onClose, onChooseVoices, onSaveAudio }: { it: LibraryItem; reading: Reading; defaultVoice: string; onClose: () => void; onChooseVoices: () => void; /** Save the document's audio to a file */ onSaveAudio?: () => void }) {
   const jobs = usePreparation((s) => s.jobs);
   const openaiModel = useSettings((s) => s.openaiModel);
   const voices = useVoices((s) => s.voices);
@@ -414,7 +414,10 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
         </div>
       )}
       <div className="flex flex-wrap justify-between gap-2">
-        <Button variant="ghost" className="-ml-3" onClick={onChooseVoices}>More voices…</Button>
+        <div className="-ml-3 flex flex-wrap gap-1">
+          <Button variant="ghost" onClick={onChooseVoices}>More voices…</Button>
+          {onSaveAudio && savedPercent > 0 && <Button variant="ghost" onClick={onSaveAudio}>Save audio…</Button>}
+        </div>
         <Button onClick={onClose}>Close</Button>
       </div>
     </Dialog>

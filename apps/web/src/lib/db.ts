@@ -356,6 +356,35 @@ export const audioCache = {
     if (stored === null || limit === null || stored > limit) void keepWithinLimit();
     notifyAudio();
   },
+  /**
+   * Save many clips at once, as an import does: a batch per transaction, then one check of the limit.
+   * A device out of room throws QuotaExceededError, with the batches before it kept.
+   */
+  async putMany(records: AudioRecord[]) {
+    if (!records.length) return;
+    const tx = (await db()).transaction("audio", "readwrite");
+    for (const rec of records) void tx.store.put({ ...rec, bytes: rec.blob.size });
+    try {
+      await tx.done;
+    } catch (error) {
+      if ((error as { name?: string } | null)?.name === "QuotaExceededError" && !fullAnnounced) {
+        fullAnnounced = true;
+        announce({ kind: "full" });
+      }
+      throw error;
+    }
+    stored = null;
+    void keepWithinLimit();
+    notifyAudio();
+  },
+  /** Remove these clips; keys not saved are ignored. */
+  async remove(keys: Iterable<string>) {
+    const tx = (await db()).transaction("audio", "readwrite");
+    for (const key of keys) void tx.store.delete(key);
+    await tx.done;
+    stored = null;
+    notifyAudio();
+  },
   /** Each saved clip's size by key. */
   async sizes(): Promise<Map<string, number>> {
     const sizes = new Map<string, number>();

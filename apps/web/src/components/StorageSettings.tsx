@@ -8,6 +8,7 @@ import { hasFish, hasOpenAI } from "../engine/providers";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
+import { ImportAudio } from "./AudioExport";
 
 function Row({ label, hint, children, last }: { label: string; hint: string; children: React.ReactNode; last?: boolean }) {
   return (
@@ -99,6 +100,9 @@ export function StorageSettings() {
       >
         {audio && <Amount>{formatBytes(audio.bytes)}</Amount>}
         <Button variant="danger" disabled={!audio?.clips} onClick={() => setConfirming(true)} className="bg-bg">Remove</Button>
+      </Row>
+      <Row label="Load audio from a file" hint="Bring back audio saved with Save audio. It plays here again without being made twice.">
+        <ImportAudio />
       </Row>
       <div className={`flex flex-col gap-2.5 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${device.used === undefined && device.kept === undefined ? "" : "border-b border-line"}`}>
         <div className="min-w-0">
