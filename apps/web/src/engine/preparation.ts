@@ -27,8 +27,10 @@ export interface PreparationStatus {
   ahead?: number;
   /** A reader moved it to the front of the queue. */
   prioritized?: boolean;
-  /** Its machine is preparing another reading. */
+  /** Its machine is preparing other readings in all its slots. */
   busy?: boolean;
+  /** Its machine shares the server's computer, which other programs are keeping busy; it resumes once they ease off. */
+  held?: boolean;
   /** The reading is on its way to the server, which has not accepted it yet. */
   submitting?: boolean;
 }

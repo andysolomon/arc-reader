@@ -36,6 +36,7 @@ describe("server-owned audio preparation", () => {
   let phonon: Server | undefined;
   let phononGate: ReturnType<typeof deferred> | undefined;
   let phononCalls: { path: string; body: Record<string, unknown>; authorization?: string }[];
+  let phononActive: number, phononPeak: number;
   const spoken = (text: string): PreparationRequest => ({ key: `phonon:${text}`, text, voice: "phonon:Captain Silas Blackwater", engine: "phonon", protocol: "openai" });
   async function addPhonon() {
     phonon = createServer(async (req, res) => {
@@ -43,6 +44,8 @@ describe("server-owned audio preparation", () => {
       for await (const chunk of req) buffers.push(Buffer.from(chunk));
       const body = JSON.parse(Buffer.concat(buffers).toString() || "{}") as Record<string, unknown>;
       phononCalls.push({ path: req.url!, body, authorization: req.headers.authorization });
+      phononPeak = Math.max(phononPeak, ++phononActive);
+      res.once("finish", () => { phononActive--; });
       await phononGate?.promise;
       res.setHeader("content-type", "audio/mpeg");
       res.end(`phonon:${body.input}`);
@@ -80,7 +83,7 @@ describe("server-owned audio preparation", () => {
     secondary = undefined; secondaryGate = undefined; discoveryGate = undefined; secondaryCalls = [];
     primaryAssignmentGate = undefined;
     secondaryUnavailable = false; secondaryDiscoveries = 0;
-    phonon = undefined; phononGate = undefined; phononCalls = [];
+    phonon = undefined; phononGate = undefined; phononCalls = []; phononActive = 0; phononPeak = 0;
     directory = await mkdtemp(join(tmpdir(), "readaloud-preparation-"));
     upstream = createServer(async (req, res) => {
       const buffers: Buffer[] = [];
@@ -107,7 +110,8 @@ describe("server-owned audio preparation", () => {
       res.end(`audio:${calls.at(-1)!.body.input || calls.at(-1)!.body.text}`);
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
-    env = { VOICESTUDIO_URL: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`, VOICESTUDIO_API_KEY: "server-secret" };
+    // The tests' speech servers share this computer; its real CPU pressure must not decide them.
+    env = { VOICESTUDIO_URL: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`, VOICESTUDIO_API_KEY: "server-secret", PREPARATION_PRESSURE_FILE: join(directory, "no-pressure") };
   });
   afterEach(async () => {
     vi.restoreAllMocks();
@@ -572,6 +576,71 @@ describe("server-owned audio preparation", () => {
     end();
     await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
     expect(phononCalls).toHaveLength(1);
+  });
+
+  it("prepares as many Phonon readings at once as it has slots, one passage each", async () => {
+    await addPhonon();
+    const service = new PreparationService({ ...env, PHONON_PREPARATION_SLOTS: "2" }, directory);
+    phononGate = deferred();
+    const first = await service.submit({ requests: [spoken("a1"), spoken("a2")], start: 0 });
+    const second = await service.submit({ requests: [spoken("b1"), spoken("b2")], start: 0 });
+    const third = await service.submit({ requests: [spoken("c1")], start: 0 });
+    await expect.poll(() => phononCalls.map((call) => call.body.input)).toEqual(["a1", "b1"]);
+    expect(await service.get(first.id)).toMatchObject({ queued: false, worker: "Phonon" });
+    expect(await service.get(second.id)).toMatchObject({ queued: false, worker: "Phonon" });
+    expect(await service.get(third.id)).toMatchObject({ queued: true, waitingFor: "Phonon", busy: true, ahead: 0 });
+    phononGate.resolve();
+    for (const job of [first, second, third]) await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(phononPeak).toBe(2);
+    expect(phononCalls).toHaveLength(5);
+  });
+
+  it("holds back preparation on this computer while other programs need its CPU", async () => {
+    await addPhonon();
+    const pressure = join(directory, "pressure");
+    const busy = (avg10: number) => writeFile(pressure, `some avg10=${avg10.toFixed(2)} avg60=0.00 avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n`);
+    await busy(40);
+    const service = new PreparationService({ ...env, PHONON_PREPARATION_SLOTS: "2", PREPARATION_PRESSURE_FILE: pressure, PREPARATION_PRESSURE_INTERVAL_MS: "30" }, directory);
+    phononGate = deferred();
+    const first = await service.submit({ requests: [spoken("a1"), spoken("a2")], start: 0 });
+    const second = await service.submit({ requests: [spoken("b1"), spoken("b2")], start: 0 });
+    // The first check gives up one slot: the earlier reading goes on, the later one is held.
+    await expect.poll(async () => (await service.get(second.id)).held).toBe(true);
+    expect(await service.get(second.id)).toMatchObject({ state: "running", queued: false, worker: "Phonon" });
+    expect(phononCalls.map((call) => call.body.input)).toEqual(["a1"]);
+    // Pressure stays high, so the next check gives up the other slot after the passage in hand.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    phononGate.resolve();
+    await expect.poll(async () => (await service.get(first.id)).held).toBe(true);
+    expect(phononCalls.map((call) => call.body.input)).toEqual(["a1"]);
+    expect(await service.get(first.id)).toMatchObject({ state: "running", done: 1 });
+    // Between the thresholds nothing changes.
+    await busy(5);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(phononCalls).toHaveLength(1);
+    // Once other programs ease off, both readings take their slots back.
+    await busy(0.5);
+    for (const job of [first, second]) await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    expect(await service.get(second.id)).not.toHaveProperty("held");
+    expect(phononCalls).toHaveLength(4);
+  });
+
+  it("starts a reading now in the slot of the lowest-ranked reading, leaving the other running", async () => {
+    await addPhonon();
+    const service = new PreparationService({ ...env, PHONON_PREPARATION_SLOTS: "2" }, directory);
+    phononGate = deferred();
+    const first = await service.submit({ requests: [spoken("a1"), spoken("a2"), spoken("a3")], start: 0 });
+    const second = await service.submit({ requests: [spoken("b1"), spoken("b2"), spoken("b3")], start: 0 });
+    await expect.poll(() => phononCalls.length).toBe(2);
+    const urgent = await service.submit({ requests: [spoken("c1")], start: 0 });
+    await service.prioritize(urgent.id, true);
+    phononGate.resolve();
+    for (const job of [first, second, urgent]) await expect.poll(async () => (await service.get(job.id)).state).toBe("done");
+    const order = phononCalls.map((call) => call.body.input);
+    // The later reading gave way after its passage in hand; the earlier one never stopped.
+    expect(order.indexOf("c1")).toBeLessThan(order.indexOf("b2"));
+    expect(order.indexOf("a2")).toBeLessThan(order.indexOf("b2"));
+    expect(order).toHaveLength(7);
   });
 
   it("refuses Phonon readings it cannot place", async () => {

@@ -27,6 +27,36 @@ variable "phonon_image" {
   description = "Run Gradium's Phonon speech server in the cluster from this image. Null leaves it out and hides its /api/phonon route."
 }
 
+# Measured on the laptop (i7-1355U, 12 threads): one Phonon request on one thread renders at
+# about 7.7x real time on 1.5 cores; the server's default of a thread per CPU spins on about
+# 9 cores for 5.2x. Two readings at once reach about 10.7x on 3.2 cores, and more add little.
+variable "phonon_preparation_slots" {
+  type        = number
+  nullable    = false
+  default     = 2
+  description = "Phonon readings prepared at once, one single-threaded request each. The server takes one more for someone listening."
+  validation {
+    condition     = var.phonon_preparation_slots >= 1 && floor(var.phonon_preparation_slots) == var.phonon_preparation_slots
+    error_message = "phonon_preparation_slots must be a whole number of at least 1."
+  }
+}
+variable "phonon_cpus" {
+  type        = number
+  nullable    = false
+  default     = 4
+  description = "Most CPUs the Phonon pod may use; a hard ceiling above its slots plus a listener."
+}
+variable "voicestudio_cpus" {
+  type        = number
+  nullable    = false
+  default     = 2
+  description = "Most CPUs the in-cluster VoiceStudio may use, and the threads its models run on. It is overflow for the remote Mac."
+  validation {
+    condition     = var.voicestudio_cpus >= 1 && floor(var.voicestudio_cpus) == var.voicestudio_cpus
+    error_message = "voicestudio_cpus must be a whole number of at least 1."
+  }
+}
+
 # kind load cannot import multi-platform images; the node pulls this one itself.
 variable "traefik_image" {
   type     = string

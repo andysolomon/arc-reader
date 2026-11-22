@@ -11,6 +11,7 @@ locals {
   config = {
     # Empty leaves the web server without its /api/phonon route.
     PHONON_URL                 = local.phonon ? "http://phonon:8880" : ""
+    PHONON_PREPARATION_SLOTS   = tostring(var.phonon_preparation_slots)
     VOICESTUDIO_URL            = var.voicestudio_remote_url != "" ? var.voicestudio_remote_url : local.in_cluster_voicestudio
     VOICESTUDIO_NAME           = var.voicestudio_name
     VOICESTUDIO_SECONDARY_URL  = var.voicestudio_secondary_remote_url != "" ? var.voicestudio_secondary_remote_url : (var.voicestudio_remote_url != "" ? local.in_cluster_voicestudio : "")
@@ -241,6 +242,20 @@ resource "kubernetes_deployment_v1" "voicestudio" {
               }
             }
           }
+          # This laptop runs other projects too. Torch, its math libraries and VoiceStudio's own
+          # worker pool otherwise size themselves to every CPU; the limit below is the hard ceiling.
+          dynamic "env" {
+            for_each = ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OMNIVOICE_CPU_POOL"]
+            content {
+              name  = env.value
+              value = tostring(var.voicestudio_cpus)
+            }
+          }
+          # The memory bounds were first set by hand on the kind cluster; kept here so they last.
+          resources {
+            requests = { cpu = "250m", memory = "2Gi" }
+            limits   = { cpu = tostring(var.voicestudio_cpus), memory = "6Gi" }
+          }
           # Loading models can take minutes on this CPU.
           startup_probe {
             http_get {
@@ -356,6 +371,21 @@ resource "kubernetes_deployment_v1" "phonon" {
           env {
             name  = "PTTS_QUANT"
             value = "q8"
+          }
+          # One thread per request: the default, a spinning thread per CPU, used about 9 cores
+          # to render slower than a single thread on 1.5. More readings at once scale better.
+          env {
+            name  = "RAYON_NUM_THREADS"
+            value = "1"
+          }
+          # One request per preparation slot, and one more so a listener is never refused.
+          env {
+            name  = "PTTS_MAX_CONCURRENT_REQUESTS"
+            value = tostring(var.phonon_preparation_slots + 1)
+          }
+          resources {
+            requests = { cpu = "250m" }
+            limits   = { cpu = tostring(var.phonon_cpus) }
           }
           # It listens once the model has loaded; the first start downloads it (about 65 MB).
           startup_probe {
