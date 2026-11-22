@@ -5,6 +5,8 @@ import { JAMAICAN_PATOIS_VOICE_ID, voiceSource } from "../data/voices";
 import { FISH_ENGINE, FISH_MODEL, baseFor, cacheKeyPrefix, isPaidEngine, openaiModelFor, preparesOnServer } from "../engine/providers";
 import { remainingBytes } from "../lib/audioSize";
 import { planReading } from "../lib/prepared";
+import { partNames } from "../lib/book";
+import { shelfPercent, shelfPreparation, type ShelfVoice } from "../lib/shelfPreparation";
 import { formatBytes } from "../lib/storage";
 import { useDeviceAudio } from "../state/deviceAudio";
 import { useLibrary } from "../state/library";
@@ -158,33 +160,34 @@ export function PreparedSummary({ it, defaultVoice, onDetails, className }: { it
   );
 }
 
-/**
- * A book's readings in one line of the sidebar: for each voice, how many chapters are fully
- * prepared, and whether more are being made.
- */
-export function ShelfSummary({ items, className }: { items: LibraryItem[]; className?: string }) {
+/** For each voice, how much of a book or series is prepared, counting the readings being made now. */
+export function useShelfPreparation(items: LibraryItem[]): ShelfVoice[] {
   const jobs = usePreparation((s) => s.jobs);
-  const ids = new Set(items.map((it) => it.rec.id));
-  const voices = new Map<string, { voice: PreparedVoice; complete: number; saved: number; busy: number }>();
-  const entry = (voice: PreparedVoice) => voices.get(voice.voiceId) ?? voices.set(voice.voiceId, { voice, complete: 0, saved: 0, busy: 0 }).get(voice.voiceId)!;
-  for (const it of items) {
-    for (const voice of it.prepared) {
-      if (voice.fraction <= 0) continue;
-      const tally = entry(voice);
-      tally.saved += voice.fraction;
-      if (voice.fraction >= 1) tally.complete++;
-    }
-  }
-  for (const job of jobs) if (ids.has(job.docId) && isPreparing(job)) entry({ voiceId: job.voice.id, name: job.voice.name, engine: job.voice.engine, fraction: 0 }).busy++;
-  if (!voices.size) return null;
+  return useMemo(() => shelfPreparation(items.map((it) => ({ id: it.rec.id, duration: it.duration, prepared: it.prepared })), jobs.filter(isPreparing)), [items, jobs]);
+}
+
+/** One voice's share of a whole book in words: "42% of the book · 3 of 12 chapters prepared". */
+export function shelfLabel(tally: ShelfVoice, book?: { kind?: "course" } | null, whole = partNames(book).whole): string {
+  const { many } = partNames(book);
+  return `${shelfPercent(tally)}% of the ${whole} · ${tally.complete} of ${tally.chapters} ${many} prepared${tally.busy ? ` · ${tally.busy} being prepared` : ""}`;
+}
+
+/**
+ * A book's readings in one line: for each voice, how much of the whole book is prepared, how many
+ * chapters are complete, and whether more are being made.
+ */
+export function ShelfSummary({ items, className, whole }: { items: LibraryItem[]; className?: string; /** What the chapters make up, when not one book: "series" */ whole?: string }) {
+  const voices = useShelfPreparation(items);
+  if (!voices.length) return null;
+  const book = items.find((it) => it.rec.book)?.rec.book;
   return (
     <div className={cn("flex flex-wrap gap-1", className)} role="group" aria-label="Audio made">
-      {[...voices.values()].map(({ voice, complete, saved, busy }) => (
-        <span key={voice.voiceId} title={`${voice.name}: ${complete} of ${items.length} prepared${busy ? ` · ${busy} being prepared` : ""}`} className={cn(CHIP, busy ? BUSY : "border-line")}>
-          <span aria-hidden className="shrink-0"><ProgressRing value={saved / items.length} size={16} stroke={1.75} /></span>
-          <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
-          <span className="whitespace-nowrap tabular-nums">{complete}/{items.length}</span>
-          {busy > 0 && <span className="min-w-0 truncate text-accent">Preparing {busy}</span>}
+      {voices.map((tally) => (
+        <span key={`${tally.voice.engine}:${tally.voice.voiceId}`} title={`${tally.voice.name}: ${shelfLabel(tally, book, whole)}`} className={cn(CHIP, tally.busy ? BUSY : "border-line")}>
+          <span aria-hidden className="shrink-0"><ProgressRing value={tally.fraction} size={16} stroke={1.75} /></span>
+          <VoiceServiceName source={voiceSource(tally.voice)} className="whitespace-nowrap">{tally.voice.name}</VoiceServiceName>
+          <span className="whitespace-nowrap tabular-nums">{shelfPercent(tally)}% · {tally.complete}/{tally.chapters}</span>
+          {tally.busy > 0 && <span className="min-w-0 truncate text-accent">Preparing {tally.busy}</span>}
         </span>
       ))}
     </div>
@@ -331,6 +334,12 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
   const step = stepProgress(job);
   const timeLeft = useTimeLeft(step);
   const stepPercent = step ? Math.floor((step.done / step.total) * 100) : 0;
+  // A chapter answers for its book too: how much of the whole this voice has prepared.
+  const library = useLibrary((s) => s.items);
+  const bookId = it.rec.book?.id;
+  const chapters = useMemo(() => bookId ? library.filter((other) => other.rec.book?.id === bookId) : [], [library, bookId]);
+  const shelf = useShelfPreparation(chapters).find((tally) => tally.voice.voiceId === reading.voiceId && tally.voice.engine === reading.engine);
+  const { whole: wholeName, many } = partNames(it.rec.book);
 
   const move = async (now: boolean) => {
     if (!job) return;
@@ -372,6 +381,15 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
         {queue && <div className={row}><dt className="text-fg2">Queue</dt><dd className="m-0 text-fg">{queue}</dd></div>}
         {machine && <div className={row}><dt className="text-fg2">Machine</dt><dd className="m-0 text-fg">{machine}</dd></div>}
         {counted && counted.total > 0 && <div className={row}><dt className="text-fg2">Generated</dt><dd className="m-0 tabular-nums text-fg">{counted.done} of {plural(counted.total, "passage")}</dd></div>}
+        {chapters.length > 1 && (
+          <div className={row}>
+            <dt className="text-fg2">Whole {wholeName}</dt>
+            <dd className="m-0 flex min-w-0 items-center gap-2 tabular-nums text-fg">
+              <ProgressRing value={shelf?.fraction ?? 0} size={16} stroke={1.75} label={`${voice.name}: ${shelf ? shelfLabel(shelf, it.rec.book) : `nothing of the ${wholeName} prepared`}`} />
+              <span>{shelf ? shelfPercent(shelf) : 0}% prepared · {shelf?.complete ?? 0} of {chapters.length} {many}{shelf?.busy ? <span className="text-accent"> · {shelf.busy} being prepared</span> : null}</span>
+            </dd>
+          </div>
+        )}
         <div className={row}><dt className="text-fg2">On this device</dt><dd className="m-0 tabular-nums text-fg">{savedPercent}% saved</dd></div>
         <div className={row}><dt className="text-fg2">Role</dt><dd className="m-0 text-fg">{(it.rec.voice ?? defaultVoice) === reading.voiceId ? "Reading voice" : "Extra prepared voice"}</dd></div>
         {queuedAt ? <div className={row}><dt className="text-fg2">Queued</dt><dd className="m-0 text-fg">{dateLabel(queuedAt)} at {new Date(queuedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</dd></div> : null}
@@ -423,6 +441,49 @@ function useSpaceNeeded(jobs: PreparationJob[]) {
   }, [device, items, jobs]);
 }
 
+/** The books whose chapters are in the queue, each with how much of the whole the voice has prepared so far. */
+function QueueBooks({ jobs }: { jobs: PreparationJob[] }) {
+  const items = useLibrary((s) => s.items);
+  const books = useMemo(() => {
+    const recs = new Map(items.map((it) => [it.rec.id, it.rec]));
+    const out = new Map<string, { book: NonNullable<LibraryItem["rec"]["book"]>; voices: Set<string> }>();
+    for (const job of jobs) {
+      const book = recs.get(job.docId)?.book;
+      if (!book || !isPreparing(job)) continue;
+      const entry = out.get(book.id) ?? out.set(book.id, { book, voices: new Set() }).get(book.id)!;
+      entry.voices.add(`${job.voice.engine}:${job.voice.id}`);
+    }
+    return [...out.values()].map(({ book, voices }) => ({ book, voices, chapters: items.filter((it) => it.rec.book?.id === book.id) }));
+  }, [items, jobs]);
+  if (!books.length) return null;
+  return (
+    <ul className="m-0 list-none divide-y divide-line border-t border-line p-0" aria-label="Books being prepared">
+      {books.map(({ book, voices, chapters }) => <QueueBook key={book.id} book={book} voices={voices} chapters={chapters} />)}
+    </ul>
+  );
+}
+
+function QueueBook({ book, voices, chapters }: { book: NonNullable<LibraryItem["rec"]["book"]>; voices: Set<string>; chapters: LibraryItem[] }) {
+  const tallies = useShelfPreparation(chapters).filter((tally) => voices.has(`${tally.voice.engine}:${tally.voice.voiceId}`));
+  return (
+    <>
+      {tallies.map((tally) => (
+        <li key={`${tally.voice.engine}:${tally.voice.voiceId}`} className="flex min-h-12 items-center gap-3 px-4 py-2 text-[12px]">
+          <ProgressRing value={tally.fraction} size={18} stroke={2} label={`${book.title} in ${tally.voice.name}: ${shelfLabel(tally, book)}`} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] text-fg">{book.title}</div>
+            <div className="flex min-w-0 items-center gap-1.5 text-fg2">
+              <VoiceServiceName source={voiceSource(tally.voice)} className="shrink-0">{tally.voice.name}</VoiceServiceName>
+              <span aria-hidden className="text-fg3">·</span>
+              <span className="truncate tabular-nums"><span className="text-fg">{shelfPercent(tally)}%</span> of the {partNames(book).whole} · {tally.complete} of {tally.chapters} {partNames(book).many}</span>
+            </div>
+          </div>
+        </li>
+      ))}
+    </>
+  );
+}
+
 export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading) => void }) {
   const { jobs, cancel, cancelAll, dismissFinished, sharedError, sharing } = usePreparation();
   const space = useSpaceNeeded(jobs);
@@ -455,6 +516,7 @@ export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading)
         {pending.length > 0 && <Button size="sm" onClick={cancelAll}>Cancel all</Button>}
         {finished > 0 && <Button size="sm" variant="ghost" onClick={dismissFinished}>Clear finished</Button>}
       </div>
+      <QueueBooks jobs={jobs} />
       {jobs.length > 0 && (
         <ul className="m-0 max-h-64 list-none divide-y divide-line overflow-y-auto border-t border-line p-0">
           {shown.map((job) => (
