@@ -79,18 +79,113 @@
   .legend{display:grid;grid-template-columns:64px 1fr;gap:8px 10px;align-items:center;font-size:12.5px}
   .legend svg{width:64px;height:30px;overflow:visible}
   .legend code{font:12px var(--mono);color:var(--fg)}
-  footer{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:9px 14px;border-top:1px solid var(--line);background:var(--card)}
+  footer{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:9px 14px calc(9px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--card)}
   footer label{font-size:12.5px;color:var(--muted);display:flex;gap:6px;align-items:center}
   footer select{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:5px 8px;max-width:300px}
   footer .btn{border-color:var(--line);color:var(--fg)}
   footer .btn.play{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
   #say{flex:1 1 320px;min-width:220px;font-size:13.5px;display:flex;gap:10px;align-items:baseline}
   #say .k{font:12px var(--mono);color:var(--muted);white-space:nowrap}
-  @media (max-width:900px){
-    body{overflow:auto;grid-template-rows:auto auto auto}
-    main{grid-template-columns:1fr;grid-template-rows:66vh auto}
-    aside{border-left:0;border-top:1px solid var(--line)}
+  /* A finger leaves :hover behind on whatever it last tapped. */
+  @media (hover:none){
+    .tabs button:not([aria-selected="true"]):hover{color:var(--muted);background:transparent}
+    .btn:not(.play):hover{background:transparent}
+    .btn:not(.play):active,.tabs button:active{background:var(--card2)}
+    .zoom button:hover,.links button:hover{border-color:var(--line)}
+    .code button:hover{outline:0}
   }
+
+  /* Phone-only controls, and wrappers that only matter there. */
+  .more,.grab,.sm,.btn .txt{display:none}
+  .menu,.transport{display:contents}
+
+  /* ---- narrow (a phone, or an iPad held upright): tabs, the diagram, a sheet of details over it, and the walkthrough controls ---- */
+  @media (max-width:900px){
+    :root{--peek:56px}
+    html,body{overscroll-behavior:none}
+    body{overflow:hidden;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;font-size:15px}
+    header{position:relative;z-index:5;flex-wrap:nowrap;align-items:stretch;gap:0;padding:0}
+    header h1{display:none}
+    .tabs{flex:1;min-width:0;flex-wrap:nowrap;gap:6px;padding:8px 12px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .tabs::-webkit-scrollbar{display:none}
+    .tabs button{flex:none;display:inline-flex;align-items:center;min-height:36px;padding:0 14px 0 7px;font-size:15px}
+    .tabs button .n{width:22px;height:22px;font-size:12px;margin-right:8px}
+    .tools{margin:0;padding:0 2px;border-left:1px solid var(--line)}
+    .more{display:inline-grid;place-items:center;width:44px;height:44px;padding:0;font-size:22px;line-height:1;color:var(--fg);align-self:center}
+    .menu{display:none;position:absolute;right:8px;top:calc(100% + 6px);min-width:230px;flex-direction:column;padding:6px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 40px -12px rgba(0,0,0,.55)}
+    .tools.open .menu{display:flex}
+    .menu .btn{display:flex;align-items:center;min-height:44px;padding:0 12px;border:0;border-radius:9px;font-size:16px;color:var(--fg);text-align:left}
+    .btn .txt{display:inline}
+    main{display:block;position:relative;overflow:hidden}
+    #stage{position:absolute;inset:0;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+    .crumb{display:none}
+    .zoom{right:10px;bottom:calc(var(--peek) + 10px)}
+    .zoom button{width:44px;height:44px;border-radius:12px;font-size:19px}
+    #zin,#zout{display:none}
+    aside{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;height:min(64%,520px);padding:0;overflow:hidden;border:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0;box-shadow:0 -10px 30px -14px rgba(0,0,0,.55);transform:translateY(calc(100% - var(--peek)));transition:transform .32s cubic-bezier(.2,.8,.2,1)}
+    aside.open{transform:none}
+    aside.dragging{transition:none}
+    .grab{position:relative;display:flex;flex:none;align-items:center;gap:10px;width:100%;height:var(--peek);padding:13px 16px 0;background:none;border:0;text-align:left;touch-action:none;cursor:pointer}
+    .grab::before{content:"";position:absolute;left:50%;top:6px;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--faint);opacity:.7}
+    .grab b{flex:1;min-width:0;font:600 15.5px/1.2 var(--sans);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+    .grab i{flex:none;width:9px;height:9px;margin:0 4px 4px 0;border:solid var(--muted);border-width:2px 2px 0 0;transform:translateY(3px) rotate(-45deg);transition:transform .25s}
+    aside.open .grab i{transform:translateY(-2px) rotate(135deg)}
+    #panel{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:6px 16px 22px}
+    #panel>h2{display:none}
+    #panel .kind{margin-bottom:10px}
+    .nav button{padding:10px 8px;font-size:14px;border-radius:10px}
+    .links{gap:8px}
+    .links button{padding:8px 12px;font-size:14px;border-radius:10px}
+    .code{gap:6px}
+    .code button{padding:8px 10px;font-size:13px;border-radius:8px}
+    .drill{padding:13px 12px;font-size:16px;border-radius:12px}
+    .hint{font-size:14px}
+    #say{position:absolute;left:10px;right:64px;bottom:calc(var(--peek) + 10px);z-index:2;display:block;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--card) 92%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:0 10px 24px -14px rgba(0,0,0,.6);font-size:14.5px;line-height:1.4;pointer-events:none}
+    #say .k{display:block;margin-bottom:2px;font-size:11px}
+    #say:has(.hint){display:none}
+    footer{position:relative;z-index:4;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px max(12px,env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
+    footer label{font-size:14px}
+    .pick{grid-area:1/1;min-width:0}
+    .lt{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+    footer select{flex:1;min-width:0;max-width:none;height:44px;padding:0 12px;border-radius:12px;font-size:16px}
+    .follow{grid-area:1/2;height:44px;padding:0 12px;gap:8px;border:1px solid var(--line);border-radius:12px;color:var(--fg)}
+    .follow .lg{display:none}
+    .follow .sm{display:inline}
+    .follow input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+    .transport{grid-area:2/1/3/-1;display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:8px}
+    footer .btn{height:44px;padding:0 8px;border-radius:12px;font-size:16px}
+  }
+  /* An iPad held upright has room for one row of controls, and for a sheet that doesn't span the screen. */
+  @media (min-width:600px) and (max-width:900px){
+    aside{right:0;margin-inline:auto;width:min(100% - 24px,640px)}
+    #say{left:64px;margin-inline:auto;max-width:620px}
+    footer{grid-template-columns:minmax(0,1fr) auto auto;gap:10px;padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+    .transport{grid-area:1/2;grid-template-columns:repeat(4,auto)}
+    .follow{grid-area:1/3}
+    footer .btn{padding:0 18px}
+  }
+  /* A wide touch screen (an iPad on its side) keeps the side panel, with controls a finger can hit. */
+  @media (pointer:coarse) and (min-width:901px){
+    /* The larger tabs take a row of their own, under the title and the tools. */
+    header h1{flex:1 1 auto}
+    .tools{order:1;margin-left:0}
+    .tabs{order:2;flex-basis:100%;gap:6px}
+    .tabs button,.btn{padding:9px 14px;font-size:14px}
+    .tabs button .n{width:20px;height:20px}
+    .zoom button{width:44px;height:44px;border-radius:12px;font-size:18px}
+    footer{gap:10px 12px}
+    footer label{min-height:40px;font-size:14px;gap:8px}
+    footer select{height:40px;padding:0 10px;font-size:16px}
+    footer .btn{height:40px;padding:0 16px}
+    footer input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+    .links{gap:8px}
+    .links button{padding:8px 12px;font-size:14px;border-radius:10px}
+    .code{gap:6px}
+    .code button{padding:8px 10px;font-size:13px}
+    .drill{padding:12px}
+    header h1 small a{display:inline-block;padding:6px 0}
+  }
+
 
   /* ---- diagram ---- */
   .band{stroke:none}
@@ -156,10 +251,13 @@
   <h1>ReadAloud — how it works<small>UML sequence diagrams of the arc-reader app · click any arrow for details · <a href="readaloud-bpmn.html">BPMN process view</a></small></h1>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <div class="tools">
-    <button class="btn" id="legendBtn" title="Notation used here">Legend</button>
-    <button class="btn" id="copyMmd" title="Copy this diagram as Mermaid sequenceDiagram text">Copy Mermaid</button>
-    <button class="btn solid" id="dl" title="Download this diagram as a Mermaid .mmd file">Download .mmd</button>
-    <button class="btn" id="theme" title="Toggle light / dark">◐</button>
+    <button class="btn more" id="more" aria-label="More" aria-haspopup="true" aria-expanded="false">⋯</button>
+    <div class="menu">
+      <button class="btn" id="legendBtn" title="Notation used here">Legend</button>
+      <button class="btn" id="copyMmd" title="Copy this diagram as Mermaid sequenceDiagram text">Copy Mermaid</button>
+      <button class="btn solid" id="dl" title="Download this diagram as a Mermaid .mmd file">Download .mmd</button>
+      <button class="btn" id="theme" title="Toggle light / dark">◐<span class="txt">&nbsp; Light or dark</span></button>
+    </div>
   </div>
 </header>
 <main>
@@ -184,15 +282,20 @@
       <button id="zfit" title="Fit width (0)">⤢</button>
     </div>
   </div>
-  <aside id="panel" aria-live="polite"></aside>
+  <aside id="sheet">
+    <button class="grab" id="grab" aria-controls="panel" aria-expanded="false"><b id="peek"></b><i aria-hidden="true"></i></button>
+    <div id="panel" aria-live="polite"></div>
+  </aside>
 </main>
 <footer>
-  <label>Walk through <select id="scen"></select></label>
-  <button class="btn play" id="play">▶ Play</button>
-  <button class="btn" id="back" title="Previous message (←)">‹ Back</button>
-  <button class="btn" id="step" title="Next message (→)">Step ›</button>
-  <button class="btn" id="reset">Reset</button>
-  <label title="When a step references another diagram, open it and walk through it too"><input type="checkbox" id="follow" checked> follow into referenced diagrams</label>
+  <label class="pick"><span class="lt">Walk through</span> <select id="scen"></select></label>
+  <div class="transport">
+    <button class="btn play" id="play">▶ Play</button>
+    <button class="btn" id="back" title="Previous message (←)">‹ Back</button>
+    <button class="btn" id="step" title="Next message (→)">Step ›</button>
+    <button class="btn" id="reset">Reset</button>
+  </div>
+  <label class="follow" title="When a step references another diagram, open it and walk through it too"><input type="checkbox" id="follow" checked> <span class="lg">follow into referenced diagrams</span><span class="sm">Follow refs</span></label>
   <div id="say"><span class="k" id="sayk"></span><span id="sayt" class="hint">Pick a walkthrough and press Play, or click any arrow.</span></div>
 </footer>
 
@@ -1063,6 +1166,50 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
   const KEYS = Object.keys(SEQS);
   const S = { cur: KEYS[0], k: 1, tx: 0, ty: 0, sel: null, walk: null, legend: false };
 
+  /* ---------- narrow layout ---------- */
+  // Matches the stylesheet: at this width (a phone, or an iPad held upright) the details are a sheet over the diagram.
+  const narrow = matchMedia("(max-width:900px)"), touch = matchMedia("(pointer:coarse)").matches;
+  const stage = $("#stage"), sheet = $("#sheet"), grab = $("#grab"), sayBox = $("#say");
+  const setSheet = (open) => { sheet.classList.toggle("open", open); grab.setAttribute("aria-expanded", String(open)); };
+  /** How much of the diagram's bottom the sheet (or its handle and the caption above it) covers. */
+  function cover() {
+    if (!narrow.matches) return 0;
+    if (sheet.classList.contains("open")) return sheet.offsetHeight;
+    return grab.offsetHeight + (sayBox.offsetHeight ? sayBox.offsetHeight + 10 : 0);
+  }
+  // The sheet's handle shows the title of whatever the panel describes.
+  new MutationObserver(() => { $("#peek").textContent = panel.querySelector("h2")?.textContent || ""; }).observe(panel, { childList: true });
+  let pull = null;
+  grab.addEventListener("pointerdown", (e) => { pull = { y: e.clientY, open: sheet.classList.contains("open"), dy: 0 }; grab.setPointerCapture(e.pointerId); });
+  grab.addEventListener("pointermove", (e) => {
+    if (!pull) return;
+    pull.dy = e.clientY - pull.y;
+    if (Math.abs(pull.dy) < 6) return;
+    const shut = sheet.offsetHeight - grab.offsetHeight;
+    sheet.classList.add("dragging");
+    sheet.style.transform = `translateY(${Math.max(0, Math.min(shut, (pull.open ? 0 : shut) + pull.dy))}px)`;
+  });
+  const drop = () => {
+    if (!pull) return;
+    const { dy, open } = pull;
+    pull = null;
+    sheet.classList.remove("dragging");
+    sheet.style.transform = "";
+    // A tap toggles; a drag goes the way it was pulled.
+    setSheet(Math.abs(dy) < 6 ? !open : Math.abs(dy) > 30 ? dy < 0 : open);
+  };
+  grab.addEventListener("pointerup", drop);
+  grab.addEventListener("pointercancel", drop);
+  grab.addEventListener("click", (e) => { if (e.detail === 0) setSheet(!sheet.classList.contains("open")); }); // keyboard
+  // The narration is a caption over the diagram on a narrow screen, and part of the footer otherwise.
+  const placeSay = () => (narrow.matches ? stage : $("footer")).appendChild(sayBox);
+  placeSay();
+  narrow.addEventListener("change", () => { placeSay(); setSheet(false); view(); });
+  const tools = $(".tools"), more = $("#more");
+  const setMenu = (open) => { tools.classList.toggle("open", open); more.setAttribute("aria-expanded", String(open)); };
+  more.onclick = (e) => { e.stopPropagation(); setMenu(!tools.classList.contains("open")); };
+  document.addEventListener("click", () => setMenu(false));
+
   /* ---------- theme ---------- */
   const THEME_KEY = "readaloud-bpmn-theme";
   const setTheme = (t) => { document.documentElement.dataset.theme = t; try { localStorage.setItem(THEME_KEY, t); } catch {} };
@@ -1072,6 +1219,7 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
   /* ---------- tabs ---------- */
   function renderTabs() {
     $("#tabs").innerHTML = KEYS.map((k, i) => `<button role="tab" data-tab="${k}" aria-selected="${k === S.cur}"><span class="n">${i + 1}</span>${esc(SEQS[k].title)}</button>`).join("");
+    $('#tabs [aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "center" });
   }
   $("#tabs").onclick = (e) => {
     const b = e.target.closest("[data-tab]");
@@ -1159,10 +1307,9 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
   }
 
   /* ---------- pan & zoom ---------- */
-  const stage = $("#stage");
   function clampPan() {
-    // Keep at least some of the diagram on screen.
-    const L = layout(S.cur), W = stage.clientWidth, H = stage.clientHeight;
+    // Keep at least some of the diagram on screen. On a narrow screen its last rows can rise clear of the open sheet.
+    const L = layout(S.cur), W = stage.clientWidth, H = stage.clientHeight - (narrow.matches ? sheet.offsetHeight : 0);
     S.tx = Math.max(120 - L.x1 * S.k, Math.min(W - 120 - L.x0 * S.k, S.tx));
     S.ty = Math.max(Math.min(12, H - L.height * S.k - 40), Math.min(40, S.ty));
   }
@@ -1174,13 +1321,28 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
   }
   function fit() {
     const L = layout(S.cur), W = stage.clientWidth;
-    S.k = Math.max(0.35, Math.min(1.1, (W - 40) / (L.x1 - L.x0)));
+    // A narrow screen shows every participant only as a thumbnail, so nothing holds the zoom up there.
+    S.k = Math.max(narrow.matches ? 0.1 : 0.35, Math.min(1.1, (W - (narrow.matches ? 16 : 40)) / (L.x1 - L.x0)));
     S.tx = (W - (L.x1 - L.x0) * S.k) / 2 - L.x0 * S.k;
     S.ty = 12;
     apply();
   }
+  /** Where a narrow screen opens a diagram: its first participants, at a size that can be read. */
+  function home() {
+    S.k = 0.7;
+    S.tx = 10 - layout(S.cur).x0 * S.k;
+    S.ty = 12;
+    apply();
+  }
+  /** The view a diagram opens with. */
+  const view = () => (narrow.matches ? home() : fit());
+  /** Double-tap: out to every participant, or back in to a readable size where the finger is. */
+  function smartZoom(cx, cy) {
+    if (S.k >= 0.5) return fit();
+    zoomAt(0.8 / S.k, cx, cy);
+  }
   function zoomAt(f, cx, cy) {
-    const k = Math.max(0.25, Math.min(2.5, S.k * f));
+    const k = Math.max(0.1, Math.min(2.5, S.k * f));
     S.tx = cx - (cx - S.tx) * (k / S.k);
     S.ty = cy - (cy - S.ty) * (k / S.k);
     S.k = k;
@@ -1200,13 +1362,29 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
   $("#zin").onclick = () => zoomAt(1.2, stage.clientWidth / 2, stage.clientHeight / 2);
   $("#zout").onclick = () => zoomAt(1 / 1.2, stage.clientWidth / 2, stage.clientHeight / 2);
   $("#zfit").onclick = fit;
-  let drag = null;
+  // One finger (or the mouse) drags; two fingers pinch to zoom and pan together.
+  let drag = null, pinch = null, lastTap = null;
+  const fingers = new Map();
+  const spread = () => { const [a, b] = [...fingers.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
   svg.addEventListener("pointerdown", (e) => {
-    drag = { x: e.clientX, y: e.clientY, tx: S.tx, ty: S.ty, moved: false };
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     svg.setPointerCapture(e.pointerId);
+    if (fingers.size === 2) { pinch = spread(); svg.classList.remove("drag"); return; }
+    if (fingers.size > 2) return;
+    drag = { x: e.clientX, y: e.clientY, tx: S.tx, ty: S.ty, moved: false, id: e.pointerId };
   });
   svg.addEventListener("pointermove", (e) => {
-    if (!drag) return;
+    if (fingers.has(e.pointerId)) fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch) {
+      if (fingers.size < 2) return;
+      const now = spread(), r = svg.getBoundingClientRect();
+      S.tx += now.x - pinch.x;
+      S.ty += now.y - pinch.y;
+      zoomAt(now.d / pinch.d, now.x - r.left, now.y - r.top);
+      pinch = now;
+      return;
+    }
+    if (!drag || e.pointerId !== drag.id) return;
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     drag.moved = true;
@@ -1215,14 +1393,35 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
     S.ty = drag.ty + dy;
     apply();
   });
+  svg.addEventListener("pointercancel", (e) => { fingers.delete(e.pointerId); pinch = null; drag = null; svg.classList.remove("drag"); });
   svg.addEventListener("pointerup", (e) => {
+    fingers.delete(e.pointerId);
+    if (pinch) {
+      // The finger still down carries on as a drag, so lifting it doesn't count as a tap.
+      pinch = null;
+      const [rest] = [...fingers.entries()];
+      drag = rest ? { x: rest[1].x, y: rest[1].y, tx: S.tx, ty: S.ty, moved: true, id: rest[0] } : null;
+      return;
+    }
     const d = drag;
     drag = null;
     svg.classList.remove("drag");
-    if (d && !d.moved) {
-      const t = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-k]");
-      if (t) select(t.dataset.k, t.dataset.id);
-      else { S.sel = null; markSel(); showHome(); }
+    if (!d || d.moved) return;
+    const t = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-k]");
+    if (e.pointerType === "touch") {
+      const again = lastTap && e.timeStamp - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 28;
+      lastTap = again ? null : { t: e.timeStamp, x: e.clientX, y: e.clientY };
+      if (again && t?.dataset.k === "r") { setSheet(false); stopWalk(true); open(find(S.cur, t.dataset.id).ref); return; }
+      if (again && !t) { const r = svg.getBoundingClientRect(); smartZoom(e.clientX - r.left, e.clientY - r.top); return; }
+    }
+    if (!t) { S.sel = null; markSel(); showHome(); setSheet(false); return; }
+    select(t.dataset.k, t.dataset.id);
+    // The sheet comes up with the details; keep what was tapped in the part of the diagram it leaves.
+    if (narrow.matches) {
+      setSheet(true);
+      const it = t.dataset.k === "p" ? null : find(S.cur, t.dataset.id);
+      if (it?.f) reveal(it.y - 30, (it.y2 || it.y) + 12);
+      else if (it) reveal(it.y0 - 10, Math.min(it.y1, it.y0 + 120));
     }
   });
   svg.addEventListener("dblclick", (e) => {
@@ -1231,10 +1430,12 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
   });
   /** Bring a y range (content coordinates) into view below the sticky participant header. */
   function reveal(y0, y1, x0, x1) {
-    const H = stage.clientHeight, W = stage.clientWidth;
-    const top = (Math.max(S.ty, 0) + HEAD_H * S.k + 10 - S.ty) / S.k, bottom = (H - 50 - S.ty) / S.k;
+    // Where the clear part of the stage ends: at the sheet or the caption on a narrow screen, above the breadcrumb otherwise.
+    const W = stage.clientWidth, H = stage.clientHeight - (narrow.matches ? cover() + 10 : 50);
+    const head = HEAD_H * S.k + 10;
+    const top = (Math.max(S.ty, 0) + head - S.ty) / S.k, bottom = (H - S.ty) / S.k;
     const to = { tx: S.tx, ty: S.ty };
-    if (y0 < top || y1 > bottom) to.ty = Math.min(12, H * 0.45 - ((y0 + y1) / 2) * S.k);
+    if (y0 < top || y1 > bottom) to.ty = Math.min(12, (narrow.matches ? head + (H - head) * 0.45 : stage.clientHeight * 0.45) - ((y0 + y1) / 2) * S.k);
     if (x0 !== undefined && (x0 * S.k + S.tx < 10 || x1 * S.k + S.tx > W - 60)) to.tx = W / 2 - ((x0 + x1) / 2) * S.k;
     if (to.tx === S.tx && to.ty === S.ty) return;
     const from = { tx: S.tx, ty: S.ty }, t0 = performance.now();
@@ -1254,7 +1455,7 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
     S.sel = null;
     history.replaceState(null, "", "#" + id);
     render();
-    fit();
+    view();
     if (!keepPanel) showHome();
   }
   function markSel() {
@@ -1291,7 +1492,9 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
       <div class="links">${layout(S.cur).ps.map((p) => pLink(p.id)).join("")}</div>
       <h3>Reading it</h3>
       <p class="hint">Time runs downward. Each column is a participant; arrows are calls between them, and the bars show who is busy. Blue arrows cross the network. Boxed regions are fragments: alternatives, options, loops and parallel work.</p>
-      <p class="hint">Click an arrow, box or participant for details and code paths. <kbd>→</kbd> <kbd>←</kbd> step, <kbd>Space</kbd> play/pause, <kbd>Esc</kbd> stop, scroll to move, <kbd>Ctrl</kbd>+scroll or <kbd>+</kbd> <kbd>−</kbd> to zoom, <kbd>0</kbd> to fit.</p>`;
+      <p class="hint">${touch
+        ? "Tap an arrow, box or participant for details and code paths. Drag to move and pinch to zoom; double-tap an empty spot to see every participant, and again to zoom back in."
+        : "Click an arrow, box or participant for details and code paths. <kbd>→</kbd> <kbd>←</kbd> step, <kbd>Space</kbd> play/pause, <kbd>Esc</kbd> stop, scroll to move, <kbd>Ctrl</kbd>+scroll or <kbd>+</kbd> <kbd>−</kbd> to zoom, <kbd>0</kbd> to fit."}</p>`;
   }
   function showPart(id) {
     const p = P[id], ms = messages(S.cur);
@@ -1352,7 +1555,7 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
         <svg viewBox="0 0 64 30"><line class="life" x1="20" y1="0" x2="20" y2="30"/><path class="m-line" d="M22,6 H48 V18 H27" style="marker-end:url(#mk-call)"/></svg><span><b>Self call</b> — work done inside one participant.</span>
         <svg viewBox="0 0 64 30"><line class="life" x1="32" y1="0" x2="32" y2="30"/><rect class="act" x="27" y="4" width="10" height="22"/></svg><span><b>Activation bar</b> — busy handling a call.</span>
         <svg viewBox="0 0 64 30"><rect class="fr" x="2" y="2" width="60" height="26" rx="3"/><path class="fr-tag" d="M2,2 h28 v9 l-6,6 H2 z"/><text class="fr-op" x="6" y="13" style="font-size:9px">alt</text></svg><span><b>Combined fragment.</b> <code>alt</code> alternatives · <code>opt</code> optional · <code>loop</code> repeats · <code>par</code> in parallel · <code>break</code> ends the enclosing fragment. Guards are in [brackets]; dashed lines separate operands.</span>
-        <svg viewBox="0 0 64 30"><rect class="ref-box" x="2" y="2" width="60" height="26" rx="3"/><path class="fr-tag" d="M2,2 h24 v8 l-5,5 H2 z"/><text class="fr-op" x="5" y="12" style="font-size:9px">ref</text></svg><span><b>Interaction use (ref)</b> — the steps are drawn in another diagram; double-click to open it.</span>
+        <svg viewBox="0 0 64 30"><rect class="ref-box" x="2" y="2" width="60" height="26" rx="3"/><path class="fr-tag" d="M2,2 h24 v8 l-5,5 H2 z"/><text class="fr-op" x="5" y="12" style="font-size:9px">ref</text></svg><span><b>Interaction use (ref)</b> — the steps are drawn in another diagram; ${touch ? "double-tap" : "double-click"} to open it.</span>
       </div>`;
   }
   panel.addEventListener("click", (e) => {
@@ -1365,6 +1568,7 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
       select(k, id, true);
       if (k === "f") { const F = find(S.cur, id); reveal(F.y0 - 10, Math.min(F.y1, F.y0 + 200), F.x0, F.x1); }
     } else if (t.dataset.open) {
+      setSheet(false);
       stopWalk(true);
       open(t.dataset.open);
     } else if (t.dataset.scen) {
@@ -1372,7 +1576,7 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
       startWalk(true);
     }
   });
-  $("#legendBtn").onclick = () => (S.legend ? (S.legend = false, S.sel ? select(S.sel.k, S.sel.id) : showHome()) : showLegend());
+  $("#legendBtn").onclick = () => { S.legend ? (S.legend = false, S.sel ? select(S.sel.k, S.sel.id) : showHome()) : showLegend(); setSheet(S.legend); };
 
   /* ---------- export ---------- */
   $("#dl").onclick = () => {
@@ -1395,6 +1599,7 @@ if (typeof module !== "undefined") module.exports = { P, ORDER, GROUPS, SEQS, OP
   }
   function startWalk(autoplay) {
     stopWalk(false);
+    setSheet(false);
     const base = S.cur, sc = $("#scen").value;
     S.walk = { base, sc, steps: buildSteps(base, sc, $("#follow").checked), i: -1, timer: null };
     applyWalkClasses();

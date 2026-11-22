@@ -145,7 +145,7 @@ export function PreparedSummary({ it, defaultVoice, onDetails, className }: { it
   return (
     <div className={cn("flex flex-wrap gap-1", className)} role="group" aria-label="Audio made">
       {made.map(({ voice, reading, fraction, active, stage, detail, label }) => (
-        <button key={voice.voiceId} type="button" onClick={() => onDetails(reading)} aria-haspopup="dialog" title={label} className={cn(CHIP, "transition-colors duration-fast hover:border-fg3 hover:text-fg", active ? BUSY : "border-line")}>
+        <button key={voice.voiceId} type="button" onClick={() => onDetails(reading)} aria-haspopup="dialog" title={label} className={cn(CHIP, "hit-44 transition-colors duration-fast hover:border-fg3 hover:text-fg", active ? BUSY : "border-line")}>
           {/* The words beside it say what the ring shows. */}
           <span aria-hidden className="shrink-0"><ProgressRing value={fraction} size={16} stroke={1.75} /></span>
           <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>

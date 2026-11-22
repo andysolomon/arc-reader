@@ -21,11 +21,11 @@ import { SUMMARY_MODELS } from "../lib/summary";
 import { useGemini, useJev, useLlm } from "../state/llm";
 import { CATEGORIES } from "../lib/category";
 import { LlmKeyField } from "../components/LlmKeyField";
-import { DOC_LINKS, docUrl } from "../lib/docs";
+import { DOC_LINKS, DOCS_SECTION, docUrl } from "../lib/docs";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-3.5">
+    <div id={id} className="flex flex-col gap-3.5">
       <SectionLabel>{title}</SectionLabel>
       {children}
     </div>
@@ -71,6 +71,22 @@ export function SettingsPage() {
   const jevAvailable = useJev((st) => st.config !== null);
   const geminiAvailable = useGemini((st) => st.config !== null);
   useEffect(() => { void useLlm.getState().load(); void useJev.getState().load(); void useGemini.getState().load(); }, []);
+  // The docs link back to /settings#how-it-works: return the reader to the list they left.
+  // Sections above it grow as they load, so keep it in view until they settle or the reader scrolls.
+  useEffect(() => {
+    if (window.location.hash !== `#${DOCS_SECTION}`) return;
+    const target = document.getElementById(DOCS_SECTION);
+    const content = target?.parentElement;
+    if (!target || !content) return;
+    const show = () => target.scrollIntoView({ block: "start" });
+    const sizes = new ResizeObserver(show);
+    const stop = () => sizes.disconnect();
+    sizes.observe(content);
+    const settled = setTimeout(stop, 3000);
+    const gestures = ["pointerdown", "wheel", "keydown"] as const;
+    for (const g of gestures) window.addEventListener(g, stop, { once: true, passive: true });
+    return () => { stop(); clearTimeout(settled); for (const g of gestures) window.removeEventListener(g, stop); };
+  }, []);
 
   const copyKey = async () => {
     try {
@@ -304,11 +320,11 @@ export function SettingsPage() {
 
         {/* The server serves the docs (vite.docs.ts); the bundled iOS app has none. */}
         {!bundled && (
-          <Section title="How it works">
+          <Section title="How it works" id={DOCS_SECTION}>
             <nav aria-label="How it works" className="flex flex-col rounded-panel border border-line bg-bg2">
               {DOC_LINKS.map((d, i) => (
-                <a key={d.page} href={docUrl(d.page)} className={`flex items-center justify-between gap-4 px-4 py-3.5 text-fg no-underline hover:bg-bg3 ${i < DOC_LINKS.length - 1 ? "border-b border-line" : ""}`}>
-                  <div>
+                <a key={d.page} href={docUrl(d.page)} className={`flex items-center justify-between gap-4 px-4 py-3.5 text-fg no-underline hover:bg-bg3 active:bg-bg3 ${i === 0 ? "rounded-t-panel" : ""} ${i < DOC_LINKS.length - 1 ? "border-b border-line" : "rounded-b-panel"}`}>
+                  <div className="min-w-0">
                     <div>{d.title}</div>
                     <div className="text-[13px] text-fg2">{d.hint}</div>
                   </div>

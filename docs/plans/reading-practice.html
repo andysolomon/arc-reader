@@ -24,6 +24,10 @@
   .diagram-container { width: 100%; overflow-x: auto; }
   svg { width: 100%; display: block; }
   @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0 !important; } }
+  @media (max-width: 700px) {
+    body { padding: 1.5rem max(1.125rem, env(safe-area-inset-right)) calc(3rem + env(safe-area-inset-bottom)) max(1.125rem, env(safe-area-inset-left)); }
+    section { margin-top: 2.25rem; }
+  }
   footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
 </style>
 </head>

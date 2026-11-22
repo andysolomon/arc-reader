@@ -71,17 +71,111 @@
   .hint kbd{font:11.5px var(--mono);background:var(--card2);border:1px solid var(--line);border-radius:4px;padding:0 4px}
   .legend{display:grid;grid-template-columns:44px 1fr;gap:6px 10px;align-items:center;font-size:12.5px}
   .legend svg{width:44px;height:30px;overflow:visible}
-  footer{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:9px 14px;border-top:1px solid var(--line);background:var(--card)}
+  footer{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:9px 14px calc(9px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--card)}
   footer label{font-size:12.5px;color:var(--muted);display:flex;gap:6px;align-items:center}
   footer select{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:5px 8px;max-width:300px}
   footer .btn{border-color:var(--line);color:var(--fg)}
   footer .btn.play{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
   #say{flex:1 1 320px;min-width:220px;font-size:13.5px;display:flex;gap:10px;align-items:baseline}
   #say .k{font:12px var(--mono);color:var(--muted);white-space:nowrap}
+  /* A finger leaves :hover behind on whatever it last tapped. */
+  @media (hover:none){
+    .tabs button:not([aria-selected="true"]):hover{color:var(--muted);background:transparent}
+    .btn:not(.play):hover{background:transparent}
+    .btn:not(.play):active,.tabs button:active{background:var(--card2)}
+    .zoom button:hover,.links button:hover{border-color:var(--line)}
+    .code button:hover{outline:0}
+  }
+
+  /* Phone-only controls, and wrappers that only matter there. */
+  .more,.grab,.sm,.btn .txt{display:none}
+  .menu,.transport{display:contents}
+
+  /* ---- narrow (a phone, or an iPad held upright): tabs, the diagram, a sheet of details over it, and the walkthrough controls ---- */
   @media (max-width:900px){
-    body{overflow:auto;grid-template-rows:auto auto auto}
-    main{grid-template-columns:1fr;grid-template-rows:62vh auto}
-    aside{border-left:0;border-top:1px solid var(--line)}
+    :root{--peek:56px}
+    html,body{overscroll-behavior:none}
+    body{overflow:hidden;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;font-size:15px}
+    header{position:relative;z-index:5;flex-wrap:nowrap;align-items:stretch;gap:0;padding:0}
+    header h1{display:none}
+    .tabs{flex:1;min-width:0;flex-wrap:nowrap;gap:6px;padding:8px 12px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .tabs::-webkit-scrollbar{display:none}
+    .tabs button{flex:none;display:inline-flex;align-items:center;min-height:36px;padding:0 14px 0 7px;font-size:15px}
+    .tabs button .n{width:22px;height:22px;font-size:12px;margin-right:8px}
+    .tools{margin:0;padding:0 2px;border-left:1px solid var(--line)}
+    .more{display:inline-grid;place-items:center;width:44px;height:44px;padding:0;font-size:22px;line-height:1;color:var(--fg);align-self:center}
+    .menu{display:none;position:absolute;right:8px;top:calc(100% + 6px);min-width:230px;flex-direction:column;padding:6px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 40px -12px rgba(0,0,0,.55)}
+    .tools.open .menu{display:flex}
+    .menu .btn{display:flex;align-items:center;min-height:44px;padding:0 12px;border:0;border-radius:9px;font-size:16px;color:var(--fg);text-align:left}
+    .btn .txt{display:inline}
+    main{display:block;position:relative;overflow:hidden}
+    #stage{position:absolute;inset:0;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+    .crumb{left:10px;top:10px;max-width:calc(100% - 74px);padding:6px 12px;font-size:13px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+    .crumb:not(:has(button)){display:none}
+    .zoom{right:10px;top:10px;bottom:auto}
+    .zoom button{width:44px;height:44px;border-radius:12px;font-size:19px}
+    #zin,#zout{display:none}
+    aside{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;height:min(64%,520px);padding:0;overflow:hidden;border:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0;box-shadow:0 -10px 30px -14px rgba(0,0,0,.55);transform:translateY(calc(100% - var(--peek)));transition:transform .32s cubic-bezier(.2,.8,.2,1)}
+    aside.open{transform:none}
+    aside.dragging{transition:none}
+    .grab{position:relative;display:flex;flex:none;align-items:center;gap:10px;width:100%;height:var(--peek);padding:13px 16px 0;background:none;border:0;text-align:left;touch-action:none;cursor:pointer}
+    .grab::before{content:"";position:absolute;left:50%;top:6px;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--faint);opacity:.7}
+    .grab b{flex:1;min-width:0;font:600 15.5px/1.2 var(--sans);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+    .grab i{flex:none;width:9px;height:9px;margin:0 4px 4px 0;border:solid var(--muted);border-width:2px 2px 0 0;transform:translateY(3px) rotate(-45deg);transition:transform .25s}
+    aside.open .grab i{transform:translateY(-2px) rotate(135deg)}
+    #panel{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:6px 16px 22px}
+    #panel>h2{display:none}
+    #panel .kind{margin-bottom:10px}
+    .links{gap:8px}
+    .links button{padding:8px 12px;font-size:14px;border-radius:10px}
+    .code{gap:6px}
+    .code button{padding:8px 10px;font-size:13px;border-radius:8px}
+    .drill{padding:13px 12px;font-size:16px;border-radius:12px}
+    .hint{font-size:14px}
+    #say{position:absolute;left:10px;right:10px;bottom:calc(var(--peek) + 10px);z-index:2;display:block;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--card) 92%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:0 10px 24px -14px rgba(0,0,0,.6);font-size:14.5px;line-height:1.4;pointer-events:none}
+    #say .k{display:block;margin-bottom:2px;font-size:11px}
+    #say:has(.hint){display:none}
+    footer{position:relative;z-index:4;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px max(12px,env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
+    footer label{font-size:14px}
+    .pick{grid-area:1/1;min-width:0}
+    .lt{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+    footer select{flex:1;min-width:0;max-width:none;height:44px;padding:0 12px;border-radius:12px;font-size:16px}
+    .follow{grid-area:1/2;height:44px;padding:0 12px;gap:8px;border:1px solid var(--line);border-radius:12px;color:var(--fg)}
+    .follow .lg{display:none}
+    .follow .sm{display:inline}
+    .follow input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+    .transport{grid-area:2/1/3/-1;display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:8px}
+    footer .btn{height:44px;padding:0 8px;border-radius:12px;font-size:16px}
+  }
+  /* An iPad held upright has room for one row of controls, and for a sheet that doesn't span the screen. */
+  @media (min-width:600px) and (max-width:900px){
+    aside{right:0;margin-inline:auto;width:min(100% - 24px,640px)}
+    #say{margin-inline:auto;max-width:620px}
+    footer{grid-template-columns:minmax(0,1fr) auto auto;gap:10px;padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+    .transport{grid-area:1/2;grid-template-columns:repeat(3,auto)}
+    .follow{grid-area:1/3}
+    footer .btn{padding:0 18px}
+  }
+  /* A wide touch screen (an iPad on its side) keeps the side panel, with controls a finger can hit. */
+  @media (pointer:coarse) and (min-width:901px){
+    /* The larger tabs take a row of their own, under the title and the tools. */
+    header h1{flex:1 1 auto}
+    .tools{order:1;margin-left:0}
+    .tabs{order:2;flex-basis:100%;gap:6px}
+    .tabs button,.btn{padding:9px 14px;font-size:14px}
+    .tabs button .n{width:20px;height:20px}
+    .zoom button{width:44px;height:44px;border-radius:12px;font-size:18px}
+    footer{gap:10px 12px}
+    footer label{min-height:40px;font-size:14px;gap:8px}
+    footer select{height:40px;padding:0 10px;font-size:16px}
+    footer .btn{height:40px;padding:0 16px}
+    footer input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+    .links{gap:8px}
+    .links button{padding:8px 12px;font-size:14px;border-radius:10px}
+    .code{gap:6px}
+    .code button{padding:8px 10px;font-size:13px}
+    .drill{padding:12px}
+    header h1 small a{display:inline-block;padding:6px 0}
   }
 
   /* ---- diagram ---- */
@@ -138,9 +232,12 @@
   <h1>ReadAloud — how it works<small>BPMN 2.0 process model of the arc-reader app · click anything for details · <a href="readaloud-sequence.html" style="color:var(--accent)">sequence diagrams</a></small></h1>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <div class="tools">
-    <button class="btn" id="legendBtn" title="BPMN notation used here">Legend</button>
-    <button class="btn solid" id="dl" title="Download this diagram as BPMN 2.0 XML (opens in Camunda Modeler or bpmn.io)">Download .bpmn</button>
-    <button class="btn" id="theme" title="Toggle light / dark">◐</button>
+    <button class="btn more" id="more" aria-label="More" aria-haspopup="true" aria-expanded="false">⋯</button>
+    <div class="menu">
+      <button class="btn" id="legendBtn" title="BPMN notation used here">Legend</button>
+      <button class="btn solid" id="dl" title="Download this diagram as BPMN 2.0 XML (opens in Camunda Modeler or bpmn.io)">Download .bpmn</button>
+      <button class="btn" id="theme" title="Toggle light / dark">◐<span class="txt">&nbsp; Light or dark</span></button>
+    </div>
   </div>
 </header>
 <main>
@@ -162,14 +259,19 @@
       <button id="zfit" title="Fit to screen (0)">⤢</button>
     </div>
   </div>
-  <aside id="panel" aria-live="polite"></aside>
+  <aside id="sheet">
+    <button class="grab" id="grab" aria-controls="panel" aria-expanded="false"><b id="peek"></b><i aria-hidden="true"></i></button>
+    <div id="panel" aria-live="polite"></div>
+  </aside>
 </main>
 <footer>
-  <label>Walk through <select id="scen"></select></label>
-  <button class="btn play" id="play">▶ Play</button>
-  <button class="btn" id="step" title="One step (→)">Step ›</button>
-  <button class="btn" id="reset">Reset</button>
-  <label title="When a step calls another process, open it and walk through it too"><input type="checkbox" id="follow" checked> follow into sub-processes</label>
+  <label class="pick"><span class="lt">Walk through</span> <select id="scen"></select></label>
+  <div class="transport">
+    <button class="btn play" id="play">▶ Play</button>
+    <button class="btn" id="step" title="One step (→)">Step ›</button>
+    <button class="btn" id="reset">Reset</button>
+  </div>
+  <label class="follow" title="When a step calls another process, open it and walk through it too"><input type="checkbox" id="follow" checked> <span class="lg">follow into sub-processes</span><span class="sm">Follow calls</span></label>
   <div id="say"><span class="k" id="sayk"></span><span id="sayt" class="hint">Pick a walkthrough and press Play, or click any shape.</span></div>
 </footer>
 
@@ -1239,6 +1341,52 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
   const EVK = { message: "message", timer: "timer", error: "error", conditional: "conditional" };
   const S = { cur: null, G: null, sel: null, views: {}, visit: {}, run: null };
 
+  /* ---------- narrow layout ---------- */
+  // Matches the stylesheet: at this width (a phone, or an iPad held upright) the details are a sheet over the diagram.
+  const narrow = matchMedia("(max-width:900px)"), touch = matchMedia("(pointer:coarse)").matches;
+  const stage = document.getElementById("stage"), sheet = document.getElementById("sheet"), grab = document.getElementById("grab");
+  const sayBox = document.getElementById("say");
+  const TOP = 56; // the breadcrumb and the fit button sit over the top of the diagram
+  const setSheet = (open) => { sheet.classList.toggle("open", open); grab.setAttribute("aria-expanded", String(open)); };
+  /** How much of the diagram's bottom the sheet (or its handle and the caption above it) covers. */
+  function cover() {
+    if (!narrow.matches) return 0;
+    if (sheet.classList.contains("open")) return sheet.offsetHeight;
+    return grab.offsetHeight + (sayBox.offsetHeight ? sayBox.offsetHeight + 10 : 0);
+  }
+  // The sheet's handle shows the title of whatever the panel describes.
+  new MutationObserver(() => { document.getElementById("peek").textContent = panel.querySelector("h2")?.textContent || ""; }).observe(panel, { childList: true });
+  let pull = null;
+  grab.addEventListener("pointerdown", (e) => { pull = { y: e.clientY, open: sheet.classList.contains("open"), dy: 0 }; grab.setPointerCapture(e.pointerId); });
+  grab.addEventListener("pointermove", (e) => {
+    if (!pull) return;
+    pull.dy = e.clientY - pull.y;
+    if (Math.abs(pull.dy) < 6) return;
+    const shut = sheet.offsetHeight - grab.offsetHeight;
+    sheet.classList.add("dragging");
+    sheet.style.transform = `translateY(${Math.max(0, Math.min(shut, (pull.open ? 0 : shut) + pull.dy))}px)`;
+  });
+  const drop = () => {
+    if (!pull) return;
+    const { dy, open } = pull;
+    pull = null;
+    sheet.classList.remove("dragging");
+    sheet.style.transform = "";
+    // A tap toggles; a drag goes the way it was pulled.
+    setSheet(Math.abs(dy) < 6 ? !open : Math.abs(dy) > 30 ? dy < 0 : open);
+  };
+  grab.addEventListener("pointerup", drop);
+  grab.addEventListener("pointercancel", drop);
+  grab.addEventListener("click", (e) => { if (e.detail === 0) setSheet(!sheet.classList.contains("open")); }); // keyboard
+  // The narration is a caption over the diagram on a narrow screen, and part of the footer otherwise.
+  const placeSay = () => (narrow.matches ? stage : document.querySelector("footer")).appendChild(sayBox);
+  placeSay();
+  narrow.addEventListener("change", () => { placeSay(); setSheet(false); delete S.views[S.cur]; render(S.cur); });
+  const tools = document.querySelector(".tools"), more = document.getElementById("more");
+  const setMenu = (open) => { tools.classList.toggle("open", open); more.setAttribute("aria-expanded", String(open)); };
+  more.onclick = (e) => { e.stopPropagation(); setMenu(!tools.classList.contains("open")); };
+  document.addEventListener("click", () => setMenu(false));
+
   /* ---------- svg helpers ---------- */
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   function wrap(text, maxW, fs) {
@@ -1407,13 +1555,14 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
     html += `<g id="layer-token"></g>`;
     root.innerHTML = html;
     document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.id === id)));
+    document.querySelector('#tabs [aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "center" });
     const chain = [];
     for (let d = D; d; d = d.parent ? DIAGRAMS[d.parent] : null) chain.unshift(d);
     crumb.innerHTML = chain.map((d, i) => i === chain.length - 1 ? `<b>${esc(d.title)}</b>` : `<button data-go="${ORDER.find((k) => DIAGRAMS[k] === d)}">${esc(d.title)}</button> ›`).join(" ");
     S.sel = null;
     fillScenarios();
     applyVisit();
-    if (!S.views[id]) fit(false); else applyView();
+    if (S.views[id]) applyView(); else if (narrow.matches) home(); else fit(false);
     showOverview();
   }
 
@@ -1433,9 +1582,23 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
   function applyView() { const v = view(); root.setAttribute("transform", `translate(${v.x},${v.y}) scale(${v.k})`); }
   function fit(animate = true) {
     const b = bounds(S.G), r = svg.getBoundingClientRect(), pad = 30;
-    const k = Math.max(0.15, Math.min(1.4, Math.min((r.width - pad * 2) / b.w, (r.height - pad * 2 - 30) / b.h)));
-    const target = { k, x: (r.width - b.w * k) / 2 - b.x * k, y: (r.height - b.h * k) / 2 - b.y * k + 15 };
+    let target;
+    if (narrow.matches) {
+      // The whole process, in the part of the stage that nothing covers.
+      const h = r.height - grab.offsetHeight - TOP - 10;
+      const k = Math.min(1.4, (r.width - 20) / b.w, h / b.h);
+      target = { k, x: (r.width - b.w * k) / 2 - b.x * k, y: TOP + (h - b.h * k) / 2 - b.y * k };
+    } else {
+      const k = Math.max(0.15, Math.min(1.4, Math.min((r.width - pad * 2) / b.w, (r.height - pad * 2 - 30) / b.h)));
+      target = { k, x: (r.width - b.w * k) / 2 - b.x * k, y: (r.height - b.h * k) / 2 - b.y * k + 15 };
+    }
     if (animate && S.views[S.cur]) tween(target); else { S.views[S.cur] = target; applyView(); }
+  }
+  /** Where a narrow screen opens a process: its top-left corner, where it starts, at a size that can be read. A whole process fits only as a thumbnail. */
+  function home() {
+    const b = bounds(S.G), k = 0.75;
+    S.views[S.cur] = { k, x: 12 - b.x * k, y: TOP + 4 - b.y * k };
+    applyView();
   }
   let tw = 0;
   function tween(to, ms = 380) {
@@ -1452,19 +1615,28 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
     });
   }
   function zoomAt(f, mx, my) {
-    const v = view(), k = Math.max(0.15, Math.min(3, v.k * f)), r = k / v.k;
+    const v = view(), k = Math.max(0.1, Math.min(3, v.k * f)), r = k / v.k;
     S.views[S.cur] = { k, x: mx - (mx - v.x) * r, y: my - (my - v.y) * r };
     applyView();
   }
   /** Pan (and zoom in to at least minK) only when the point is near the edge or off screen. */
   function focusOn(pt, minK = 0.8) {
-    const r = svg.getBoundingClientRect(), v = view();
+    // On a narrow screen, the part of the diagram that nothing covers.
+    const r = svg.getBoundingClientRect(), v = view(), top = narrow.matches ? TOP : 0, h = r.height - top - cover();
     const k = Math.max(v.k, minK);
-    const px = pt.cx * v.k + v.x, py = pt.cy * v.k + v.y;
-    const mx = r.width * 0.16, my = r.height * 0.18;
-    if (k === v.k && px > mx && px < r.width - mx && py > my && py < r.height - my) return Promise.resolve();
-    return tween({ k, x: r.width / 2 - pt.cx * k, y: r.height / 2 - pt.cy * k });
+    const px = pt.cx * v.k + v.x, py = pt.cy * v.k + v.y - top;
+    const mx = r.width * 0.16, my = h * 0.18;
+    if (k === v.k && px > mx && px < r.width - mx && py > my && py < h - my) return Promise.resolve();
+    return tween({ k, x: r.width / 2 - pt.cx * k, y: top + h / 2 - pt.cy * k });
   }
+  /** Double-tap: zoom in to a readable size where the finger is, or back out to the whole process. */
+  function smartZoom(mx, my) {
+    const v = view();
+    if (v.k >= 0.6) return fit();
+    tween({ k: 0.9, x: mx - ((mx - v.x) / v.k) * 0.9, y: my - ((my - v.y) / v.k) * 0.9 });
+  }
+  /** How close a walkthrough gets: closer on a narrow screen, where the same zoom is harder to read. */
+  const walkK = () => (narrow.matches ? 0.95 : 0.72);
 
   svg.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -1472,21 +1644,61 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
     if (e.ctrlKey || Math.abs(e.deltaY) > Math.abs(e.deltaX)) zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0016)), e.clientX - r.left, e.clientY - r.top);
     else { const v = view(); v.x -= e.deltaX; applyView(); }
   }, { passive: false });
-  let drag = null;
-  svg.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, vx: view().x, vy: view().y, moved: false, id: e.pointerId }; });
+  // One finger (or the mouse) drags; two fingers pinch to zoom and pan together.
+  let drag = null, pinch = null, lastTap = null;
+  const fingers = new Map();
+  const spread = () => { const [a, b] = [...fingers.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
+  svg.addEventListener("pointerdown", (e) => {
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.size === 2) { tw++; pinch = spread(); svg.classList.remove("drag"); return; }
+    if (fingers.size > 2) return;
+    drag = { x: e.clientX, y: e.clientY, vx: view().x, vy: view().y, moved: false, id: e.pointerId };
+  });
   window.addEventListener("pointermove", (e) => {
+    if (fingers.has(e.pointerId)) fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch) {
+      if (fingers.size < 2) return;
+      const now = spread(), r = svg.getBoundingClientRect(), v = view();
+      S.views[S.cur] = { ...v, x: v.x + now.x - pinch.x, y: v.y + now.y - pinch.y };
+      zoomAt(now.d / pinch.d, now.x - r.left, now.y - r.top);
+      pinch = now;
+      return;
+    }
     if (!drag || e.pointerId !== drag.id) return;
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) > 4) { drag.moved = true; svg.classList.add("drag"); svg.setPointerCapture?.(drag.id); }
     if (drag.moved) { tw++; S.views[S.cur] = { ...view(), x: drag.vx + dx, y: drag.vy + dy }; applyView(); }
   });
+  window.addEventListener("pointercancel", (e) => { fingers.delete(e.pointerId); pinch = null; drag = null; svg.classList.remove("drag"); });
   window.addEventListener("pointerup", (e) => {
+    fingers.delete(e.pointerId);
+    if (pinch) {
+      // The finger still down carries on as a drag, so lifting it doesn't count as a tap.
+      pinch = null;
+      const [rest] = [...fingers.entries()];
+      drag = rest ? { x: rest[1].x, y: rest[1].y, vx: view().x, vy: view().y, moved: true, id: rest[0] } : null;
+      return;
+    }
     if (!drag) return;
     const wasDrag = drag.moved; drag = null; svg.classList.remove("drag");
     if (wasDrag) return;
-    const t = e.target.closest?.("[data-id],[data-flow]");
-    if (!t || !svg.contains(t)) { select(null); return; }
-    if (t.dataset.flow) select(t.dataset.flow); else select(t.dataset.id);
+    const t = e.target.closest?.("[data-id],[data-flow]"), hit = t && svg.contains(t) ? t : null;
+    const el = hit && S.G.E[hit.dataset.id];
+    // A pool or lane is the floor the shapes stand on: tapping it names it, without raising the sheet.
+    const floor = !hit || (el && (el.kind === "lane" || (el.kind === "pool" && !el.bb)));
+    if (e.pointerType === "touch") {
+      const again = lastTap && e.timeStamp - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 28;
+      lastTap = again ? null : { t: e.timeStamp, x: e.clientX, y: e.clientY };
+      if (again && el && el.t === "call") { setSheet(false); open(el.ref); return; }
+      if (again && floor) { const r = svg.getBoundingClientRect(); smartZoom(e.clientX - r.left, e.clientY - r.top); return; }
+    }
+    if (!hit) { select(null); setSheet(false); return; }
+    if (hit.dataset.flow) select(hit.dataset.flow); else select(hit.dataset.id);
+    // The sheet comes up with a shape's details; keep the shape in the part of the diagram it leaves.
+    if (narrow.matches) {
+      setSheet(!floor);
+      if (!floor && el && Number.isFinite(el.cx)) focusOn(el, view().k);
+    }
   });
   svg.addEventListener("dblclick", (e) => {
     const t = e.target.closest?.("[data-id]");
@@ -1496,7 +1708,8 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
   document.getElementById("zin").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(1.25, r.width / 2, r.height / 2); };
   document.getElementById("zout").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(0.8, r.width / 2, r.height / 2); };
   document.getElementById("zfit").onclick = () => fit();
-  window.addEventListener("resize", () => fit(false));
+  // A narrow screen keeps its place when it turns; the fit button shows the whole process.
+  window.addEventListener("resize", () => { if (!narrow.matches) fit(false); });
   crumb.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) open(b.dataset.go); });
 
   /* ---------- selection & panel ---------- */
@@ -1566,7 +1779,7 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
   panel.addEventListener("click", (e) => {
     const s = e.target.closest("[data-sel]"), o = e.target.closest("[data-open]"), c = e.target.closest("[data-copy]"), sc = e.target.closest("[data-scen]");
     if (s) select(s.dataset.sel, { pan: true });
-    if (o) open(o.dataset.open);
+    if (o) { setSheet(false); open(o.dataset.open); }
     if (sc) { document.getElementById("scen").value = sc.dataset.scen; startRun(); }
     if (c) { navigator.clipboard?.writeText(c.dataset.copy).then(() => { c.classList.add("ok"); setTimeout(() => c.classList.remove("ok"), 1200); }).catch(() => {}); }
   });
@@ -1580,7 +1793,9 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
       <h3>Walkthroughs</h3><div class="links">${D.scenarios.map((s) => `<button data-scen="${s.id}">▶ ${esc(s.n)}</button>`).join("")}</div>
       ${calls.length ? `<h3>Sub-processes</h3><div class="links">${calls.map((c) => `<button data-open="${c.ref}">${esc(c.n)} ›</button>`).join("")}</div>` : D.parent ? `<h3>Called from</h3><div class="links"><button data-open="${D.parent}">‹ ${esc(DIAGRAMS[D.parent].title)}</button></div>` : ""}
       <h3>Getting around</h3>
-      <p class="hint">Click a shape for what it does and where it lives in the code. Double-click a thick-bordered call activity to open it. Drag to pan, scroll to zoom, <kbd>0</kbd> fits, <kbd>Esc</kbd> clears, <kbd>→</kbd> steps a walkthrough.</p>`;
+      <p class="hint">${touch
+        ? "Tap a shape for what it does and where it lives in the code. Double-tap a thick-bordered call activity to open it. Drag to pan and pinch to zoom; double-tap between shapes to see the whole process, and again to zoom back in."
+        : "Click a shape for what it does and where it lives in the code. Double-click a thick-bordered call activity to open it. Drag to pan, scroll to zoom, <kbd>0</kbd> fits, <kbd>Esc</kbd> clears, <kbd>→</kbd> steps a walkthrough."}</p>`;
   }
 
   /* ---------- legend ---------- */
@@ -1609,9 +1824,9 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
     return `<span class="kind"><i></i>Notation</span><h2>Reading BPMN</h2>
       <p class="hint">Pools are participants (the browser app, the app server); lanes split a pool by responsibility. Grey pools are black boxes: external systems whose insides aren’t modelled.</p>
       <div class="legend">${rows.map(([s, t]) => `${mini(s)}<span>${esc(t)}</span>`).join("")}</div>
-      <p class="hint" style="margin-top:14px">Click anywhere on the diagram to close.</p>`;
+      <p class="hint" style="margin-top:14px">${touch ? "Tap" : "Click"} anywhere on the diagram to close.</p>`;
   }
-  document.getElementById("legendBtn").onclick = () => { select(null); panel.innerHTML = legendHTML(); };
+  document.getElementById("legendBtn").onclick = () => { select(null); panel.innerHTML = legendHTML(); setSheet(true); };
 
   /* ---------- tabs, download, theme ---------- */
   document.getElementById("tabs").innerHTML = ORDER.map((id, i) => `<button role="tab" data-id="${id}"><span class="n">${i + 1}</span>${esc(DIAGRAMS[id].title)}</button>`).join("");
@@ -1686,7 +1901,7 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
       const f = prev && S.G.flows.find((x) => x.f === prev && x.to === st.at && x.k !== "data");
       // A wide pool is focused where the message lands, not at its centre.
       const end = f && f.pts[f.pts.length - 1];
-      await focusOn(el.kind === "pool" && end ? { cx: end[0], cy: end[1] } : el, 0.72);
+      await focusOn(el.kind === "pool" && end ? { cx: end[0], cy: end[1] } : el, walkK());
       if (f) {
         (S.visit[S.cur] ||= new Set()).add(f.id);
         document.getElementById("path-" + f.id)?.classList.add("visited");
@@ -1704,7 +1919,7 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
         if (run.dead) return;
         render(diag); await sleep(200);
         mark(st.at);
-        await focusOn(el, 0.72);
+        await focusOn(el, walkK());
       }
       prev = st.at;
     }
@@ -1716,6 +1931,7 @@ if (typeof module !== "undefined") module.exports = { DIAGRAMS, build, toBPMN, b
   }
   function startRun(playing = true) {
     stopRun();
+    setSheet(false);
     // Read the choice first: render() refills the list.
     const home = S.cur, sc = scenSel.value;
     S.visit = {};
