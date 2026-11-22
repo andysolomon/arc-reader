@@ -49,13 +49,15 @@ export const isPreparing = (job: PreparationJob) => ["queued", "preparing", "sav
 export const useWorking = (docIds: readonly string[]) =>
   usePreparation((s) => s.jobs.some((job) => (job.status === "preparing" || job.status === "saving") && docIds.includes(job.docId)));
 // Cloud providers keep bounded parallelism. VoiceStudio and Phonon submissions join
-// the durable server queue, which reserves exactly one whole reading per machine.
+// the durable server queue, which reserves whole readings per machine: one on VoiceStudio,
+// as many as the Phonon server is set to take.
 export const PREPARATION_CONCURRENCY = 3;
 export const PREPARATION_QUEUE_LIMIT = 20;
 const active = new Map<string, { controller: AbortController; provider: string }>();
 /** Local readings moved up before the server knew of them; it is told once they are submitted. */
 const raised = new Map<string, { now: boolean; sent?: boolean }>();
 const SENDING = "Sending to the server…";
+const HELD = "Paused while this computer is busy";
 export const providerFor = (job: PreparationJob) => hasOwnServer(job.voice.engine) ? job.voice.engine : "voicestudio";
 /** How long a finished reading stays in the queue before it clears itself. */
 export const READY_LINGER_MS = 4000;
@@ -268,7 +270,7 @@ async function run(job: PreparationJob, signal: AbortSignal) {
         }
         update(job.id, {
           done, total, status: status?.queued || status?.submitting ? "queued" : "preparing", worker: status?.worker, waitingFor: status?.waitingFor,
-          ...(status?.id ? { serverId: status.id } : {}), message: status?.unreachable ? "Can't reach the server. Retrying…" : status?.submitting ? SENDING : undefined,
+          ...(status?.id ? { serverId: status.id } : {}), message: status?.unreachable ? "Can't reach the server. Retrying…" : status?.submitting ? SENDING : status?.held ? HELD : undefined,
           // A lost connection says nothing about the queue; keep the last answer.
           ...(status?.unreachable ? {} : { ahead: status?.ahead, busy: status?.busy, prioritized: status?.prioritized || (status?.queued && raised.has(job.id)) || undefined }),
         });

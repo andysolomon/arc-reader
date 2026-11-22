@@ -4,6 +4,7 @@ import { uid } from "./hash";
 import type { DocLink } from "./links";
 import type { SavedDiagram } from "./articleDiagram";
 import { deviceStorage } from "./storage";
+import { audioLimitFor, DEFAULT_AUDIO_LIMIT, type AudioLimitChoice } from "./audioLimit";
 
 export type DocSource = "paste" | "url" | "file" | "share" | "sample";
 
@@ -238,10 +239,8 @@ export const positions = {
   },
 };
 
-/** Downloaded audio kept on this device. Past it, the oldest clips make room for new ones. */
-export const AUDIO_CACHE_BYTES = 1024 ** 3;
 /** Making room stops this far below the limit, so a full cache is not trimmed on every save. */
-const AUDIO_CACHE_ROOM = 0.9;
+export const AUDIO_CACHE_ROOM = 0.9;
 
 export interface AudioUsage { clips: number; bytes: number }
 /** Something the person should hear about: older clips made room, or the device refused a save. */
@@ -261,14 +260,13 @@ const REMEASURE_AFTER = 200;
 let limit: number | null = null;
 let upkeep: Promise<void> | null = null;
 let fullAnnounced = false;
+/** How much audio to keep, as chosen in Settings → Storage. */
+let chosen: AudioLimitChoice = DEFAULT_AUDIO_LIMIT;
 
 const sizeOf = (rec: AudioRecord) => rec.bytes ?? rec.blob?.size ?? 0;
 
-/** The limit on downloaded audio: AUDIO_CACHE_BYTES, or half of what the browser allows this site when that is less. */
-export const audioLimitFor = (allowed?: number) => (allowed ? Math.min(AUDIO_CACHE_BYTES, Math.floor(allowed / 2)) : AUDIO_CACHE_BYTES);
-
 async function audioLimit(): Promise<number> {
-  limit = audioLimitFor((await deviceStorage()).allowed);
+  limit = audioLimitFor((await deviceStorage()).allowed, chosen);
   return limit;
 }
 
@@ -317,6 +315,15 @@ function keepWithinLimit(): Promise<void> {
     }
   })();
   return upkeep;
+}
+
+/** Use the amount chosen in Settings → Storage. A smaller one removes the oldest clips past it now. */
+export function chooseAudioLimit(choice: AudioLimitChoice): Promise<void> {
+  if (choice === chosen) return upkeep ?? Promise.resolve();
+  chosen = choice;
+  limit = null;
+  // A pass already running uses the old amount; check again once it ends.
+  return (upkeep ?? Promise.resolve()).then(keepWithinLimit);
 }
 
 export const audioCache = {

@@ -16,7 +16,7 @@ import { useBreakpoint, useIsTouch } from "../hooks/useMedia";
 import { audioCache } from "../lib/db";
 import { syncLibrary, useLibrarySync } from "../lib/librarySync";
 import { ICON_ON, IconMenu, MenuAction, MenuDivider, MenuGroup, MenuOption } from "../components/IconMenu";
-import { PreparationDetails, PreparationQueue, PrepareDialog, PreparedStatus, type Reading } from "../components/LibraryPreparation";
+import { PreparationDetails, PreparationQueue, PrepareDialog, PreparedStatus, ShelfSummary, type Reading } from "../components/LibraryPreparation";
 import { useCategories } from "../state/categories";
 import { useJev } from "../state/llm";
 import { useFavorites } from "../state/favorites";
@@ -585,6 +585,7 @@ function BookGroup({ shelf, whole, title = shelf.title, grid, open, onToggle, on
             {read > 0 && <Fact className="tabular-nums text-accent">{read === have ? "All read" : `${read} read`}</Fact>}
             {shelf.items.length < whole.items.length && <Fact className="tabular-nums">{shelf.items.length} shown</Fact>}
           </div>
+          <ShelfSummary items={whole.items} className="mt-1.5" />
         </div>
         <div className="col-span-2 col-start-2 mt-1 flex items-start justify-between gap-3">
           <div className="-ml-2 flex flex-wrap items-center gap-x-1 text-[13px] text-fg2">
@@ -645,6 +646,7 @@ function SeriesGroup({ series, whole, grid, open, onToggle, onContinue, children
             {read > 0 && <Fact className="tabular-nums text-accent">{read === have ? "All read" : `${read} read`}</Fact>}
             {series.volumes.length < whole.volumes.length && <Fact className="tabular-nums">{series.volumes.length} shown</Fact>}
           </div>
+          <ShelfSummary items={items} whole="series" className="mt-1.5" />
         </div>
         <div className="col-span-2 col-start-2 mt-1 flex items-start justify-between gap-3">
           <div className="-ml-2 flex flex-wrap items-center gap-x-1 text-[13px] text-fg2">

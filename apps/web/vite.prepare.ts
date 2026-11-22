@@ -6,6 +6,7 @@ import type { Connect, Plugin } from "vite";
 import type { PreparationRequest, PreparationStatus, SharedPreparation } from "./src/engine/preparation";
 import { PHONON_ENGINE, PHONON_WORKER, forPhonon, PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
 import { SpeechActivity } from "./vite.speech-activity";
+import { HostPressure } from "./vite.host-pressure";
 import { mp3VoicedShare } from "./vite.voicing";
 import { sendJson } from "./vite.json";
 import { GARBLED_BELOW, GARBLED_RETRIES } from "./src/engine/voicing";
@@ -40,8 +41,13 @@ export class PreparationService {
   private jobs = new Map<string, Job>();
   private inflight = new Map<string, { promise: Promise<Audio>; consumers: Set<() => boolean> }>();
   private writes = new Map<string, Promise<void>>();
-  private queues = new Map<string, Promise<unknown>>();
+  /** Passages each machine is generating, at most its slots; the rest wait for a turn. */
+  private generating = new Map<string, number>();
+  private turns = new Map<string, Set<() => void>>();
   private active = new Map<string, PreparationWorker>();
+  /** Readings held back because the computer their machine shares is busy. */
+  private held = new Set<string>();
+  private pressure: HostPressure;
   private changes = new Map<string, Set<() => void>>();
   private scheduling = new Map<string, Promise<void>>();
   /** Whether the overflow machine has each queued reading's voice; absent until discovery answers. */
@@ -53,6 +59,7 @@ export class PreparationService {
   private ready: Promise<void>;
   constructor(env: Record<string, string>, private directory = resolve(env.PREPARATION_DATA_DIR || ".readaloud-preparations"), private activity = new SpeechActivity()) {
     this.discovery = new PreparationWorkers(env);
+    this.pressure = HostPressure.from(env);
     // The same model the bundle was built with, so prepared audio matches the device's cache keys.
     this.phononModel = env.VITE_PHONON_TTS_MODEL || "gradium/phonon-31m-en";
     this.ready = this.restore();
@@ -106,7 +113,17 @@ export class PreparationService {
       ...(waitingFor ? { waitingFor } : {}),
       ...(queued ? this.place(job) : {}),
       ...(worker && (job.state !== "running" || this.active.has(job.id)) ? { worker: worker.name } : {}),
+      ...(this.held.has(job.id) ? { held: true } : {}),
       ...(job.error ? { error: job.error } : {}) };
+  }
+
+  /** Readings a machine is preparing, highest ranked first. */
+  private on(worker: PreparationWorker) {
+    return [...this.active].filter(([, other]) => other.id === worker.id).flatMap(([id]) => this.jobs.get(id) || []).sort(inOrder);
+  }
+
+  private full(worker: PreparationWorker) {
+    return this.on(worker).length >= worker.slots;
   }
 
   private waiting() {
@@ -125,13 +142,15 @@ export class PreparationService {
     const waiting = this.waiting().sort(inOrder);
     const ahead = waiting.slice(0, waiting.indexOf(job)).filter((other) => forPhonon(other.requests) === forPhonon(job.requests)
       && (!other.workerId || !job.workerId || other.workerId === job.workerId)).length;
-    const machine = this.machineFor(job);
-    return { ahead, ...(job.priority ? { prioritized: true } : {}),
-      ...([...this.active.values()].some((worker) => worker.id === machine) ? { busy: true } : {}) };
+    const machine = this.discovery.workers.find((worker) => worker.id === this.machineFor(job));
+    return { ahead, ...(job.priority ? { prioritized: true } : {}), ...(machine && this.full(machine) ? { busy: true } : {}) };
   }
 
-  /** A reading asked to start now takes this machine once the passage in hand is finished. */
+  /** A reading asked to start now takes a free slot, or else the slot of the lowest-ranked
+   * reading on its machine once that one's passage in hand is finished. */
   private outranked(job: Job, worker: PreparationWorker) {
+    const here = this.on(worker);
+    if (here.length < worker.slots || here.at(-1) !== job) return false;
     return this.waiting().some((other) => other.urgent && (other.priority || 0) > (job.priority || 0) && this.machineFor(other) === worker.id);
   }
 
@@ -171,7 +190,7 @@ export class PreparationService {
   }
 
   private async assign(worker: PreparationWorker) {
-    if ([...this.active.values()].some((active) => active.id === worker.id)) return;
+    if (this.full(worker)) return;
     const pending = [...this.jobs.values()].filter((job) => job.state === "running" && !this.active.has(job.id))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     // The Mac takes the oldest reading only it can prepare before ones the secondary
@@ -206,7 +225,7 @@ export class PreparationService {
         this.notify(job);
         this.schedule();
       });
-      break;
+      if (this.full(worker)) break;
     }
   }
 
@@ -219,7 +238,7 @@ export class PreparationService {
     this.retryTimer = undefined;
     // A restored secondary job can outlive a temporary outage, even when the
     // primary has no work whose completion could wake the scheduler.
-    const idle = this.discovery.workers.filter((worker) => ![...this.active.values()].some((active) => active.id === worker.id));
+    const idle = this.discovery.workers.filter((worker) => !this.full(worker));
     // An idle Phonon server is no reason to keep asking on behalf of a VoiceStudio reading, or the reverse.
     if ([...this.jobs.values()].some((job) => job.state === "running" && !this.active.has(job.id)
       && idle.some((worker) => forPhonon(job.requests) === (worker.id === PHONON_WORKER)))) {
@@ -321,7 +340,7 @@ export class PreparationService {
               // speech server refuses a third concurrent request, and switching
               // engines mid-stream would evict theirs from memory.
               await this.activity.idle(worker.target);
-              if (job.state !== "running") return;
+              if (!await this.room(job, worker)) return;
               await this.audioFor(job.requests[index], () => job.state === "running", worker);
             }
             break;
@@ -408,7 +427,7 @@ export class PreparationService {
         return { ...metadata, body: await readFile(resolve(this.directory, `${key}.bin`)) };
       } catch { /* not cached */ }
       // Cache hits must never wait behind slow inference for another voice.
-      // Only misses enter the single-worker queue, one passage per job at a time.
+      // Only misses take one of the machine's slots, one passage per job at a time.
       const generate = async () => {
         if (![...consumers].some((isAllowed) => isAllowed())) throw new HttpError(410, "Audio preparation was cancelled or expired.");
         // A garbled take (see src/engine/voicing.ts) is asked for again; the best take is kept.
@@ -431,14 +450,55 @@ export class PreparationService {
         await this.atomic(`${key}.json`, JSON.stringify(metadata));
         return { body, ...metadata };
       };
-      const pending = (this.queues.get(worker.id) || Promise.resolve()).then(generate, generate);
-      this.queues.set(worker.id, pending.catch(() => {}));
-      return pending;
+      const release = await this.turn(worker);
+      try { return await generate(); }
+      finally { release(); }
     };
     const pending = run();
     this.inflight.set(key, { promise: pending, consumers });
     void pending.finally(() => this.inflight.delete(key)).catch(() => {});
     return pending;
+  }
+
+  /** Waits for one of the machine's slots; call the returned function once to give it back. */
+  private async turn(worker: PreparationWorker): Promise<() => void> {
+    while ((this.generating.get(worker.id) || 0) >= worker.slots) {
+      await new Promise<void>((resolve) => {
+        const waiters = this.turns.get(worker.id) || new Set();
+        waiters.add(resolve);
+        this.turns.set(worker.id, waiters);
+      });
+    }
+    this.generating.set(worker.id, (this.generating.get(worker.id) || 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.generating.set(worker.id, (this.generating.get(worker.id) || 1) - 1);
+      const waiters = this.turns.get(worker.id);
+      this.turns.delete(worker.id);
+      for (const wake of waiters || []) wake();
+    };
+  }
+
+  /** On a machine sharing this computer, waits while other programs need its CPU: the
+   * highest-ranked readings keep the slots pressure allows and the rest are held. False once
+   * the reading stops running or gives way to one asked to start now. */
+  private async room(job: Job, worker: PreparationWorker) {
+    if (!worker.local) return job.state === "running";
+    for (;;) {
+      if (job.state !== "running" || this.outranked(job, worker)) break;
+      const allowed = await this.pressure.allowed(worker.slots);
+      if (job.state !== "running") break;
+      if (this.on(worker).indexOf(job) < allowed) {
+        if (this.held.delete(job.id)) this.notify(job);
+        return true;
+      }
+      if (!this.held.has(job.id)) { this.held.add(job.id); this.notify(job); }
+      await this.wait(job, this.pressure.retryMs);
+    }
+    if (this.held.delete(job.id)) this.notify(job);
+    return false;
   }
 
   private async upstream(worker: PreparationWorker, path: string, body?: unknown): Promise<Response> {

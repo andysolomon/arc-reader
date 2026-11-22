@@ -26,7 +26,7 @@ describe("preparation machine compatibility", () => {
     expect(new PreparationWorkers(env).workers.map((worker) => worker.id)).toEqual(["primary", "secondary"]);
     const workers = new PreparationWorkers({ ...env, PHONON_URL: "http://phonon:8880/" });
     const [mac, cpu, phonon] = workers.workers;
-    expect(phonon).toEqual({ id: "phonon", name: "Phonon", target: "http://phonon:8880", key: "" });
+    expect(phonon).toEqual({ id: "phonon", name: "Phonon", target: "http://phonon:8880", key: "", slots: 1, local: true });
     const spoken: PreparationRequest = { key: "phonon|text", text: "Hello.", voice: "phonon:Zoey", engine: "phonon", protocol: "openai" };
     expect(await Promise.all([mac, cpu, phonon].map((worker) => workers.supports(worker, [spoken])))).toEqual([false, false, true]);
     expect(await workers.supports(phonon, [request])).toBe(false);
@@ -34,6 +34,15 @@ describe("preparation machine compatibility", () => {
     expect(workers.only([request])).toBeUndefined();
     // Routing a Phonon reading asks VoiceStudio nothing.
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("gives Phonon the slots it is set to take and knows which machines share this computer", () => {
+    const [mac, cpu, phonon] = new PreparationWorkers({ ...env, PHONON_URL: "http://phonon:8880", PHONON_PREPARATION_SLOTS: "2" }).workers;
+    expect([mac.slots, cpu.slots, phonon.slots]).toEqual([1, 1, 2]);
+    // A dotted host is another computer; a bare service name or loopback is this one.
+    expect([mac.local, cpu.local, phonon.local]).toEqual([false, false, true]);
+    expect(new PreparationWorkers({ VOICESTUDIO_URL: "http://127.0.0.1:3900", VOICESTUDIO_SECONDARY_URL: "http://voicestudio:3900" }).workers.map((worker) => worker.local)).toEqual([true, true]);
+    for (const slots of ["", "0", "-3", "nope"]) expect(new PreparationWorkers({ ...env, PHONON_URL: "http://phonon:8880", PHONON_PREPARATION_SLOTS: slots }).workers[2].slots).toBe(1);
   });
 
   it("accepts a matching saved design without transferring a recipe or reference", async () => {

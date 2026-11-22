@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Button, Dialog } from "@readaloud/ui";
-import { audioCache, audioLimitFor, type AudioUsage } from "../lib/db";
+import { Button, Dialog, Segmented } from "@readaloud/ui";
+import { audioCache, AUDIO_CACHE_ROOM, type AudioUsage } from "../lib/db";
+import { audioLimitChoicesFor, audioLimitFor, mostAudioFor, type AudioLimitChoice } from "../lib/audioLimit";
 import { deviceStorage, formatBytes, keepStorage, type DeviceStorage } from "../lib/storage";
 import { isNativeApp } from "../lib/native";
 import { hasFish, hasOpenAI } from "../engine/providers";
 import { useLibrary } from "../state/library";
+import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 
 function Row({ label, hint, children, last }: { label: string; hint: string; children: React.ReactNode; last?: boolean }) {
@@ -28,6 +30,10 @@ export function StorageSettings() {
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [asking, setAsking] = useState(false);
+  const choice = useSettings((s) => s.audioLimit);
+  /** A smaller amount than the audio already saved, waiting for the person to agree to removing the rest. */
+  const [shrinking, setShrinking] = useState<AudioLimitChoice>(choice);
+  const [askingToShrink, setAskingToShrink] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -47,9 +53,20 @@ export function StorageSettings() {
     return () => { live = false; unsubscribe(); clearTimeout(timer); window.removeEventListener("focus", refresh); };
   }, []);
 
-  const limit = formatBytes(audioLimitFor(device.allowed));
   const passages = audio ? (audio.clips === 1 ? "1 passage" : `${audio.clips.toLocaleString()} passages`) : "";
-  const policy = `Up to ${limit} is kept; the oldest is removed first.`;
+  const choices = audioLimitChoicesFor(device.allowed);
+  // A saved amount past what the browser now allows works out to the most it allows.
+  const shown = choices.includes(choice) ? choice : "max";
+  const most = mostAudioFor(device.allowed);
+  const limitOf = (next: AudioLimitChoice) => audioLimitFor(device.allowed, next);
+  /** Audio removed to fit a smaller amount: making room stops a little below it. */
+  const removedFor = (next: AudioLimitChoice) => (audio ? Math.max(0, audio.bytes - limitOf(next) * AUDIO_CACHE_ROOM) : 0);
+
+  const choose = (next: AudioLimitChoice) => {
+    if (next === shown) return;
+    if (audio && audio.bytes > limitOf(next)) { setShrinking(next); setAskingToShrink(true); }
+    else useSettings.getState().set("audioLimit", next);
+  };
 
   const remove = async () => {
     setRemoving(true);
@@ -78,12 +95,26 @@ export function StorageSettings() {
     <div role="region" aria-label="Storage" className="flex flex-col rounded-panel border border-line bg-bg2">
       <Row
         label="Downloaded audio"
-        hint={audio === null ? "Measuring…" : audio.clips ? `${passages} saved to replay and to listen offline. ${policy}` : `Nothing saved yet. ${policy}`}
-        last={device.used === undefined && device.kept === undefined}
+        hint={audio === null ? "Measuring…" : audio.clips ? `${passages} saved to replay and to listen offline.` : "Nothing saved yet."}
       >
         {audio && <Amount>{formatBytes(audio.bytes)}</Amount>}
         <Button variant="danger" disabled={!audio?.clips} onClick={() => setConfirming(true)} className="bg-bg">Remove</Button>
       </Row>
+      <div className={`flex flex-col gap-2.5 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${device.used === undefined && device.kept === undefined ? "" : "border-b border-line"}`}>
+        <div className="min-w-0">
+          <div>Keep up to</div>
+          <div className="text-[13px] text-fg2">
+            Past this, the oldest audio is removed first.{most ? ` Max is half of what this browser allows: ${formatBytes(most)}.` : ""}
+          </div>
+        </div>
+        <Segmented
+          label="Downloaded audio to keep"
+          value={shown}
+          onChange={choose}
+          options={choices.map((c) => ({ value: c, label: c === "max" ? "Max" : `${c} GB` }))}
+          className="shrink-0 flex-wrap"
+        />
+      </div>
       {device.used !== undefined && (
         <Row
           label="Everything on this device"
@@ -104,6 +135,16 @@ export function StorageSettings() {
           {device.kept ? <Amount>On</Amount> : <Button loading={asking} onClick={() => void keep()} className="bg-bg">Turn on</Button>}
         </Row>
       )}
+      <Dialog open={askingToShrink} onClose={() => setAskingToShrink(false)} title={`Keep up to ${formatBytes(limitOf(shrinking))}?`}>
+        <p className="text-sm text-fg2">
+          The oldest {formatBytes(removedFor(shrinking))} of downloaded audio is removed from this device to fit.
+          {" "}Listening to it again makes or downloads it again{hasOpenAI() || hasFish() ? ", and paid voices bill for it again" : ""}.
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={() => setAskingToShrink(false)}>Cancel</Button>
+          <Button variant="danger" onClick={() => { useSettings.getState().set("audioLimit", shrinking); setAskingToShrink(false); }}>Remove older audio</Button>
+        </div>
+      </Dialog>
       <Dialog open={confirming} onClose={() => { if (!removing) setConfirming(false); }} title="Remove downloaded audio?">
         <p className="text-sm text-fg2">
           {audio ? `${formatBytes(audio.bytes)} of saved audio` : "Saved audio"} is removed from this device. Your documents and your place in each stay.

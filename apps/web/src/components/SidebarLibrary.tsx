@@ -145,7 +145,7 @@ export function SidebarLibrary() {
           </span>
           <ChevronRight size={14} strokeWidth={1.5} className={cn("mt-[3px] shrink-0 text-fg3 transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
         </button>
-        {!open && <ShelfSummary items={items} className="pb-2 pl-[38px] pr-2" />}
+        {!open && <ShelfSummary items={items} whole="series" className="pb-2 pl-[38px] pr-2" />}
         {open && (
           <ul id={panel} aria-label={`Volumes of ${group.title}`} className="m-0 flex list-none flex-col gap-px p-0 pl-3">
             {group.volumes.map(({ shelf, title }) => book(shelf, undefined, title))}
