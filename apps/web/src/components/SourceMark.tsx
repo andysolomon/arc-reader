@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { BookOpen, ClipboardList, FileText, Globe, Library as LibraryIcon } from "lucide-react";
 import { cn } from "@readaloud/ui";
 import type { DocRecord } from "../lib/db";
+import { useWorking } from "../state/preparation";
 
 /** Site favicon for articles, via the server so the browser never reports library sites elsewhere. */
 export function SourceIcon({ rec }: { rec: Pick<DocRecord, "source" | "domain"> }) {
@@ -14,30 +15,36 @@ export function SourceIcon({ rec }: { rec: Pick<DocRecord, "source" | "domain"> 
   return <Icon size={14} strokeWidth={1.5} className="shrink-0 text-fg2" aria-hidden />;
 }
 
-const MARK = "grid size-6 shrink-0 place-items-center rounded-[7px]";
+const MARK = "relative grid size-6 shrink-0 place-items-center rounded-[7px]";
+/** While audio is being made, an arc circles the tile; the words beside it say so for screen readers. */
+const ORBIT = "mark-orbit";
+const NONE: readonly string[] = [];
 
 /** The tile that leads a document wherever it is listed: where it came from. */
-export function SourceMark({ rec, className }: { rec: Pick<DocRecord, "source" | "domain">; className?: string }) {
+export function SourceMark({ rec, className }: { rec: Pick<DocRecord, "id" | "source" | "domain">; className?: string }) {
+  const working = useWorking(useMemo(() => [rec.id], [rec.id]));
   return (
-    <span className={cn(MARK, "bg-bg3 ring-1 ring-line", className)}>
+    <span className={cn(MARK, "bg-bg3 ring-1 ring-line", working && ORBIT, className)}>
       <SourceIcon rec={rec} />
     </span>
   );
 }
 
 /** The tile that leads a series, which stands in for its volumes. */
-export function SeriesMark({ className }: { className?: string }) {
+export function SeriesMark({ docIds = NONE, className }: { docIds?: readonly string[]; className?: string }) {
+  const working = useWorking(docIds);
   return (
-    <span aria-hidden className={cn(MARK, "bg-[color-mix(in_oklch,var(--accent)_18%,transparent)] text-accent", className)}>
+    <span aria-hidden className={cn(MARK, "bg-[color-mix(in_oklch,var(--accent)_18%,transparent)] text-accent", working && ORBIT, className)}>
       <LibraryIcon size={14} strokeWidth={1.75} />
     </span>
   );
 }
 
 /** The tile that leads a book or course, which stands in for its chapters. */
-export function BookMark({ className }: { className?: string }) {
+export function BookMark({ docIds = NONE, className }: { docIds?: readonly string[]; className?: string }) {
+  const working = useWorking(docIds);
   return (
-    <span aria-hidden className={cn(MARK, "bg-[color-mix(in_oklch,var(--accent)_18%,transparent)] text-accent", className)}>
+    <span aria-hidden className={cn(MARK, "bg-[color-mix(in_oklch,var(--accent)_18%,transparent)] text-accent", working && ORBIT, className)}>
       <BookOpen size={14} strokeWidth={1.75} />
     </span>
   );

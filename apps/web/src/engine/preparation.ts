@@ -149,24 +149,30 @@ export function hasActivePreparation(requests: PreparationRequest[]): boolean {
 // without failing. Give up instead, so the reader is told and the request is retried.
 const STATUS_TIMEOUT_MS = 10_000;
 const SUBMIT_TIMEOUT_MS = 20_000;
+/** A prepared clip is a few hundred KB at most. */
+const CLIP_TIMEOUT_MS = 30_000;
 /** A submission carries the whole reading's text; allow a slow uplink 10 KB a second. */
 const submitTimeout = (body: string) => Math.max(SUBMIT_TIMEOUT_MS, body.length / 10);
 
-async function json<T>(path: string, init?: RequestInit, timeout?: number): Promise<T> {
-  if (!timeout) return answer<T>(await fetch(`${BASE}${path}`, init));
-  const outer = init?.signal;
+/** Run `request` with a signal that aborts when `outer` does or after `timeout` ms, whichever comes first. */
+async function timed<T>(outer: AbortSignal | null | undefined, timeout: number, request: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   const cancel = () => controller.abort(outer?.reason);
   const timer = setTimeout(() => controller.abort(new DOMException("The server did not answer in time.", "TimeoutError")), timeout);
   if (outer?.aborted) cancel();
   else outer?.addEventListener("abort", cancel, { once: true });
   try {
-    // The body is read inside the time limit too.
-    return await answer<T>(await fetch(`${BASE}${path}`, { ...init, signal: controller.signal }));
+    return await request(controller.signal);
   } finally {
     clearTimeout(timer);
     outer?.removeEventListener("abort", cancel);
   }
+}
+
+async function json<T>(path: string, init?: RequestInit, timeout?: number): Promise<T> {
+  if (!timeout) return answer<T>(await fetch(`${BASE}${path}`, init));
+  // The body is read inside the time limit too.
+  return timed(init?.signal, timeout, async (signal) => answer<T>(await fetch(`${BASE}${path}`, { ...init, signal })));
 }
 
 async function answer<T>(response: Response): Promise<T> {
@@ -330,12 +336,16 @@ export async function preparedAudio(key: string, signal?: AbortSignal): Promise<
   const running = shared.find((job) => job.state === "running" && job.keys.includes(key));
   const entry = ready || saved().slice().reverse().find((job) => job.keys.includes(key)) || running;
   if (!entry) return null;
-  const response = await fetch(`${BASE}/${entry.id}/audio/${entry.keys.indexOf(key)}`, { signal });
-  // The server cache may have expired. Ordinary generation remains available.
-  if (response.status === 404 || response.status === 410) return null;
-  if (!response.ok) {
-    const data = await response.json().catch(() => null) as { error?: string } | null;
-    throw new PreparationHttpError(response.status, data?.error || "Could not fetch prepared audio.");
-  }
-  return response;
+  // The clip is read whole inside the time limit, so a connection that stalled while the
+  // phone was asleep fails and is retried instead of holding the reading forever.
+  return timed(signal, CLIP_TIMEOUT_MS, async (limited) => {
+    const response = await fetch(`${BASE}/${entry.id}/audio/${entry.keys.indexOf(key)}`, { signal: limited });
+    // The server cache may have expired. Ordinary generation remains available.
+    if (response.status === 404 || response.status === 410) return null;
+    if (!response.ok) {
+      const data = await response.json().catch(() => null) as { error?: string } | null;
+      throw new PreparationHttpError(response.status, data?.error || "Could not fetch prepared audio.");
+    }
+    return new Response(await response.blob(), { status: response.status, headers: response.headers });
+  });
 }
