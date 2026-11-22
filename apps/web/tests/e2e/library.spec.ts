@@ -125,7 +125,8 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   // Internal navigation keeps the preparation queue alive.
   await page.getByRole("link", { name: "Compose", exact: true }).click();
   await page.getByRole("link", { name: "Library", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished", { timeout: 15_000 });
+  // Finished readings clear themselves from the queue.
+  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toBeHidden({ timeout: 20_000 });
   await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toHaveCount(2);
   await expect(page.getByRole("img", { name: "Jasper: 100% prepared", exact: true })).toHaveCount(2);
   expect(requests).toBe(8);
@@ -153,7 +154,8 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   await dialog.getByRole("checkbox", { name: "Bella VoiceStudio" }).check();
   await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
-  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished");
+  await expect(page.getByRole("region", { name: "Audio preparation queue" }).getByRole("listitem")).toHaveCount(4);
+  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toBeHidden({ timeout: 15_000 });
   expect(requests).toBe(8);
 
   await page.reload();
@@ -266,8 +268,9 @@ test("shows one reading per machine, waiting readings, and restores their assign
   await page.route("**/api/preparations", async (route) => {
     if (route.request().method() !== "POST") return route.fallback();
     const index = jobs.length;
+    // The last readings submitted get the machines, so the queue has to move them up.
     const job = { id: `00000000-0000-0000-0000-${String(index).padStart(12, "0")}`, state: "running", done: 0, total: 2,
-      queued: index >= 2, ...(index < 2 ? { worker: ["Mac", "Omarchy"][index] } : {}) };
+      queued: index < 2, ...(index >= 2 ? { worker: ["Mac", "Omarchy"][index - 2] } : {}) };
     jobs.push(job);
     await route.fulfill({ status: 202, json: job });
   });
@@ -286,6 +289,11 @@ test("shows one reading per machine, waiting readings, and restores their assign
   await expect(queue).toContainText("2 active · 2 queued");
   await expect(queue).toContainText("Preparing on Mac");
   await expect(queue).toContainText("Preparing on Omarchy");
+  // Readings being made lead the list.
+  const rows = queue.getByRole("listitem");
+  await expect(rows.nth(0)).toContainText("Preparing on");
+  await expect(rows.nth(1)).toContainText("Preparing on");
+  await expect(rows.nth(2)).toContainText("Queued");
   await page.reload();
   await expect(queue).toContainText("2 active · 2 queued");
   await expect(queue).toContainText("Preparing on Mac");
