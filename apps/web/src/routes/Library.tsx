@@ -572,7 +572,7 @@ function BookGroup({ shelf, whole, title = shelf.title, grid, open, onToggle, on
         onClick={(e) => { if (opensDocument(e)) onToggle(); }}
         className={cn("grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 transition-colors duration-fast", grid ? "p-4" : "px-5 py-3.5 active:bg-bg2 sm:px-4 [@media(hover:hover)]:hover:bg-bg2")}
       >
-        <BookMark />
+        <BookMark docIds={whole.items.map((it) => it.rec.id)} />
         <div className={cn(TITLE, "min-w-0")}>{title}</div>
         <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} ${many} of ${shelf.title}`} onClick={onToggle} className="-mr-1 grid size-[22px] shrink-0 place-items-center rounded-control border-0 bg-transparent text-fg3 hover:text-fg">
           <ChevronRight size={16} strokeWidth={1.5} className={cn("transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
@@ -631,7 +631,7 @@ function SeriesGroup({ series, whole, grid, open, onToggle, onContinue, children
         onClick={(e) => { if (opensDocument(e)) onToggle(); }}
         className={cn("grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 transition-colors duration-fast", grid ? "p-4" : "px-5 py-3.5 active:bg-bg2 sm:px-4 [@media(hover:hover)]:hover:bg-bg2")}
       >
-        <SeriesMark />
+        <SeriesMark docIds={items.map((it) => it.rec.id)} />
         <div className={cn(TITLE, "min-w-0")}>{series.title}</div>
         <button type="button" aria-expanded={open} aria-controls={open ? panel : undefined} aria-label={`${open ? "Hide" : "Show"} volumes of ${series.title}`} onClick={onToggle} className="-mr-1 grid size-[22px] shrink-0 place-items-center rounded-control border-0 bg-transparent text-fg3 hover:text-fg">
           <ChevronRight size={16} strokeWidth={1.5} className={cn("transition-transform duration-fast motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
