@@ -125,7 +125,8 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   // Internal navigation keeps the preparation queue alive.
   await page.getByRole("link", { name: "Compose", exact: true }).click();
   await page.getByRole("link", { name: "Library", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished", { timeout: 15_000 });
+  // Finished readings clear themselves from the queue.
+  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toBeHidden({ timeout: 20_000 });
   await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toHaveCount(2);
   await expect(page.getByRole("img", { name: "Jasper: 100% prepared", exact: true })).toHaveCount(2);
   expect(requests).toBe(8);
@@ -153,7 +154,8 @@ test("prepares multiple documents in multiple voices, reuses saved audio, and sh
   await dialog.getByRole("checkbox", { name: "Bella VoiceStudio" }).check();
   await dialog.getByRole("checkbox", { name: "Jasper VoiceStudio" }).check();
   await dialog.getByRole("button", { name: "Prepare 4 readings" }).click();
-  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toContainText("Audio preparation finished");
+  await expect(page.getByRole("region", { name: "Audio preparation queue" }).getByRole("listitem")).toHaveCount(4);
+  await expect(page.getByRole("region", { name: "Audio preparation queue" })).toBeHidden({ timeout: 15_000 });
   expect(requests).toBe(8);
 
   await page.reload();

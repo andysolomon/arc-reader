@@ -54,6 +54,10 @@ const active = new Map<string, { controller: AbortController; provider: string }
 const raised = new Map<string, { now: boolean; sent?: boolean }>();
 const SENDING = "Sending to the server…";
 export const providerFor = (job: PreparationJob) => hasOwnServer(job.voice.engine) ? job.voice.engine : "voicestudio";
+/** How long a finished reading stays in the queue before it clears itself. */
+export const READY_LINGER_MS = 4000;
+/** A finished reading with nothing more to say leaves the queue on its own; errors, cancellations and notes stay until cleared. */
+const clearsItself = (job: PreparationJob) => job.status === "ready" && !job.message;
 
 interface PreparationState {
   jobs: PreparationJob[];
@@ -88,8 +92,11 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
         const remote = sharedPreparationJobs(await docs.all(), catalogue, getVoice);
         const hidden = new Set(get().hiddenShared);
         let jobs = get().jobs.filter((job) => !job.remote);
+        const seen = new Set(get().jobs.map((job) => job.id));
         for (const job of remote) {
           if (hidden.has(job.id) && !isPreparing(job)) continue;
+          // Readings that finished before this device was watching have nothing to report.
+          if (clearsItself(job) && !seen.has(job.id)) { hidden.add(job.id); continue; }
           const local = jobs.find((other) => sameReading(job, other));
           if (local && (isPreparing(local) || (local.serverId === job.serverId && local.status === job.status))) continue;
           jobs = jobs.filter((other) => !sameReading(job, other));
@@ -159,12 +166,30 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   partialize: ({ jobs, hiddenShared }) => ({ jobs: jobs.filter((job) => !job.remote), hiddenShared }),
   merge: (persisted, current) => {
     const { jobs = [], hiddenShared = [] } = (persisted ?? {}) as { jobs?: PreparationJob[]; hiddenShared?: string[] };
-    return { ...current, hiddenShared, jobs: jobs.map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, step: undefined, worker: undefined, waitingFor: undefined, ahead: undefined, busy: undefined } : job) };
+    return { ...current, hiddenShared, jobs: jobs.filter((job) => !clearsItself(job)).map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, step: undefined, worker: undefined, waitingFor: undefined, ahead: undefined, busy: undefined } : job) };
   },
   // Local storage hydrates synchronously, before usePreparation is initialized.
   // Re-enter the worker afterwards; server jobs reconnect and saved audio is reused.
   onRehydrateStorage: () => (_state, error) => { if (!error) queueMicrotask(() => { void drain(); }); },
 }));
+
+// Each finished reading is shown briefly, then leaves the queue.
+const lingering = new Map<string, ReturnType<typeof setTimeout>>();
+usePreparation.subscribe(({ jobs }) => {
+  for (const job of jobs) {
+    if (!clearsItself(job) || lingering.has(job.id)) continue;
+    lingering.set(job.id, setTimeout(() => {
+      lingering.delete(job.id);
+      const state = usePreparation.getState();
+      const finished = state.jobs.find((other) => other.id === job.id);
+      if (!finished || !clearsItself(finished)) return;
+      usePreparation.setState({
+        jobs: state.jobs.filter((other) => other.id !== job.id),
+        ...(finished.remote ? { hiddenShared: [...new Set([...state.hiddenShared, job.id])] } : {}),
+      });
+    }, READY_LINGER_MS));
+  }
+});
 
 // A step's count belongs to its message: a new message without one drops the old count.
 const update = (id: string, patch: Partial<PreparationJob>) => {

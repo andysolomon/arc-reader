@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { refreshPreparationCatalog, type SharedPreparation } from "../engine/preparation";
 import { cacheKey } from "../engine/providers";
 import { db, docs, type DocRecord } from "../lib/db";
 import { planPassages, segment } from "../lib/segment";
-import { usePreparation } from "./preparation";
+import { READY_LINGER_MS, usePreparation } from "./preparation";
 
 vi.hoisted(() => {
   const storage = new Map<string, string>();
@@ -23,9 +23,9 @@ vi.mock("../engine/providers", async (original) => ({ ...await original<typeof i
 vi.mock("../engine/preparation", async (original) => ({ ...await original<typeof import("../engine/preparation")>(), refreshPreparationCatalog: vi.fn(), sharedAudioRemaining: () => 0 }));
 
 const rec: DocRecord = { id: "doc", title: "Shared doc", text: "First passage.\n\nSecond passage.", voice: null, chars: 30, source: "paste", domain: "Text", createdAt: 0, updatedAt: 0 };
-const reading = (id: string): SharedPreparation => {
+const reading = (id: string, state: SharedPreparation["state"] = "done"): SharedPreparation => {
   const keys = planPassages(segment(rec.text).sentences).map((p) => cacheKey({ text: p.text, voice: "expr-voice-2-f", engine: "kittentts" }));
-  return { id, state: "done", done: keys.length, total: keys.length, keys, available: keys.map((_, i) => i), voice: "expr-voice-2-f", engine: "kittentts", createdAt: 1 };
+  return { id, state, done: state === "running" ? 0 : keys.length, total: keys.length, keys, available: keys.map((_, i) => i), voice: "expr-voice-2-f", engine: "kittentts", createdAt: 1 };
 };
 
 beforeEach(async () => {
@@ -35,14 +35,25 @@ beforeEach(async () => {
   await database.clear("docs");
   await docs.put(rec);
 });
+afterEach(() => { vi.useRealTimers(); });
 
 describe("Shared server preparations", () => {
-  it("keeps cleared finished readings hidden across syncs and reloads", async () => {
+  it("does not list readings that finished before this device was watching", async () => {
+    vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one")]);
+    await usePreparation.getState().refreshShared();
+    expect(usePreparation.getState().jobs).toEqual([]);
+  });
+
+  it("shows a reading finishing, then clears it and keeps it hidden across syncs and reloads", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one", "running")]);
+    await usePreparation.getState().refreshShared();
     vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one")]);
     await usePreparation.getState().refreshShared();
     expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["ready"]);
 
-    usePreparation.getState().dismissFinished();
+    vi.advanceTimersByTime(READY_LINGER_MS);
+    expect(usePreparation.getState().jobs).toEqual([]);
     await usePreparation.getState().refreshShared();
     expect(usePreparation.getState().jobs).toEqual([]);
 
@@ -55,12 +66,21 @@ describe("Shared server preparations", () => {
     expect(usePreparation.getState().jobs).toEqual([]);
   });
 
+  it("keeps failed readings until cleared", async () => {
+    vi.mocked(refreshPreparationCatalog).mockResolvedValue([{ ...reading("one", "error"), error: "Server refused" }]);
+    await usePreparation.getState().refreshShared();
+    expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["error"]);
+    usePreparation.getState().dismissFinished();
+    await usePreparation.getState().refreshShared();
+    expect(usePreparation.getState().jobs).toEqual([]);
+  });
+
   it("shows new readings and forgets dismissals the server no longer lists", async () => {
-    vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one")]);
+    vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one", "error")]);
     await usePreparation.getState().refreshShared();
     usePreparation.getState().dismissFinished();
 
-    vi.mocked(refreshPreparationCatalog).mockResolvedValue([{ ...reading("two"), createdAt: 2 }]);
+    vi.mocked(refreshPreparationCatalog).mockResolvedValue([{ ...reading("two", "running"), createdAt: 2 }]);
     await usePreparation.getState().refreshShared();
     expect(usePreparation.getState().jobs.map((j) => j.serverId)).toEqual(["two"]);
     expect(usePreparation.getState().hiddenShared).toEqual([]);
