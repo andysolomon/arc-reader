@@ -521,8 +521,8 @@ function Lead({ it, inBook, selecting, selected, className }: Pick<ItemProps, "i
       </span>
     );
   }
-  // A chapter sits under its book's mark.
-  if (inBook) return <span aria-hidden className={cn("size-6 shrink-0", className)} />;
+  // A chapter is listed under its book, which already shows where it came from.
+  if (inBook) return null;
   return <SourceMark rec={it.rec} className={className} />;
 }
 
@@ -689,7 +689,7 @@ function SeriesGroup({ series, whole, grid, open, onToggle, onContinue, onExport
         </div>
       </div>
       {open && (
-        <ul id={panel} aria-label={`Volumes of ${series.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "flex flex-col gap-3.5 bg-bg p-4" : "flex flex-col pl-5 sm:pl-4 [&>li:last-child]:border-b-0")}>
+        <ul id={panel} aria-label={`Volumes of ${series.title}`} className={cn("m-0 list-none border-t border-line p-0", grid ? "flex flex-col gap-3.5 bg-bg p-4" : "flex flex-col [&>li:last-child]:border-b-0")}>
           {children}
         </ul>
       )}
@@ -789,6 +789,8 @@ const SWIPE_W = 5 * 44 + 4 * 2 + 16;
  */
 function Row(props: ItemProps & { touch: boolean }) {
   const { it, touch, selecting, selected, inBook } = props;
+  // A chapter has no mark of its own, so on a phone its words get the row's whole width.
+  const bare = inBook && !selecting;
   const [dx, setDx] = useState(0);
   const [open, setOpen] = useState(false);
   const start = useRef<{ x: number; y: number; id: number } | null>(null);
@@ -841,7 +843,8 @@ function Row(props: ItemProps & { touch: boolean }) {
       <div
         onClick={(e) => { if (opensDocument(e)) press(e); }}
         className={cn(
-          "relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 bg-bg px-5 py-3.5 transition-[background-color,transform] duration-fast active:bg-bg2 sm:px-4 [@media(hover:hover)]:group-hover:bg-bg2",
+          "relative grid cursor-pointer items-start gap-x-3 bg-bg px-5 py-3.5 transition-[background-color,transform] duration-fast active:bg-bg2 sm:px-4 [@media(hover:hover)]:group-hover:bg-bg2",
+          bare ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto]",
           selected && PICKED,
         )}
         style={{ transform: offset ? `translateX(${offset}px)` : undefined, transitionProperty: start.current ? "background-color" : undefined }}
@@ -855,9 +858,9 @@ function Row(props: ItemProps & { touch: boolean }) {
         <time dateTime={Number.isFinite(it.rec.createdAt) ? new Date(it.rec.createdAt).toISOString() : undefined} title={`Added ${dateLabel(it.rec.createdAt)}`} className="shrink-0 text-[12px] leading-[22px] tabular-nums text-fg2">
           {agoLabel(it.rec.createdAt)}
         </time>
-        <Meta it={it} inBook={inBook} estimate={props.estimate} className="col-span-2 col-start-2 mt-0.5" />
-        <div className="col-span-2 col-start-2 mt-2 flex items-start justify-between gap-3">
-          <PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} />
+        <Meta it={it} inBook={inBook} estimate={props.estimate} className={cn("col-span-2 mt-0.5", bare ? "col-start-1" : "col-start-2")} />
+        <div className={cn("col-span-2 mt-2 flex items-start justify-between gap-3", bare ? "col-start-1" : "col-start-2")}>
+          <PreparedStatus it={it} defaultVoice={props.defaultVoice} onDetails={props.details} className="min-w-0" />
           <Progress value={it.progress} reads={it.reads} />
         </div>
         {!touch && !selecting && (
