@@ -26,7 +26,7 @@ import { PREMIUM_FIT_LABELS, hasPremiumFit } from "../lib/premiumFit";
 import { formatUsd } from "../lib/usage";
 import { catalogue } from "../lib/postTitle";
 import { entriesOf, finished, nextInSeries, nextUnread, seriesOf, shelves, useBooks, type LibraryEntry, type Series, type Shelf } from "../state/books";
-import { BookMark, SeriesMark, SourceMark } from "../components/SourceMark";
+import { BookMark, DocMark, SeriesMark } from "../components/SourceMark";
 import { partNames } from "../lib/book";
 import { ExportAudioDialog } from "../components/AudioExport";
 import type { DocRecord } from "../lib/db";
@@ -523,7 +523,7 @@ function Lead({ it, inBook, selecting, selected, className }: Pick<ItemProps, "i
   }
   // A chapter is listed under its book, which already shows where it came from.
   if (inBook) return null;
-  return <SourceMark rec={it.rec} className={className} />;
+  return <DocMark rec={it.rec} className={className} />;
 }
 
 /**
@@ -879,7 +879,7 @@ function CardItem(props: ItemProps) {
       className={cn("group flex min-h-[170px] cursor-pointer flex-col gap-3 rounded-card border border-line bg-bg2 p-4 transition-colors duration-fast hover:border-fg3", selected && "!border-accent")}
     >
       <div className="flex h-9 items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5"><Lead {...props} inBook={false} /><ReadProgress value={it.progress} /></div>
+        <div className="flex items-center gap-2.5"><Lead {...props} inBook={false} className="[&_[data-cover-thumb]]:w-7" /><ReadProgress value={it.progress} /></div>
         {!selecting && <Actions {...props} size={32} className="-mr-1.5 opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100" />}
       </div>
       <div className="flex-1">

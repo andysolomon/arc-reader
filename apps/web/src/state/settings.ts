@@ -37,6 +37,8 @@ export interface Settings {
   showSummary: boolean;
   /** Show the diagram panel above the text in the Reader */
   showDiagram: boolean;
+  /** Show each article's cover and its sections' covers, and ask for them when a document is opened */
+  showCovers: boolean;
   fontSize: number;
   wide: boolean;
   railOpen: boolean;
@@ -117,6 +119,7 @@ export const useSettings = create<Settings & Actions>()(
       summaryModel: DEFAULT_SUMMARY_MODEL,
       showSummary: false,
       showDiagram: false,
+      showCovers: true,
       fontSize: 19,
       wide: false,
       railOpen: typeof window === "undefined" ? true : window.innerWidth > 1024,

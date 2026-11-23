@@ -94,9 +94,19 @@ function changesFrom(raw: unknown): LibraryChange[] {
   return raw.changes as LibraryChange[];
 }
 
+/** What a commit did to the documents, for whatever keeps something per document (covers). */
+export interface LibraryChanges {
+  /** Documents the library did not have before */
+  added: DocRecord[];
+  /** Documents whose title or text is no longer what it was */
+  changed: DocRecord[];
+  deleted: string[];
+}
+
 /** A single server owns the library. Each request is serialized and committed atomically before acknowledgment. */
 export class LibraryService {
   private queue: Promise<unknown> = Promise.resolve();
+  private listeners = new Set<(changes: LibraryChanges) => void>();
   /** The parsed library, kept while the file on disk is the one it was read from. */
   private cache?: { mtimeMs: number; size: number; snapshot: LibrarySnapshot };
   constructor(private directory: string) {}
@@ -138,6 +148,12 @@ export class LibraryService {
       }
       return { docs, missing };
     });
+  }
+
+  /** Told after each commit that added, rewrote or deleted a document. Returns how to stop. */
+  subscribe(listener: (changes: LibraryChanges) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   /** Every document, as stored now. */
@@ -184,8 +200,11 @@ export class LibraryService {
       const docs = new Map(snapshot.docs.map((doc) => [doc.id, doc]));
       const positions = new Map(snapshot.positions.map((pos) => [pos.docId, pos]));
       const deleted = new Set(snapshot.deleted);
+      const before = new Map(docs);
+      const removed = new Set<string>();
       for (const change of changes) {
         if (change.kind === "delete") {
+          if (docs.has(change.docId)) removed.add(change.docId);
           deleted.add(change.docId);
           docs.delete(change.docId);
           positions.delete(change.docId);
@@ -209,6 +228,13 @@ export class LibraryService {
       await rename(temporary, this.file);
       const info = await stat(this.file);
       this.cache = { mtimeMs: info.mtimeMs, size: info.size, snapshot: next };
+      const added = next.docs.filter((doc) => !before.has(doc.id));
+      const changed = next.docs.filter((doc) => { const was = before.get(doc.id); return !!was && (was.text !== doc.text || was.title !== doc.title); });
+      if (added.length || changed.length || removed.size) {
+        const told: LibraryChanges = { added, changed, deleted: [...removed] };
+        // The library is saved; a listener that throws must not make the phone send it all again.
+        for (const listener of this.listeners) { try { listener(told); } catch (error) { console.error("A library listener failed:", error); } }
+      }
       return next;
     });
   }
