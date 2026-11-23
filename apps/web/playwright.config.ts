@@ -80,6 +80,8 @@ export default defineConfig({
         // Stub workflows exercise one machine unless a test explicitly adds a second.
         VOICESTUDIO_SECONDARY_URL: LIVE ? process.env.VOICESTUDIO_SECONDARY_URL || localEnv.VOICESTUDIO_SECONDARY_URL || "" : "",
         VITE_OPENAI_BASE: "/api/oa",
+        // Covers are drawn by a paid image model; tests that show them answer /api/covers themselves.
+        COVERS: "off",
         VITE_OPENAI_TTS_MODEL: "gpt-4o-mini-tts",
         OPENAI_URL: LIVE ? process.env.OPENAI_URL || localEnv.OPENAI_URL || "https://api.openai.com" : `http://127.0.0.1:${openaiPort}`,
         OPENAI_API_KEY: LIVE ? process.env.OPENAI_API_KEY || localEnv.OPENAI_API_KEY || "" : "oa-test-key",

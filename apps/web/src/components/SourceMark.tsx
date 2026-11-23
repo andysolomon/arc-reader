@@ -3,6 +3,9 @@ import { BookOpen, ClipboardList, FileText, Globe, Library as LibraryIcon } from
 import { cn } from "@readaloud/ui";
 import type { DocRecord } from "../lib/db";
 import { useWorking } from "../state/preparation";
+import { useCovers } from "../state/covers";
+import { useSettings } from "../state/settings";
+import { CoverThumb } from "./Cover";
 
 /** Site favicon for articles, via the server so the browser never reports library sites elsewhere. */
 export function SourceIcon({ rec }: { rec: Pick<DocRecord, "source" | "domain"> }) {
@@ -28,6 +31,16 @@ export function SourceMark({ rec, className }: { rec: Pick<DocRecord, "id" | "so
       <SourceIcon rec={rec} />
     </span>
   );
+}
+
+/** What leads a document in the Library: its cover once it has one, until then where it came from. */
+export function DocMark({ rec, className }: { rec: Pick<DocRecord, "id" | "source" | "domain">; className?: string }) {
+  const url = useCovers((s) => s.shelf[rec.id]?.url);
+  const shown = useSettings((s) => s.showCovers);
+  const working = useWorking(useMemo(() => [rec.id], [rec.id]));
+  if (!url || !shown) return <SourceMark rec={rec} className={className} />;
+  // Taller than a line of title: in a list row it stands beside the title, facts and status together.
+  return <span className={cn("relative row-span-3 grid shrink-0 self-start", working && ORBIT, className)}><CoverThumb url={url} /></span>;
 }
 
 /** The tile that leads a series, which stands in for its volumes. */

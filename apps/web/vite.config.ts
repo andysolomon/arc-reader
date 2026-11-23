@@ -10,6 +10,7 @@ import { libraryService, sharedLibrary } from "./vite.library";
 import { bookImport } from "./vite.books";
 import { SpeechActivity } from "./vite.speech-activity";
 import { voiceAvatars } from "./vite.avatars";
+import { articleCovers } from "./vite.covers";
 import { llm } from "./vite.llm";
 import { jev } from "./vite.jev";
 import { decide } from "./vite.decide";
@@ -41,6 +42,7 @@ export default defineConfig(({ mode }) => {
     sharedLibrary(env, library),
     bookImport(library, slides),
     voiceAvatars(env),
+    articleCovers(env, library),
     llm(env),
     jev(env),
     decide(env),
@@ -83,6 +85,12 @@ export default defineConfig(({ mode }) => {
         navigateFallbackDenylist: [/^\/docs\//, /^\/cadence(\/|$)/],
         globIgnores: ["docs/**"],
         runtimeCaching: [
+          {
+            // Cover art never changes under a name, so a phone keeps it for reading offline.
+            urlPattern: /\/api\/covers\/images\/[a-f0-9-]+\.(?:webp|png)$/,
+            handler: "CacheFirst",
+            options: { cacheName: "covers", expiration: { maxEntries: 1500, maxAgeSeconds: 60 * 60 * 24 * 365 }, cacheableResponse: { statuses: [200] } },
+          },
           {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
             handler: "CacheFirst",

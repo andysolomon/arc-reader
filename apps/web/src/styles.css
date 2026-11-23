@@ -68,6 +68,15 @@ body,
 }
 @keyframes orbit { to { --orbit-angle: 360deg; } }
 
+/*
+ * Cover art is ink on off-white paper of its own, a shade off the cover's. Lifting the lightest
+ * tones to white and multiplying leaves only the ink, so no rectangle shows around the drawing.
+ */
+.cover-art {
+  mix-blend-mode: multiply;
+  filter: brightness(1.07) contrast(1.06);
+}
+
 /* Stays in the reader chrome while a summary is generated, including mid-playback. */
 .summary-processing-track {
   position: relative;

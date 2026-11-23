@@ -18,6 +18,8 @@ locals {
     VOICESTUDIO_SECONDARY_NAME = var.voicestudio_secondary_name
     LLM_URL                    = var.llm_url
     PREPARATION_YIELD_MS       = var.preparation_yield_ms
+    COVERS                     = var.covers
+    COVER_DAILY_LIMIT          = var.cover_daily_limit
     VOICESTUDIO_ASR_MODEL      = var.voicestudio_asr_model
   }
   secrets = {

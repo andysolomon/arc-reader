@@ -108,6 +108,18 @@ variable "preparation_yield_ms" {
   nullable = false
   default  = ""
 }
+# Article covers (README: Article covers). "off" makes none; empty leaves them on.
+variable "covers" {
+  type     = string
+  nullable = false
+  default  = ""
+}
+# New cover art in any 24 hours. Empty uses the server's default of 200.
+variable "cover_daily_limit" {
+  type     = string
+  nullable = false
+  default  = ""
+}
 variable "voicestudio_asr_model" {
   type     = string
   nullable = false

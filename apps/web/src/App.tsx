@@ -24,6 +24,7 @@ import { useVoices } from "./state/voices";
 import { startLibrarySync } from "./lib/librarySync";
 import { useBooks } from "./state/books";
 import { usePreparation } from "./state/preparation";
+import { startCoverSync } from "./state/covers";
 
 function ThemeSync() {
   const id = useThemeId();
@@ -68,7 +69,8 @@ export default function App() {
     // Keep as much audio as chosen in Settings → Storage.
     void chooseAudioLimit(useSettings.getState().audioLimit);
     const stopLimit = useSettings.subscribe((state) => void chooseAudioLimit(state.audioLimit));
-    return () => { document.removeEventListener("visibilitychange", reloadVoices); document.removeEventListener("visibilitychange", watchBooks); stopSync(); stopNotices(); stopLimit(); };
+    const stopCovers = startCoverSync();
+    return () => { stopCovers(); document.removeEventListener("visibilitychange", reloadVoices); document.removeEventListener("visibilitychange", watchBooks); stopSync(); stopNotices(); stopLimit(); };
   }, []);
   return (
     <MotionConfig reducedMotion="user" transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}>
