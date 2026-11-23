@@ -14,6 +14,7 @@ export interface ShelfJob {
   voice: { id: string; name: string; engine: string };
   done: number;
   total: number;
+  status?: string;
 }
 
 /** One voice's audio across a book or series. */
@@ -25,6 +26,8 @@ export interface ShelfVoice {
   complete: number;
   /** Chapters queued, being made or being saved */
   busy: number;
+  /** Of those, the ones whose audio is already made and only being copied onto this device */
+  saving: number;
   chapters: number;
 }
 
@@ -42,10 +45,10 @@ export function shelfPreparation(chapters: ShelfChapter[], jobs: ShelfJob[]): Sh
   const average = known.length ? known.reduce((sum, c) => sum + c.duration, 0) / known.length : 1;
   const weight = (c: ShelfChapter) => (c.duration > 0 ? c.duration : average);
   const whole = chapters.reduce((sum, c) => sum + weight(c), 0);
-  const voices = new Map<string, { voice: PreparedVoice; done: Map<string, number>; complete: Set<string>; busy: Set<string> }>();
+  const voices = new Map<string, { voice: PreparedVoice; done: Map<string, number>; complete: Set<string>; busy: Set<string>; saving: Set<string> }>();
   const entry = (voice: PreparedVoice) => {
     const key = voiceKey(voice);
-    if (!voices.has(key)) voices.set(key, { voice: { ...voice, fraction: 0 }, done: new Map(), complete: new Set(), busy: new Set() });
+    if (!voices.has(key)) voices.set(key, { voice: { ...voice, fraction: 0 }, done: new Map(), complete: new Set(), busy: new Set(), saving: new Set() });
     return voices.get(key)!;
   };
   const ids = new Set(chapters.map((c) => c.id));
@@ -61,14 +64,16 @@ export function shelfPreparation(chapters: ShelfChapter[], jobs: ShelfJob[]): Sh
     if (!ids.has(job.docId)) continue;
     const tally = entry({ voiceId: job.voice.id, name: job.voice.name, engine: job.voice.engine, fraction: 0 });
     tally.busy.add(job.docId);
+    // Audio the server has finished counts as prepared already; what is left is downloading it.
+    if (job.status === "saving" || tally.complete.has(job.docId)) tally.saving.add(job.docId);
     // A run starts its count at zero even when most of the audio is already saved.
     const generated = job.total > 0 ? Math.max(0, Math.min(1, job.done / job.total)) : 0;
     tally.done.set(job.docId, Math.max(tally.done.get(job.docId) ?? 0, generated));
   }
-  return [...voices.values()].map(({ voice, done, complete, busy }) => {
+  return [...voices.values()].map(({ voice, done, complete, busy, saving }) => {
     let made = 0;
     for (const chapter of chapters) made += weight(chapter) * (done.get(chapter.id) ?? 0);
-    return { voice, fraction: whole ? Math.min(1, made / whole) : 0, complete: complete.size, busy: busy.size, chapters: chapters.length };
+    return { voice, fraction: whole ? Math.min(1, made / whole) : 0, complete: complete.size, busy: busy.size, saving: saving.size, chapters: chapters.length };
   });
 }
 

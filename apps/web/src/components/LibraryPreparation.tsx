@@ -166,10 +166,19 @@ export function useShelfPreparation(items: LibraryItem[]): ShelfVoice[] {
   return useMemo(() => shelfPreparation(items.map((it) => ({ id: it.rec.id, duration: it.duration, prepared: it.prepared })), jobs.filter(isPreparing)), [items, jobs]);
 }
 
+/** The work left on a book's chapters: "Preparing 3 · saving 74", or "Saving 77" once the audio is all made. */
+export function shelfBusyLabel({ busy, saving }: Pick<ShelfVoice, "busy" | "saving">): string | null {
+  const making = busy - saving;
+  if (!busy) return null;
+  return making ? `Preparing ${making}${saving ? ` · saving ${saving}` : ""}` : `Saving ${saving}`;
+}
+
 /** One voice's share of a whole book in words: "42% of the book · 3 of 12 chapters prepared". */
 export function shelfLabel(tally: ShelfVoice, book?: { kind?: "course" } | null, whole = partNames(book).whole): string {
   const { many } = partNames(book);
-  return `${shelfPercent(tally)}% of the ${whole} · ${tally.complete} of ${tally.chapters} ${many} prepared${tally.busy ? ` · ${tally.busy} being prepared` : ""}`;
+  const making = tally.busy - tally.saving;
+  const busy = [making && `${making} being prepared`, tally.saving && `${tally.saving} being saved on this device`].filter(Boolean).join(" · ");
+  return `${shelfPercent(tally)}% of the ${whole} · ${tally.complete} of ${tally.chapters} ${many} prepared${busy ? ` · ${busy}` : ""}`;
 }
 
 /**
@@ -187,7 +196,7 @@ export function ShelfSummary({ items, className, whole }: { items: LibraryItem[]
           <span aria-hidden className="shrink-0"><ProgressRing value={tally.fraction} size={16} stroke={1.75} /></span>
           <VoiceServiceName source={voiceSource(tally.voice)} className="whitespace-nowrap">{tally.voice.name}</VoiceServiceName>
           <span className="whitespace-nowrap tabular-nums">{shelfPercent(tally)}% · {tally.complete}/{tally.chapters}</span>
-          {tally.busy > 0 && <span className="min-w-0 truncate text-accent">Preparing {tally.busy}</span>}
+          {tally.busy > 0 && <span className="min-w-0 truncate text-accent">{shelfBusyLabel(tally)}</span>}
         </span>
       ))}
     </div>
@@ -387,7 +396,7 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
             <dt className="text-fg2">Whole {wholeName}</dt>
             <dd className="m-0 flex min-w-0 items-center gap-2 tabular-nums text-fg">
               <ProgressRing value={shelf?.fraction ?? 0} size={16} stroke={1.75} label={`${voice.name}: ${shelf ? shelfLabel(shelf, it.rec.book) : `nothing of the ${wholeName} prepared`}`} />
-              <span>{shelf ? shelfPercent(shelf) : 0}% prepared · {shelf?.complete ?? 0} of {chapters.length} {many}{shelf?.busy ? <span className="text-accent"> · {shelf.busy} being prepared</span> : null}</span>
+              <span>{shelf ? shelfPercent(shelf) : 0}% prepared · {shelf?.complete ?? 0} of {chapters.length} {many}{shelf?.busy ? <span className="text-accent"> · {shelfBusyLabel(shelf)?.toLowerCase()}</span> : null}</span>
             </dd>
           </div>
         )}
@@ -510,7 +519,7 @@ export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading)
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
         <span className="grid size-7 shrink-0 place-items-center rounded-full bg-bg3 text-accent" aria-hidden><Zap size={14} /></span>
         <div className="min-w-0 flex-1">
-          <span className="block text-sm font-medium" role="status">{pending.length ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}${saving ? ` · ${saving} saving` : ""}` : "Audio preparation finished"}</span>
+          <span className="block text-sm font-medium" role="status">{pending.length ? (preparing || queued ? `Preparing audio · ${preparing} active${queued ? ` · ${queued} queued` : ""}${saving ? ` · ${saving} saving` : ""}` : `Saving audio on this device · ${saving} ${saving === 1 ? "reading" : "readings"}`) : "Audio preparation finished"}</span>
           {pending.length > 0 && space && space.total > 0 && (
             <span className="block text-[12px] text-fg2">
               ≈{formatBytes(space.total)} to save on this device{room && <span className="text-danger"> · {room}</span>}

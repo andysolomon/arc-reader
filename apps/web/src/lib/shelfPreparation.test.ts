@@ -26,6 +26,16 @@ describe("shelfPreparation", () => {
     expect(tally.complete).toBe(0);
   });
 
+  it("tells chapters only being copied onto the device apart from ones still being made", () => {
+    const [tally] = shelfPreparation([
+      { id: "made", duration: 100, prepared: [{ ...bella, fraction: 1 }] },
+      { id: "downloading", duration: 100, prepared: [{ ...bella, fraction: 0.4 }] },
+      { id: "new", duration: 100, prepared: [] },
+    ], [job("made", 0, 10), { ...job("downloading", 10, 10), status: "saving" }, job("new", 2, 10)]);
+    expect(tally.busy).toBe(3);
+    expect(tally.saving).toBe(2);
+  });
+
   it("ignores queue entries for other documents and keeps voices apart", () => {
     const voices = shelfPreparation([
       { id: "one", duration: 100, prepared: [{ ...bella, fraction: 1 }, { voiceId: "jasper", name: "Jasper", engine: "voicestudio", fraction: 0.5 }] },
