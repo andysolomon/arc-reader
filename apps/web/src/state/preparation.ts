@@ -177,7 +177,9 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   partialize: ({ jobs, hiddenShared }) => ({ jobs: jobs.filter((job) => !job.remote), hiddenShared }),
   merge: (persisted, current) => {
     const { jobs = [], hiddenShared = [] } = (persisted ?? {}) as { jobs?: PreparationJob[]; hiddenShared?: string[] };
-    return { ...current, hiddenShared, jobs: jobs.filter((job) => !clearsItself(job)).map((job) => ["preparing", "saving"].includes(job.status) ? { ...job, status: "queued", message: undefined, step: undefined, worker: undefined, waitingFor: undefined, ahead: undefined, busy: undefined } : job) };
+    // A reading the server had already made goes back to saving, not to the server's queue.
+    return { ...current, hiddenShared, jobs: jobs.filter((job) => !clearsItself(job)).map((job) => job.status === "saving" ? { ...job, message: WAITING_TO_SAVE, step: undefined }
+      : job.status === "preparing" ? { ...job, status: "queued", message: undefined, step: undefined, worker: undefined, waitingFor: undefined, ahead: undefined, busy: undefined } : job) };
   },
   // Local storage hydrates synchronously, before usePreparation is initialized.
   // Re-enter the worker afterwards; server jobs reconnect and saved audio is reused.
@@ -218,7 +220,15 @@ function drain() {
     const provider = providerFor(job);
     const background = preparesOnServer(job.voice.engine);
     const limit = background ? PREPARATION_QUEUE_LIMIT : provider === "voicestudio" ? 1 : PREPARATION_CONCURRENCY;
-    if (job.status !== "queued" || active.has(job.id) || (counts.get(provider) || 0) >= limit) continue;
+    if (active.has(job.id)) continue;
+    // Restored from before a reload: the server has made it, so only saving is left and it takes no machine.
+    if (job.status === "saving") {
+      const controller = new AbortController();
+      active.set(job.id, { controller, provider, saving: true });
+      void run(job, controller.signal).finally(() => { active.delete(job.id); drain(); });
+      continue;
+    }
+    if (job.status !== "queued" || (counts.get(provider) || 0) >= limit) continue;
     const controller = new AbortController();
     active.set(job.id, { controller, provider });
     counts.set(provider, (counts.get(provider) || 0) + 1);
@@ -282,9 +292,21 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     const { sentences } = segment(text, rec.codeSummaries, rec.visualDescriptions);
     const passages = planPassages(sentences);
     if (!passages.length) throw new Error("There is no text to prepare.");
+    // Passages already saved on this device are not asked for or read again.
+    const keyOf = (passage: { text: string }) => cacheKey({ text: passage.text, voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel });
+    const saved = await Promise.all(passages.map((passage) => audioCache.has(keyOf(passage)).catch(() => false)));
+    signal.throwIfAborted();
+    const missing = passages.filter((_, i) => !saved[i]);
+    const kept = passages.length - missing.length;
+    if (!missing.length) {
+      update(job.id, { status: "ready", done: passages.length, total: passages.length, message: undefined, worker: undefined, waitingFor: undefined });
+      return;
+    }
     const onServer = preparesOnServer(job.voice.engine);
-    update(job.id, { total: passages.length, message: onServer ? SENDING : undefined });
-    if (onServer) {
+    // Restored after a reload with the server's part already done.
+    const serverDone = job.status === "saving";
+    update(job.id, { total: passages.length, done: Math.max(job.done, kept), message: onServer && !serverDone ? SENDING : undefined });
+    if (onServer && !serverDone) {
       await prepareInBackground(passages.map((passage) => ({
         text: passage.text, voice: job.voice.id, engine: job.voice.engine, profile: job.voice.kind === "profile",
       })), 0, (done, total, status) => {
@@ -310,8 +332,9 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     }
     const release = onServer ? await saveTurn(signal) : undefined;
     try {
-      if (onServer) update(job.id, { message: undefined, step: { done: 0, total: passages.length } });
-      for (const passage of passages) {
+      let stored = kept;
+      if (onServer) update(job.id, { message: undefined, step: { done: stored, total: passages.length } });
+      for (const passage of missing) {
         signal.throwIfAborted();
         const req = {
           text: passage.text, voice: job.voice.id, engine: job.voice.engine, openaiModel: job.openaiModel, docId: job.docId,
@@ -325,7 +348,8 @@ async function run(job: PreparationJob, signal: AbortSignal) {
         if (!chunk.audio) throw new Error("This voice did not return audio to prepare.");
         // Older sentence clips can be joined in memory; those are already safely cached.
         if (chunk.source !== "cache" && !(await audioCache.get(cacheKey(req)))) throw new Error("Could not save prepared audio. Free some storage and retry.");
-        update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, passage.index + 1), ...(onServer ? { step: { done: passage.index + 1, total: passages.length } } : {}) });
+        stored++;
+        update(job.id, { done: Math.max(usePreparation.getState().jobs.find((j) => j.id === job.id)?.done || 0, stored), ...(onServer ? { step: { done: stored, total: passages.length } } : {}) });
       }
     } finally {
       release?.();

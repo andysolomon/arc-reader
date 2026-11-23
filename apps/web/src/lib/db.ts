@@ -330,6 +330,8 @@ export const audioCache = {
   get: async (key: string) => (await db()).get("audio", key),
   /** Read coverage without loading audio blobs into memory. */
   keys: async () => (await db()).getAllKeys("audio"),
+  /** Whether a clip is saved, without loading its audio. */
+  has: async (key: string) => (await (await db()).getKey("audio", key)) !== undefined,
   subscribe(listener: () => void) {
     audioListeners.add(listener);
     return () => { audioListeners.delete(listener); };

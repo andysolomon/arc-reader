@@ -135,6 +135,29 @@ describe("Library preparation queue", () => {
     expect(generated).toEqual(["First a.", "Second a."]);
   });
 
+  it("finishes a reading already saved on this device without asking the server again", async () => {
+    for (const text of ["First a.", "Second a."]) {
+      await audioCache.put({ key: cacheKey({ text, voice: bella.id, engine: bella.engine, openaiModel: "tts-1" }), blob: new Blob(["audio"]), mime: "audio/mpeg", duration: 1, createdAt: 0 });
+    }
+    usePreparation.getState().enqueue([record("a")], [bella]);
+    await settled();
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "ready", done: 2, total: 2 });
+    expect(prepareInBackground).not.toHaveBeenCalled();
+    expect(synthesize).not.toHaveBeenCalled();
+  });
+
+  it("goes back to saving after a reload, only for the passages not saved yet", async () => {
+    await audioCache.put({ key: cacheKey({ text: "First a.", voice: bella.id, engine: bella.engine, openaiModel: "tts-1" }), blob: new Blob(["audio"]), mime: "audio/mpeg", duration: 1, createdAt: 0 });
+    const saving: PreparationJob = { id: "a", docId: "a", title: "a", voice: bella, openaiModel: "tts-1", wordTimings: true, status: "saving", done: 2, total: 2, step: { done: 1, total: 2 }, serverId: "s1" };
+    localStorage.setItem("readaloud:preparation-queue", JSON.stringify({ state: { jobs: [saving] }, version: 0 }));
+    await usePreparation.persist.rehydrate();
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "saving", message: "Waiting to save on this device" });
+    await settled();
+    expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "ready", done: 2 });
+    expect(prepareInBackground).not.toHaveBeenCalled();
+    expect(vi.mocked(synthesize).mock.calls.map(([r]) => r.text)).toEqual(["Second a."]);
+  });
+
   it("cancels a reading waiting for reconnection and advances the queue", async () => {
     vi.mocked(synthesize).mockRejectedValueOnce(new TypeError("Server restarted"));
     usePreparation.getState().enqueue([record("a"), record("b")], [bella]);

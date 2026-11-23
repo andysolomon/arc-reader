@@ -765,7 +765,7 @@ const DIAGRAMS = {
       "The job belongs to the web server, not to the browser tab: it survives reloads, a sleeping phone and server restarts (jobs are files on disk), and identical readings share one job.",
     ],
     pools: [
-      { id: "P_br", n: "Browser · prerender() / Library queue", x: 0, y: 0, w: 1420, h: 240, lanes: [], d: "player.prerender() → engine.prepare() for the open reading; the Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:318", SRC + "state/preparation.ts:213"] },
+      { id: "P_br", n: "Browser · prerender() / Library queue", x: 0, y: 0, w: 1420, h: 240, lanes: [], d: "player.prerender() → engine.prepare() for the open reading; the Library’s preparation queue (state/preparation.ts) does the same for document × voice pairs, up to 20 queued.", code: [SRC + "state/player.ts:318", SRC + "state/preparation.ts:215"] },
       { id: "P_srv", n: "Vite server · PreparationService", x: 0, y: 300, w: 1420, lanes: [
         { id: "L_api", n: "Job API", h: 200, d: "/api/preparations: GET / (the shared catalogue: clips available, and clips only some device holds), POST (submit), GET /:id (status), GET /:id/audio/:i (clip), PUT /:id/audio/:i (a device publishes a clip it already has), DELETE /:id (cancel).", code: ["apps/web/vite.prepare.ts:575"] },
         { id: "L_sched", n: "Machine scheduler", h: 170, d: "One whole reading per machine at a time.", code: ["apps/web/vite.prepare.ts:181"] },
