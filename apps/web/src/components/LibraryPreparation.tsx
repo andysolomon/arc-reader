@@ -101,10 +101,10 @@ export function useReadings(it: LibraryItem, defaultVoice: string): { voiceId: s
   return { voiceId, live, readings };
 }
 
-export function PreparedStatus({ it, defaultVoice, onDetails }: { it: LibraryItem; defaultVoice: string; onDetails: (reading: Reading) => void }) {
+export function PreparedStatus({ it, defaultVoice, onDetails, className }: { it: LibraryItem; defaultVoice: string; onDetails: (reading: Reading) => void; className?: string }) {
   const { voiceId, live, readings } = useReadings(it, defaultVoice);
   return (
-    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Prepared audio">
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)} role="group" aria-label="Prepared audio">
       {live && (
         <span className="mr-1 inline-flex h-7 items-center gap-1.5 whitespace-nowrap text-[12px] text-fg2" title="Reading voice">
           <Volume2 size={13} strokeWidth={1.5} className="shrink-0 text-fg3" aria-hidden />
