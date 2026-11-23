@@ -149,6 +149,9 @@ export function SettingsPage() {
             <RowItem label="Auto-play on share" hint="When text arrives from the share sheet, open the Reader already playing.">
               <Switch checked={s.autoplayShare} onChange={(v) => s.set("autoplayShare", v)} label="Auto-play on share" />
             </RowItem>
+            <RowItem label="Covers" hint="Every article gets a cover, and each section under a heading gets its own, drawn in the background after you add it. Turn this off to read without them; covers for new articles are still drawn.">
+              <Switch checked={s.showCovers} onChange={(v) => s.set("showCovers", v)} label="Covers" />
+            </RowItem>
             <RowItem label="Show links as they are read" hint="When a linked word or phrase has been read, its link appears for a few seconds. Every link is also listed under Links in the Reader.">
               <Switch checked={s.linkToasts} onChange={(v) => s.set("linkToasts", v)} label="Show links as they are read" />
             </RowItem>

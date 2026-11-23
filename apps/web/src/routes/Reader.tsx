@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Star, Headphones, Code2, Check, ImageIcon, Workflow, X } from "lucide-react";
@@ -29,6 +29,11 @@ import { BookOffer, ChapterNav, MissingChapters, chapterLabel, useOpenChapter } 
 import { neighbours } from "../state/books";
 import { useLibrary } from "../state/library";
 import { useFavorites } from "../state/favorites";
+import { Cover } from "../components/Cover";
+import { useCovers, useDocCovers } from "../state/covers";
+import { coverPlaces } from "../lib/covers";
+import { summarySource } from "../lib/summary";
+import { catalogue } from "../lib/postTitle";
 
 export function Reader() {
   const { id } = useParams();
@@ -51,7 +56,7 @@ export function Reader() {
   const setShortcuts = usePlayer((s) => s.setShortcutsOpen);
   const record = usePlayer((s) => s.record);
   const readingSummary = usePlayer((s) => s.summary);
-  const { fontSize, wide, highlightStyle, showSummary, showDiagram, set } = useSettings();
+  const { fontSize, wide, highlightStyle, showSummary, showDiagram, showCovers, set } = useSettings();
   const theme = getTheme(useThemeId());
   const cycleTheme = useCycleTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -114,6 +119,23 @@ export function Reader() {
     void useFavorites.getState().toggle(detailsRecord);
     toast(favorited ? "Removed from favorites" : "Added to favorites · estimating a premium read");
   };
+  // Covers belong to the article as written: not to its summary, and not to the page stripped down for focus.
+  const coverRecord = showCovers && detailsRecord && !readingSummary ? detailsRecord : null;
+  const coverVersion = useMemo(() => coverRecord ? summarySource(coverRecord.text) : "", [coverRecord?.text]);
+  const covers = useDocCovers(coverRecord?.id, coverVersion, !!coverRecord);
+  const redraw = () => { if (coverRecord) void useCovers.getState().ensure(coverRecord.id, true).catch(() => toast("The covers couldn't be asked for. Try again when you're connected.")); };
+  const articleCover = coverRecord && covers?.docId === coverRecord.id && !focus ? covers.covers.find((cover) => cover.kind === "article" && cover.status !== "blocked") : undefined;
+  const sectionCovers = useMemo(() => {
+    const inserts = new Map<number, ReactNode>();
+    if (!coverRecord || !ready || focus || covers?.docId !== coverRecord.id) return inserts;
+    const sections = covers.covers.filter((cover) => cover.kind === "section" && cover.status !== "blocked");
+    const eyebrow = catalogue(coverRecord).title;
+    for (const [paragraph, key] of coverPlaces(doc.paragraphs, sections, covers.headings)) {
+      const cover = sections.find((section) => section.key === key)!;
+      inserts.set(paragraph, <Cover cover={cover} eyebrow={eyebrow} foot={cover.path.length > 1 ? cover.path[cover.path.length - 2] : undefined} onRetry={redraw} className="max-w-[18rem] font-sans" />);
+    }
+    return inserts;
+  }, [coverRecord, covers, doc, ready, focus]);
   const hasLinks = !!ready && links.length > 0;
   const showLinks = hasLinks && linksOpen && !focus;
   const chapter = detailsRecord?.book && !readingSummary ? detailsRecord : null;
@@ -243,6 +265,15 @@ export function Reader() {
         <motion.div layoutId="doc-surface" className="mx-auto" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
           {detailsRecord && !focus && !readingSummary && <BookOffer record={detailsRecord} />}
           {detailsRecord && !focus && !readingSummary && <VideoTranscript record={detailsRecord} />}
+          {articleCover && coverRecord && (
+            <Cover
+              cover={articleCover}
+              eyebrow={coverRecord.meta?.site || coverRecord.domain}
+              foot={[catalogue(coverRecord).author, coverRecord.meta?.published].filter(Boolean).join(" · ") || undefined}
+              onRetry={redraw}
+              className="mb-9 max-w-[21rem]"
+            />
+          )}
           {ready && !focus && (
             <div className="mb-10 border-b border-line pb-7">
               <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-medium uppercase tracking-[0.16em] text-fg2">
@@ -285,6 +316,7 @@ export function Reader() {
               wide={wide}
               onSeek={seek}
               scrollRef={scrollRef}
+              inserts={sectionCovers}
             />
           ) : missing ? null : (
             <div className="flex flex-col gap-3 font-serif" style={{ fontSize }} aria-busy="true" aria-label="Loading document">

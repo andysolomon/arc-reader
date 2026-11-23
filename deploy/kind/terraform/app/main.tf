@@ -45,6 +45,8 @@ module "readaloud" {
   voicestudio_secondary_name       = local.env.voicestudio_secondary_name
   llm_url                          = local.env.llm_url
   preparation_yield_ms             = local.env.preparation_yield_ms
+  covers                           = local.env.covers
+  cover_daily_limit                = local.env.cover_daily_limit
   voicestudio_asr_model            = local.env.voicestudio_asr_model
   voicestudio_api_key              = local.env.voicestudio_api_key
   voicestudio_secondary_api_key    = local.env.voicestudio_secondary_api_key

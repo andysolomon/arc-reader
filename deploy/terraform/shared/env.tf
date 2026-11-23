@@ -24,6 +24,14 @@ variable "preparation_yield_ms" {
   type    = string
   default = null
 }
+variable "covers" {
+  type    = string
+  default = null
+}
+variable "cover_daily_limit" {
+  type    = string
+  default = null
+}
 variable "voicestudio_asr_model" {
   type    = string
   default = null
@@ -79,6 +87,8 @@ locals {
     voicestudio_secondary_name       = var.voicestudio_secondary_name
     llm_url                          = var.llm_url
     preparation_yield_ms             = var.preparation_yield_ms
+    covers                           = var.covers
+    cover_daily_limit                = var.cover_daily_limit
     voicestudio_asr_model            = var.voicestudio_asr_model
     voicestudio_api_key              = var.voicestudio_api_key
     voicestudio_secondary_api_key    = var.voicestudio_secondary_api_key

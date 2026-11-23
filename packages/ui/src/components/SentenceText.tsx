@@ -1,6 +1,6 @@
 import { VisualFigure } from "./VisualFigure";
 import { CodeBlock } from "./CodeBlock";
-import { memo, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, memo, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Code2, ChevronDown } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { HighlightMode, ParagraphLike } from "../lib/types";
@@ -20,6 +20,8 @@ export interface SentenceTextProps {
   onSeek?: (index: number) => void;
   /** Scroll container; when provided, the active sentence is kept one third down */
   scrollRef?: React.RefObject<HTMLElement | null>;
+  /** Shown before the paragraph at each index, outside the text: a section's cover before its heading */
+  inserts?: ReadonlyMap<number, ReactNode>;
   className?: string;
 }
 
@@ -37,6 +39,7 @@ export const SentenceText = memo(function SentenceText({
   wide,
   onSeek,
   scrollRef,
+  inserts,
   className,
 }: SentenceTextProps) {
   const ref = useRef<HTMLElement>(null);
@@ -128,12 +131,16 @@ export const SentenceText = memo(function SentenceText({
         if (p.heading) {
           // The document's title is the page's h1, so its own headings start at h2.
           const Heading = p.heading <= 2 ? "h2" : p.heading === 3 ? "h3" : "h4";
-          return (
+          const insert = inserts?.get(pi);
+          const heading = (
             <Heading key={pi} data-heading={p.heading} className={cn(
-              "mb-[0.6em] mt-[1.7em] font-medium leading-[1.25] [text-wrap:balance] first:mt-0",
+              "mb-[0.6em] font-medium leading-[1.25] [text-wrap:balance]",
+              // Under its cover a heading sits close; alone it keeps its distance from the text above.
+              insert ? "mt-[0.9em]" : "mt-[1.7em] first:mt-0",
               p.heading <= 2 ? "text-[1.45em] tracking-[-0.015em]" : p.heading === 3 ? "text-[1.2em] tracking-[-0.01em]" : "text-[1.05em]",
             )}>{content}</Heading>
           );
+          return insert ? <Fragment key={pi}><div data-insert className="mt-[2.2em] first:mt-0">{insert}</div>{heading}</Fragment> : heading;
         }
         return <p key={pi} className="mb-[1.35em] mt-0 last:mb-0">{content}</p>;
       })}

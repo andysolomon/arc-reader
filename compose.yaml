@@ -81,6 +81,9 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       PREPARATION_DATA_DIR: /app/preparations
       PREPARATION_YIELD_MS: ${PREPARATION_YIELD_MS:-}
+      # Article covers use OPENAI_API_KEY. COVERS=off makes none; the limit caps new art in 24 hours.
+      COVERS: ${COVERS:-}
+      COVER_DAILY_LIMIT: ${COVER_DAILY_LIMIT:-}
       LIBRARY_DATA_DIR: /app/library
     volumes:
       - preparation-data:/app/preparations
