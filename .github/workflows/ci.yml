@@ -15,6 +15,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -23,6 +25,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pnpm check
+      - name: Refuse attribution trailers in the PR's commits
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          for c in $(git rev-list "origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}"); do
+            git log -1 --format=%B "$c" > "$RUNNER_TEMP/msg"
+            sh scripts/git-hooks/commit-msg "$RUNNER_TEMP/msg" || { echo "in commit $c"; exit 1; }
+          done
 
   e2e:
     runs-on: ubuntu-latest

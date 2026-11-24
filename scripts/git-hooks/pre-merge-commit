@@ -6,5 +6,5 @@
 echo "pre-merge-commit: running pnpm check before merging into main" >&2
 pnpm --silent check >"$(git rev-parse --git-dir)/pre-merge-check.log" 2>&1 && exit 0
 tail -40 "$(git rev-parse --git-dir)/pre-merge-check.log" >&2
-echo "pre-merge-commit: pnpm check failed, so nothing was merged or deployed. Fix the branch and merge again (full log: $(git rev-parse --git-dir)/pre-merge-check.log)." >&2
+echo "pre-merge-commit: pnpm check failed, so nothing was merged or deployed. Run \`git merge --abort\` here to put main back, fix the branch, and merge again. Full log: $(git rev-parse --git-dir)/pre-merge-check.log" >&2
 exit 1

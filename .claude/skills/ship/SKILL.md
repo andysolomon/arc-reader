@@ -17,7 +17,6 @@ BRANCH=$(git branch --show-current)
 ## 1. Commit
 
 - Run `git status --short`. Stage the task's changes and commit with a message that says what changed and why.
-- Never add `Co-Authored-By` or "Generated with" trailers. Commits are authored solely by Andrew Solomon.
 - If there is nothing to commit and `git log --oneline main..HEAD` is empty, the work is already shipped. Say so, then skip to step 5 to confirm the deploy.
 
 ## 2. Bring main into the branch
@@ -69,6 +68,8 @@ git -C "$MAIN" merge --no-ff -m "Merge <one-line summary of the change>" "$BRANC
 ```
 
 If the main checkout is dirty or not on `main`, stop and tell the user rather than stashing or switching. The stash stack is shared with other sessions.
+
+The versioned `pre-merge-commit` hook (scripts/git-hooks, linked by `pnpm install`) runs `pnpm check` first and refuses the merge if it fails; then run `git -C "$MAIN" merge --abort` and fix the branch. Never pass `--no-verify`.
 
 The `post-merge` hook in the shared `.git/hooks` starts `deploy/kind/deploy.sh` in the background (build the web image, load it into kind, roll out) and logs to `.git/docker-rebuild.log`.
 
