@@ -22,6 +22,14 @@ describe("prepared audio coverage", () => {
     expect(preparedVoices({ ...rec, text: "Different text." }, [bella], keys, "gpt-4o-mini-tts")).toEqual([]);
   });
 
+  it("tells audio stored on this device apart from audio only the server has", () => {
+    const server = key("One two. Three four.");
+    const here = key("Five six.");
+    const [voice] = preparedVoices(rec, [bella], new Set([server, here]), "gpt-4o-mini-tts", new Set(), planReading(rec), new Set([here]));
+    expect(voice.fraction).toBe(1);
+    expect(voice.stored).toBe(1 / 3);
+  });
+
   it("matches the engine and OpenAI model used for playback", () => {
     const voice = OPENAI_VOICES[0];
     const keys = new Set([key("One two. Three four.", voice, "tts-1")]);

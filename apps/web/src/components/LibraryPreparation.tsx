@@ -92,7 +92,7 @@ export function useReadings(it: LibraryItem, defaultVoice: string): { voiceId: s
       ? job.message ?? (job.status === "queued" ? (job.waitingFor ? `Waiting for ${job.waitingFor}` : "Queued") : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing")
       : player ? (player.unreachable ? "Can’t reach server" : "Preparing") : undefined;
     // The made audio is copied here passage by passage; until the copy starts, the library's last look at this device stands.
-    const saved = job?.status === "saving" ? Math.max(voice.fraction, job.step && job.step.total > 0 ? Math.min(1, job.step.done / job.step.total) : 0) : null;
+    const saved = job?.status === "saving" ? Math.max(voice.stored ?? voice.fraction, job.step && job.step.total > 0 ? Math.min(1, job.step.done / job.step.total) : 0) : null;
     const progress = counted && counted.total > 0 ? `${percent}% generated · ${counted.done}/${counted.total} passages` : `${percent}% prepared`;
     return {
       voice, reading: { docId: it.rec.id, voiceId: voice.voiceId, engine: voice.engine }, fraction, saved, active: !!counted, stage,
@@ -462,6 +462,22 @@ function useSpaceNeeded(jobs: PreparationJob[]) {
   }, [device, items, jobs]);
 }
 
+/** For each reading being copied onto this device, 0..1 of it stored here: the save under way counts each passage as it lands. */
+function useStoredOnDevice(jobs: PreparationJob[]) {
+  const items = useLibrary((s) => s.items);
+  return useMemo(() => {
+    const recs = new Map(items.map((it) => [it.rec.id, it]));
+    const out = new Map<string, number>();
+    for (const job of jobs) {
+      if (job.status !== "saving") continue;
+      const voice = recs.get(job.docId)?.prepared.find((v) => v.voiceId === job.voice.id && v.engine === job.voice.engine);
+      const step = job.step && job.step.total > 0 ? job.step.done / job.step.total : 0;
+      out.set(job.id, Math.min(1, Math.max(voice?.stored ?? 0, step)));
+    }
+    return out;
+  }, [items, jobs]);
+}
+
 /** The books whose chapters are in the queue, each with how much of the whole the voice has prepared so far. */
 function QueueBooks({ jobs }: { jobs: PreparationJob[] }) {
   const items = useLibrary((s) => s.items);
@@ -485,7 +501,9 @@ function QueueBooks({ jobs }: { jobs: PreparationJob[] }) {
 }
 
 function QueueBook({ book, voices, chapters }: { book: NonNullable<LibraryItem["rec"]["book"]>; voices: Set<string>; chapters: LibraryItem[] }) {
-  const tallies = useShelfPreparation(chapters).filter((tally) => voices.has(`${tally.voice.engine}:${tally.voice.voiceId}`));
+  // A book whose audio is all made has nothing left to prepare; its chapters' saves show in the rows below.
+  const tallies = useShelfPreparation(chapters).filter((tally) => voices.has(`${tally.voice.engine}:${tally.voice.voiceId}`) && tally.complete < tally.chapters);
+  if (!tallies.length) return null;
   return (
     <>
       {tallies.map((tally) => (
@@ -508,6 +526,7 @@ function QueueBook({ book, voices, chapters }: { book: NonNullable<LibraryItem["
 export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading) => void }) {
   const { jobs, cancel, cancelAll, dismissFinished, sharedError, sharing } = usePreparation();
   const space = useSpaceNeeded(jobs);
+  const stored = useStoredOnDevice(jobs);
   if (!jobs.length && !sharedError && !sharing) return null;
   const pending = jobs.filter(isPreparing);
   const preparing = pending.filter((job) => job.status === "preparing").length;
@@ -542,14 +561,16 @@ export function PreparationQueue({ onDetails }: { onDetails?: (reading: Reading)
         <ul className="m-0 max-h-64 list-none divide-y divide-line overflow-y-auto border-t border-line p-0">
           {shown.map((job) => (
             <li key={job.id} className="flex min-h-12 items-center gap-3 px-4 py-2 text-[12px]">
-              <span aria-hidden className="shrink-0"><ProgressRing value={job.status === "ready" ? 1 : job.total > 0 ? job.done / job.total : 0} size={18} stroke={2} /></span>
+              {job.status === "saving"
+                ? <span className="shrink-0" title="Saved on this device"><ProgressRing value={stored.get(job.id) ?? 0} size={18} stroke={2} label={`${job.title}: ${Math.floor((stored.get(job.id) ?? 0) * 100)}% saved on this device`} /></span>
+                : <span aria-hidden className="shrink-0"><ProgressRing value={job.status === "ready" ? 1 : job.total > 0 ? job.done / job.total : 0} size={18} stroke={2} /></span>}
               <button type="button" disabled={!onDetails} title="Preparation details" aria-haspopup="dialog" onClick={() => onDetails?.({ docId: job.docId, voiceId: job.voice.id, engine: job.voice.engine })} className="block min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-left text-[12px] disabled:cursor-default">
                 <div className="truncate text-[13px] text-fg">{job.title}</div>
                 <div className="flex min-w-0 items-center gap-1.5 text-fg2">
                   <VoiceServiceName source={voiceSource(job.voice)} className="shrink-0">{job.voice.name}</VoiceServiceName>
                   <span aria-hidden className="text-fg3">·</span>
                   <span className={cn("truncate", job.status === "error" && "text-danger", job.status === "preparing" && "text-accent")}>
-                    {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? job.message ?? "Saving audio on this device…" : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? `Queued · waiting for ${job.waitingFor ?? "a free machine"}`}
+                    {job.status === "preparing" ? job.message ?? `Preparing${job.worker ? ` on ${job.worker}` : ""} · ${job.done}/${job.total} passages` : job.status === "saving" ? `${Math.floor((stored.get(job.id) ?? 0) * 100)}% saved · ${job.message ?? "Saving audio on this device"}` : job.status === "ready" ? job.message ?? (job.remote ? "Prepared on server" : "Prepared") : job.status === "error" ? job.message : job.status === "cancelled" ? "Cancelled · saved audio kept" : job.message ?? `Queued · waiting for ${job.waitingFor ?? "a free machine"}`}
                   </span>
                 </div>
               </button>

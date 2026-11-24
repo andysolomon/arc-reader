@@ -61,7 +61,7 @@ export function shelfPreparation(chapters: ShelfChapter[], jobs: ShelfJob[]): Sh
       if (voice.fraction <= 0) continue;
       const tally = entry(voice);
       tally.done.set(chapter.id, Math.min(1, voice.fraction));
-      tally.stored.set(chapter.id, Math.min(1, voice.fraction));
+      tally.stored.set(chapter.id, Math.min(1, voice.stored ?? voice.fraction));
       if (voice.fraction >= 1) tally.complete.add(chapter.id);
     }
   }
