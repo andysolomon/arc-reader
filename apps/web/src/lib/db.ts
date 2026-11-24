@@ -2,7 +2,6 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { readsOf, type LibraryChange, type PendingChange } from "./libraryProtocol";
 import { uid } from "./hash";
 import type { DocLink } from "./links";
-import type { SavedDiagram } from "./articleDiagram";
 import { deviceStorage } from "./storage";
 import { audioLimitFor, DEFAULT_AUDIO_LIMIT, type AudioLimitChoice } from "./audioLimit";
 
@@ -69,8 +68,6 @@ export interface DocRecord {
   patois?: { sourceText: string; text: string; version: number };
   /** LLM summary of `text`; `source` fingerprints the text it was made from. */
   summary?: { source: string; text: string; model: string; version: number; createdAt: number };
-  /** A diagram of `text` a model laid out (see articleDiagram.ts); `source` fingerprints that text. */
-  diagram?: SavedDiagram;
   /** Spoken explanations keyed by code content, shared across voices and devices. */
   codeSummaries?: Record<string, string>;
   /** Cached descriptions keyed by visual source, alt text, and caption. */
