@@ -160,12 +160,15 @@ test("the Library shows each article's cover, and Settings turns covers off", as
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await expect(page.locator("main [data-cover-thumb] img").first()).toHaveAttribute("src", "/api/covers/images/article.png");
+  // The cover leads the row, and where the article came from stays on its corner.
+  await expect(page.locator("main [data-source-badge]").first()).toBeVisible();
 
   await page.goto("/settings");
   await page.getByRole("switch", { name: "Covers" }).click();
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await expect(page.locator("[data-cover-thumb]")).toHaveCount(0);
+  await expect(page.locator("[data-source-badge]")).toHaveCount(0);
   const asked = server.ensures.length;
   await page.getByRole("button", { name: "Bread Notes" }).first().click();
   await page.getByRole("region", { name: "Player" }).waitFor();
