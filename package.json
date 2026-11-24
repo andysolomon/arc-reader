@@ -9,6 +9,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "check": "pnpm typecheck && pnpm test",
+    "verify:preparation": "node apps/web/verification/preparation/check.mjs",
     "test:e2e": "pnpm --filter @readaloud/web test:e2e",
     "cadence": "pnpm --filter @readaloud/cadence dev",
     "test:e2e:cadence": "pnpm --filter @readaloud/cadence test:e2e",
