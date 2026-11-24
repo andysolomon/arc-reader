@@ -15,6 +15,7 @@ CONSTANTS
     QueueLimit,       \* PREPARATION_QUEUE_LIMIT (20 in the code)
     SaveConcurrency,  \* SAVE_CONCURRENCY (2 in the code)
     MaxReloads,       \* page reloads in one behavior
+    UnloadFailsClips, \* a reload fails the clip downloads in flight, and the old page persists what run() does about it
     \* Each switch below puts one fixed bug back when TRUE. All are FALSE for the current code.
     SavingHoldsSlot,       \* 179a031^ :209 drain counted every active entry, so a saving reading kept its place
     ClipWaitsForever,      \* 179a031^ engine/preparation.ts:333 the clip fetch in preparedAudio had no time limit
@@ -187,13 +188,17 @@ ClipTimesOut(j) ==
 
 (***************************************************************************)
 (* The page reloads. merge (:178-183) restores the persisted statuses, and *)
-(* onRehydrateStorage (:186) drains. In-memory state and in-flight         *)
-(* requests are gone; audioCache and the server's jobs stay.               *)
+(* onRehydrateStorage (:186) drains. In-memory state is gone; audioCache   *)
+(* and the server's jobs stay. With UnloadFailsClips, the browser fails    *)
+(* the clip downloads in flight first, and run()'s catch on the old page   *)
+(* may persist those readings as "queued" (:360-361) before it unloads.    *)
 (***************************************************************************)
 Reload ==
     /\ reloads < MaxReloads
-    /\ LET st == [j \in Jobs |-> IF status[j] = "saving" /\ RestoreSavingAsQueued THEN "queued" ELSE status[j]]
-       IN  Settle(st, [j \in Jobs |-> "none"], [j \in Jobs |-> "idle"])
+    /\ \E failed \in SUBSET {j \in Jobs : UnloadFailsClips /\ pc[j] = "walking"} :
+          LET left == [j \in Jobs |-> IF j \in failed THEN "queued" ELSE status[j]]
+              st == [j \in Jobs |-> IF left[j] = "saving" /\ RestoreSavingAsQueued THEN "queued" ELSE left[j]]
+          IN  Settle(st, [j \in Jobs |-> "none"], [j \in Jobs |-> "idle"])
     /\ todo' = [j \in Jobs |-> {}]
     /\ savingNow' = 0
     /\ reloads' = reloads + 1

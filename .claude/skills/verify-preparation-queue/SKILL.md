@@ -24,6 +24,7 @@ Each line ends in `ok` or `FAIL`. The run passes when each config gives its expe
 | `PreparationQueue.86d7c09-resend.cfg` | `NoResendAfterReload` fails | replays the merge bug 86d7c09 fixed |
 | `PreparationQueue.86d7c09-rewalk.cfg` | `NoRewalk` fails | replays the save-loop bug 86d7c09 fixed |
 | `PreparationQueue.starvation.cfg` | `QueuedReachServer` fails | a finding on the current code |
+| `PreparationQueue.reload-mid-clip.cfg` | `NoResendAfterReload` fails | a finding on the current code |
 | `SharedPreparations.cfg` | every property holds | the current code |
 | `SharedPreparations.847a4bc.cfg` | `ClearedStayCleared` fails | replays the bug 847a4bc fixed |
 | `SharedPreparations.text-changes.cfg` | `ClearedStayCleared` fails | a finding on the current code |
@@ -79,9 +80,12 @@ The queue model has 3 readings of 2 passages, 1 place (`PREPARATION_QUEUE_LIMIT`
 
 Left out: cancel, prioritize, non-transient errors, cloud voices that this device prepares itself, Patois, code and image descriptions, the server's machine scheduling, and the wake-up order inside `saveTurn`. Every reading is server-prepared. The server's own queue is unbounded.
 
+Two assumptions keep the current configs passing, and each has a finding config that turns it off. `UnloadFailsClips` is FALSE: a reload changes nothing the old page persists. `TextChanges` is FALSE: the document's text stays the same.
+
 `ClearedStayCleared` holds only because the server drops ended readings oldest first. If a newer reading of the same document leaves the catalogue before an older cleared one, the older one comes back.
 
 ## Findings on the current code
 
 - **Starvation** (`PreparationQueue.starvation.cfg`). A reading whose clip times out goes back to "queued" at its old place in the list (`run()`'s catch), and `drain()` hands places out in list order. When every clip times out, two readings can trade the one place forever while a third is never sent. The model needs no timing for this. In the app, it takes more readings timing out than there are places, so it is unlikely but possible on a weak connection.
+- **Reload mid-clip** (`PreparationQueue.reload-mid-clip.cfg`). A reload fails the clip download in flight. `run()`'s catch on the old page treats it as a lost connection and persists the reading as "queued" before the page unloads. The reloaded page then sends the reading back to the server, which is the symptom 86d7c09 fixed. Readings are downloading clips for most of the time they are saving, so this is the common case. Replayed in Chromium: the reloaded page restored the reading as "queued" with "Waiting for the speech server to reconnect…" and submitted it a second time.
 - **Edit and undo** (`SharedPreparations.text-changes.cfg`). `refreshShared` forgets a cleared reading as soon as `sharedPreparationJobs` stops listing it. Editing the document's text stops the listing. After the edit is undone, the cleared reading's row comes back.
