@@ -222,13 +222,13 @@ export function VoicesPage() {
   };
 
 
-  const actionsFor = (v: Voice): VoiceCardAction[] => {
+  const actionsFor = (v: Voice, name: string): VoiceCardAction[] => {
     const actions = profileActionsFor(v) ?? [];
     const entry = avatarEntries[voiceAvatarIdentity(v)];
     if (!avatarsConfigured || v.kind === "local" || entry?.status === "ready") return actions;
     const pending = entry?.status === "queued" || entry?.status === "generating";
     return [{
-      label: pending ? `Creating avatar for ${v.name}` : entry?.status === "failed" ? `Retry avatar for ${v.name}: ${entry.error}` : `Create illustrated avatar for ${v.name}`,
+      label: pending ? `Creating avatar for ${name}` : entry?.status === "failed" ? `Retry avatar for ${name}: ${entry.error}` : `Create illustrated avatar for ${name}`,
       icon: <ImagePlus size={16} strokeWidth={1.5} aria-hidden />,
       onClick: () => {
         if (pending) { toast(`The avatar for ${v.name} is being created.`); return; }
@@ -242,6 +242,8 @@ export function VoicesPage() {
   const bySource = new Map<VoiceSource, typeof VOICES>((Object.keys(SOURCE_INFO) as VoiceSource[]).map((s) => [s, []]));
   for (const v of shown) bySource.set(voiceSource(v), [...(bySource.get(voiceSource(v)) ?? []), v]);
   const groups = [...bySource].filter(([, voices]) => voices.length);
+  const repeatedNames = new Set(shown.map((v) => v.name).filter((n, i, all) => all.indexOf(n) !== i));
+  const nameOf = (v: Voice, source: VoiceSource) => (repeatedNames.has(v.name) ? `${v.name} (${SOURCE_INFO[source]?.title ?? source})` : v.name);
 
   return (
     <section data-screen="voices" className="min-h-0 flex-1 overflow-y-auto px-5 pt-3 sm:px-10 sm:pt-10 animate-fadein" style={{ paddingBottom: hasDoc ? 160 : 64 }}>
@@ -321,9 +323,9 @@ export function VoicesPage() {
             </div>
             <div className={VOICE_GRID}>
               {voices.map((v) => (
-                <VoiceCard key={v.id} voice={v} source={source} selected={current === v.id} previewing={previewing === v.id} generating={previewing === v.id && generating} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)}
+                <VoiceCard key={v.id} voice={v} name={nameOf(v, source)} source={source} selected={current === v.id} previewing={previewing === v.id} generating={previewing === v.id && generating} onPreview={() => (previewing === v.id ? stopPreview() : void preview(v.id))} onSelect={() => void use(v.id)}
                   note={[preparedOnly ? preparedNote(prepared.find((p) => p.voiceId === v.id)?.fraction) : undefined, avatarReviewNote(avatarEntries[voiceAvatarIdentity(v)])].filter(Boolean).join(" · ") || undefined}
-                  actions={actionsFor(v)} />
+                  actions={actionsFor(v, nameOf(v, source))} />
               ))}
             </div>
           </section>

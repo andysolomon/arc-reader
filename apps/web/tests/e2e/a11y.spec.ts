@@ -51,3 +51,17 @@ for (const theme of THEMES) {
     });
   });
 }
+
+// Two controls with one name can't be told apart by a screen reader, or by a test (805e1eb, 125fbe1).
+for (const s of SCREENS) {
+  test(`${s.name}: no two buttons share a name`, async ({ page }) => {
+    // Every key unset, so each key field shows its form at once.
+    for (const key of ["llm", "jev", "decide"]) await page.route(`**/api/${key}/config`, (route) => route.request().method() === "GET" ? route.fulfill({ json: { configured: false } }) : route.continue());
+    await page.goto(s.path);
+    await page.getByRole("heading", { level: 1 }).first().waitFor();
+    await page.waitForLoadState("networkidle");
+    const names = [...(await page.locator("body").ariaSnapshot()).matchAll(/^\s*- button "(.+?)"/gm)].map((m) => m[1]);
+    const repeated = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];
+    expect(repeated, `Name each button for what it acts on, e.g. aria-label="Save Gemini key"`).toEqual([]);
+  });
+}
