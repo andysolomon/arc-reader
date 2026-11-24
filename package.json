@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "packageManager": "pnpm@12.9.1",
   "scripts": {
+    "prepare": "[ ! -f scripts/install-git-hooks.sh ] || sh scripts/install-git-hooks.sh",
     "dev": "pnpm --filter @readaloud/web dev",
     "build": "pnpm -r --filter './packages/**' build && pnpm --filter @readaloud/web build",
     "typecheck": "pnpm -r typecheck",
