@@ -34,15 +34,12 @@ Resolve conflicts if any, keeping both sides' intent.
 
 ## 2a. Keep the diagram pages in step
 
-`docs/readaloud-bpmn.html` and `docs/readaloud-sequence.html` cite code by line. From the worktree root:
+`docs/readaloud-bpmn.html` and `docs/readaloud-sequence.html` cite code by how a line starts (`SRC + "engine/engine.ts#private ensureChunk("`). The app adds the line numbers when it serves them, so moving code never needs a page edit. From the worktree root:
 
 ```sh
-pnpm diagrams:refs    # re-points references at the lines in docs/diagram-anchors.json
 pnpm diagrams:stale   # diagrams whose cited code this branch changed
 ```
 
-- If `diagrams:refs` changed the pages, commit them with the anchors file ("Re-point diagram code references").
-- If it reports a broken reference, the cited line is gone or changed beyond its name. Point that reference at the code it describes on the page, then run it again. A conflict in these three files resolves the same way: take either side and rerun `diagrams:refs`.
 - `diagrams:stale` is a reminder, not a gate. When it lists diagrams and the change alters the behaviour they describe, update what they say before merging. Mention any you left as they were in the report.
 
 ## 3. Verify before merging
