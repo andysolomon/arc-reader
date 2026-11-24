@@ -224,10 +224,9 @@ test("shows live server progress before audio is downloaded, then distinguishes 
   } finally { release(); }
 });
 
-// A finding of the model (PreparationQueue.reload-mid-clip.cfg): the reload fails the clip download in
-// flight, and the old page persists the reading as "queued" before it unloads. When this passes, drop test.fail.
+// The reload fails the clip download in flight, and run() on the old page must not persist the reading
+// as "queued" before it unloads (PreparationQueue.reload-mid-clip.cfg replays the bug in the model).
 test("a reload while a clip downloads goes back to saving without sending the reading again", async ({ page }) => {
-  test.fail();
   await seedLibrary(page, [null]);
   const status = { id: "", state: "running", done: 0, total: 2 };
   let submissions = 0;
