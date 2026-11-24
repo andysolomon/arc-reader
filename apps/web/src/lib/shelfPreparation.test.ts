@@ -47,6 +47,15 @@ describe("shelfPreparation", () => {
     expect(tally.saved).toBeCloseTo((100 + 60) / 400);
   });
 
+  it("does not count audio only the server has as stored on this device", () => {
+    const [tally] = shelfPreparation([
+      { id: "here", duration: 100, prepared: [{ ...bella, fraction: 1, stored: 1 }] },
+      { id: "server", duration: 100, prepared: [{ ...bella, fraction: 1, stored: 0.25 }] },
+    ], [{ ...job("server", 10, 10), status: "saving" }]);
+    expect(tally.fraction).toBe(1);
+    expect(tally.saved).toBeCloseTo((1 + 0.25) / 2);
+  });
+
   it("ignores queue entries for other documents and keeps voices apart", () => {
     const voices = shelfPreparation([
       { id: "one", duration: 100, prepared: [{ ...bella, fraction: 1 }, { voiceId: "jasper", name: "Jasper", engine: "voicestudio", fraction: 0.5 }] },

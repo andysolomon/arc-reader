@@ -217,6 +217,10 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toHaveCount(0);
     // A second ring measures what is stored on this device, apart from the full ring for what is made.
     await expect(page.getByRole("img", { name: "Bella: 0% saved on this device", exact: true })).toBeVisible();
+    // The queue's ring for a reading being saved fills with what is stored here, not the audio the server made.
+    const queue = page.getByRole("region", { name: "Audio preparation queue" });
+    await expect(queue.getByRole("img", { name: /: 0% saved on this device$/ })).toBeVisible();
+    await expect(queue).toContainText("0% saved");
     release();
     await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
     await page.reload();
