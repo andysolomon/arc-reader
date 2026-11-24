@@ -1,4 +1,3 @@
-/** A hyperlink found in a document: where it points and the words it was attached to. */
 export interface DocLink {
   url: string;
   /** Anchor or Markdown link text; the URL itself for bare links. */

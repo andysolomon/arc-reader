@@ -1,6 +1,5 @@
 import type { PreparedVoice } from "./prepared";
 
-/** What a shelf needs to know about one of its chapters. */
 export interface ShelfChapter {
   id: string;
   /** How long it reads, in seconds: longer chapters count for more of the whole */

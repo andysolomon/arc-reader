@@ -153,7 +153,6 @@ this file. Audio is matched to documents by their text, so anything that changed
 
 export interface Backup {
   file: Blob;
-  /** The clips written, by key */
   keys: string[];
   bytes: number;
 }
@@ -211,8 +210,6 @@ export function offloadKeys(keys: string[], exported: DocRecord[], library: DocR
   for (const rec of library) if (!ids.has(rec.id)) for (const h of textHashes(rec)) others.add(h);
   return keys.filter((key) => !others.has(suffixOf(key)));
 }
-
-// ---- loading a file back ----
 
 export const NOT_A_BACKUP = "This isn't a ReadAloud audio file.";
 

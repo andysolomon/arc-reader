@@ -44,7 +44,6 @@ export interface BookContents {
   tail?: { url: string; title: string; n: number };
 }
 
-/** What a book's parts are called. */
 export const partNames = (book?: { kind?: "course" } | null) => book?.kind === "course"
   ? { one: "lecture", many: "lectures", One: "Lecture", short: "Lec.", whole: "course" }
   : { one: "chapter", many: "chapters", One: "Chapter", short: "Ch.", whole: "book" };

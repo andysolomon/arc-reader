@@ -1,7 +1,6 @@
 import { Mic, Square } from "lucide-react";
 import { Button } from "@readaloud/ui";
 
-/** The status row and the big record / stop button under the passage. */
 export function RecorderControls({ recording, starting, seconds, levels, disabled, onStart, onStop }: {
   recording: boolean; starting: boolean; seconds: number; levels: number[]; disabled?: boolean; onStart: () => void; onStop: () => void;
 }) {

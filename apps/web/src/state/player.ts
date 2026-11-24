@@ -417,7 +417,6 @@ export const usePlayer = create<PlayerState & Actions>()((set, get) => {
   };
 });
 
-// Default speed from settings on first load
 engine.setSpeed(useSettings.getState().defaultSpeed);
 
 // If the default voice changes while a doc without an override is loaded, follow it.

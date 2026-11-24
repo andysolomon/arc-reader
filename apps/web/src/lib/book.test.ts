@@ -169,7 +169,6 @@ describe("finding a track's notes", () => {
   it("leaves lists that are not tracks alone", () => {
     // Without breadcrumbs ending on the page, an unnumbered list is just a list.
     expect(bookContents(parse(trackPage.replace(/<script[\s\S]*?<\/script>/, "")), TRACK)).toBeNull();
-    // An archive of dated posts.
     const archive = trackPage.replace(/<\/a> —/g, "</a> <time datetime=\"2026-01-02\">2 Jan</time> —");
     expect(bookContents(parse(archive), TRACK)).toBeNull();
     // An article that happens to hold a list of links among plenty of others.

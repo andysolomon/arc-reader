@@ -79,8 +79,6 @@ export function textBook(name: string, raw: string): Fetched | null {
   return asBook(name, title ?? fromFileName(name), meta, parts);
 }
 
-// ── EPUB ──────────────────────────────────────────────────────────────────────
-
 interface TocEntry {
   title: string;
   /** Path inside the archive */

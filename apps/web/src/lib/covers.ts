@@ -11,7 +11,6 @@ import { proseParts } from "./segment";
 
 /** The look every cover shares. Changing it makes new art instead of reusing the old. */
 export const COVER_STYLE = "field-notes-1";
-/** The key of the cover for the whole article. */
 export const ARTICLE_COVER = "article";
 
 export interface CoverSection {

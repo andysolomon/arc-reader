@@ -64,7 +64,6 @@ export function IconMenu({ label, icon, on, size = 36, width = 240, align = "end
 
 const ITEM = "flex min-h-10 w-full shrink-0 items-center gap-2 rounded-control border-0 bg-transparent px-2 py-1.5 text-left text-[14px] text-fg hover:bg-bg3 focus-visible:bg-bg3 disabled:opacity-50";
 
-/** One of a set of choices, ticked when it is the one in force. */
 export function MenuOption({ checked, onSelect, count, children }: { checked: boolean; onSelect: () => void; /** How many documents the choice holds */ count?: number; children: ReactNode }) {
   return (
     <button type="button" role="menuitemradio" aria-checked={checked} onClick={onSelect} className={cn(ITEM, checked && "font-medium")}>
@@ -85,7 +84,6 @@ export function MenuAction({ icon, onSelect, disabled, children }: { icon: React
   );
 }
 
-/** Choices that belong together, under a quiet heading. */
 export function MenuGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div role="group" aria-label={label} className="flex flex-col">
