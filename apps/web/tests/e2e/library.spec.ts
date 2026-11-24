@@ -215,6 +215,8 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     Object.assign(status, { done: 2, state: "done" });
     await expect(page.getByRole("img", { name: "Bella: 100% generated · 2/2 passages · Saving audio on this device", exact: true })).toBeVisible();
     await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toHaveCount(0);
+    // A second ring measures what is stored on this device, apart from the full ring for what is made.
+    await expect(page.getByRole("img", { name: "Bella: 0% saved on this device", exact: true })).toBeVisible();
     release();
     await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
     await page.reload();

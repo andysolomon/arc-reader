@@ -35,6 +35,8 @@ export interface ReadingStatus {
   reading: Reading;
   /** 0..1: how much of the audio exists, saved on this device or generated in the run under way, whichever is further */
   fraction: number;
+  /** 0..1 stored on this device, only while the made audio is being copied here */
+  saved: number | null;
   /** Queued, being made or being saved right now */
   active: boolean;
   stage?: string;
@@ -89,9 +91,11 @@ export function useReadings(it: LibraryItem, defaultVoice: string): { voiceId: s
     const stage = job
       ? job.message ?? (job.status === "queued" ? (job.waitingFor ? `Waiting for ${job.waitingFor}` : "Queued") : job.status === "saving" ? "Saving audio on this device" : job.worker ? `Preparing on ${job.worker}` : "Preparing")
       : player ? (player.unreachable ? "Can’t reach server" : "Preparing") : undefined;
+    // The made audio is copied here passage by passage; until the copy starts, the library's last look at this device stands.
+    const saved = job?.status === "saving" ? Math.max(voice.fraction, job.step && job.step.total > 0 ? Math.min(1, job.step.done / job.step.total) : 0) : null;
     const progress = counted && counted.total > 0 ? `${percent}% generated · ${counted.done}/${counted.total} passages` : `${percent}% prepared`;
     return {
-      voice, reading: { docId: it.rec.id, voiceId: voice.voiceId, engine: voice.engine }, fraction, active: !!counted, stage,
+      voice, reading: { docId: it.rec.id, voiceId: voice.voiceId, engine: voice.engine }, fraction, saved, active: !!counted, stage,
       detail: counted ? (counted.total > 0 ? `${percent}% · ${counted.done}/${counted.total}` : null) : percent > 0 && percent < 100 ? `${percent}%` : null,
       label: `${voice.name}: ${progress}${stage ? ` · ${stage}` : ""}`,
       isReading: voice.voiceId === voiceId,
@@ -112,7 +116,7 @@ export function PreparedStatus({ it, defaultVoice, onDetails, className }: { it:
           <span><VoiceServiceName source={voiceSource(getVoice(voiceId))}>{getVoice(voiceId).name}</VoiceServiceName> · live audio</span>
         </span>
       )}
-      {readings.map(({ voice, reading, fraction, active, stage, detail, label, isReading, empty }) => (
+      {readings.map(({ voice, reading, fraction, saved, active, stage, detail, label, isReading, empty }) => (
         // The ring and outline carry the two ends: full is ready, empty and dashed is not prepared. Only partial audio needs words.
         <button
           key={voice.voiceId}
@@ -127,11 +131,18 @@ export function PreparedStatus({ it, defaultVoice, onDetails, className }: { it:
           {isReading && <><Volume2 size={13} strokeWidth={1.5} className="-mr-0.5 shrink-0" aria-hidden /><span className="sr-only">Reading voice</span></>}
           <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
           {detail && <span className="whitespace-nowrap tabular-nums">{detail}</span>}
+          {saved !== null && <SavingRing value={saved} size={16} label={`${voice.name}: ${Math.floor(saved * 100)}% saved on this device`} />}
           {stage && <span className="min-w-0 truncate text-accent">{stage}</span>}
         </button>
       ))}
     </div>
   );
+}
+
+/** How much of the made audio is stored on this device, beside the ring for how much is made. */
+function SavingRing({ value, size, label }: { value: number; size: number; label?: string }) {
+  const ring = <ProgressRing value={value} size={size} stroke={1.5} label={label} />;
+  return label ? <span className="ml-0.5 shrink-0">{ring}</span> : <span aria-hidden className="ml-0.5 shrink-0">{ring}</span>;
 }
 
 const CHIP = "inline-flex h-6 max-w-full items-center gap-1 rounded-pill border bg-bg pl-1 pr-2 text-left text-[11px] text-fg2";
@@ -146,12 +157,13 @@ export function PreparedSummary({ it, defaultVoice, onDetails, className }: { it
   if (!made.length) return null;
   return (
     <div className={cn("flex flex-wrap gap-1", className)} role="group" aria-label="Audio made">
-      {made.map(({ voice, reading, fraction, active, stage, detail, label }) => (
-        <button key={voice.voiceId} type="button" onClick={() => onDetails(reading)} aria-haspopup="dialog" title={label} className={cn(CHIP, "hit-44 transition-colors duration-fast hover:border-fg3 hover:text-fg", active ? BUSY : "border-line")}>
+      {made.map(({ voice, reading, fraction, saved, active, stage, detail, label }) => (
+        <button key={voice.voiceId} type="button" onClick={() => onDetails(reading)} aria-haspopup="dialog" title={saved === null ? label : `${label} · ${Math.floor(saved * 100)}% saved`} className={cn(CHIP, "hit-44 transition-colors duration-fast hover:border-fg3 hover:text-fg", active ? BUSY : "border-line")}>
           {/* The words beside it say what the ring shows. */}
           <span aria-hidden className="shrink-0"><ProgressRing value={fraction} size={16} stroke={1.75} /></span>
           <VoiceServiceName source={voiceSource(voice)} className="whitespace-nowrap">{voice.name}</VoiceServiceName>
           {detail && <span className="whitespace-nowrap tabular-nums">{detail}</span>}
+          {saved !== null && <SavingRing value={saved} size={14} />}
           {stage && <span className="min-w-0 truncate text-accent">{stage}</span>}
           {!detail && !stage && <span className="sr-only">prepared</span>}
         </button>
@@ -166,18 +178,11 @@ export function useShelfPreparation(items: LibraryItem[]): ShelfVoice[] {
   return useMemo(() => shelfPreparation(items.map((it) => ({ id: it.rec.id, duration: it.duration, prepared: it.prepared })), jobs.filter(isPreparing)), [items, jobs]);
 }
 
-/** The work left on a book's chapters: "Preparing 3 · saving 74", or "Saving 77" once the audio is all made. */
-export function shelfBusyLabel({ busy, saving }: Pick<ShelfVoice, "busy" | "saving">): string | null {
-  const making = busy - saving;
-  if (!busy) return null;
-  return making ? `Preparing ${making}${saving ? ` · saving ${saving}` : ""}` : `Saving ${saving}`;
-}
-
 /** One voice's share of a whole book in words: "42% of the book · 3 of 12 chapters prepared". */
 export function shelfLabel(tally: ShelfVoice, book?: { kind?: "course" } | null, whole = partNames(book).whole): string {
   const { many } = partNames(book);
   const making = tally.busy - tally.saving;
-  const busy = [making && `${making} being prepared`, tally.saving && `${tally.saving} being saved on this device`].filter(Boolean).join(" · ");
+  const busy = [making && `${making} being prepared`, tally.saving && `${tally.saving} being saved on this device (${Math.floor(tally.saved * 100)}% of the ${whole} saved)`].filter(Boolean).join(" · ");
   return `${shelfPercent(tally)}% of the ${whole} · ${tally.complete} of ${tally.chapters} ${many} prepared${busy ? ` · ${busy}` : ""}`;
 }
 
@@ -196,7 +201,9 @@ export function ShelfSummary({ items, className, whole }: { items: LibraryItem[]
           <span aria-hidden className="shrink-0"><ProgressRing value={tally.fraction} size={16} stroke={1.75} /></span>
           <VoiceServiceName source={voiceSource(tally.voice)} className="whitespace-nowrap">{tally.voice.name}</VoiceServiceName>
           <span className="whitespace-nowrap tabular-nums">{shelfPercent(tally)}% · {tally.complete}/{tally.chapters}</span>
-          {tally.busy > 0 && <span className="min-w-0 truncate text-accent">{shelfBusyLabel(tally)}</span>}
+          {/* The work left on its chapters: "Preparing 3", then a ring for how much is stored on this device beside "Saving 74". */}
+          {tally.busy > tally.saving && <span className="min-w-0 truncate text-accent">Preparing {tally.busy - tally.saving}</span>}
+          {tally.saving > 0 && <><SavingRing value={tally.saved} size={14} /><span className="whitespace-nowrap text-accent">Saving {tally.saving}</span></>}
         </span>
       ))}
     </div>
@@ -396,7 +403,8 @@ export function PreparationDetails({ it, reading, defaultVoice, onClose, onChoos
             <dt className="text-fg2">Whole {wholeName}</dt>
             <dd className="m-0 flex min-w-0 items-center gap-2 tabular-nums text-fg">
               <ProgressRing value={shelf?.fraction ?? 0} size={16} stroke={1.75} label={`${voice.name}: ${shelf ? shelfLabel(shelf, it.rec.book) : `nothing of the ${wholeName} prepared`}`} />
-              <span>{shelf ? shelfPercent(shelf) : 0}% prepared · {shelf?.complete ?? 0} of {chapters.length} {many}{shelf?.busy ? <span className="text-accent"> · {shelfBusyLabel(shelf)?.toLowerCase()}</span> : null}</span>
+              <span>{shelf ? shelfPercent(shelf) : 0}% prepared · {shelf?.complete ?? 0} of {chapters.length} {many}{shelf && shelf.busy > shelf.saving ? <span className="text-accent"> · preparing {shelf.busy - shelf.saving}</span> : null}</span>
+              {shelf && shelf.saving > 0 && <span className="inline-flex items-center gap-1 text-accent"><SavingRing value={shelf.saved} size={14} label={`${Math.floor(shelf.saved * 100)}% of the ${wholeName} saved on this device`} />saving {shelf.saving}</span>}
             </dd>
           </div>
         )}
