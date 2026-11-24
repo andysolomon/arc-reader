@@ -26,7 +26,7 @@ describe("adding a book's chapters on the server", () => {
     directory = await mkdtemp(join(tmpdir(), "readaloud-books-"));
     library = new LibraryService(directory);
   });
-  afterEach(() => rm(directory, { recursive: true, force: true }));
+  afterEach(() => rm(directory, { recursive: true, force: true, maxRetries: 5 })); // an HTTP import may still be writing
 
   it("saves each missing chapter in its place, leaving the ones already shelved", async () => {
     await library.save([shelved("one", "01-http", 1, 3)]);
