@@ -35,8 +35,6 @@ export interface Settings {
   summaryModel: SummaryModel;
   /** Show the summary panel above the text in the Reader */
   showSummary: boolean;
-  /** Show the diagram panel above the text in the Reader */
-  showDiagram: boolean;
   /** Show each article's cover and its sections' covers, and ask for them when a document is opened */
   showCovers: boolean;
   fontSize: number;
@@ -118,7 +116,6 @@ export const useSettings = create<Settings & Actions>()(
       openaiModel: OPENAI_MODEL,
       summaryModel: DEFAULT_SUMMARY_MODEL,
       showSummary: false,
-      showDiagram: false,
       showCovers: true,
       fontSize: 19,
       wide: false,

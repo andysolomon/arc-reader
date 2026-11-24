@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Star, Headphones, Code2, Check, ImageIcon, Workflow, X } from "lucide-react";
+import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Star, Headphones, Code2, Check, ImageIcon, X } from "lucide-react";
 import { IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
@@ -18,9 +18,6 @@ import { hasSummary, summaryModelLabel } from "../lib/summary";
 import { useLlm } from "../state/llm";
 import { useSummaries } from "../state/summaries";
 import { ArticleSummary } from "../components/ArticleSummary";
-import { ArticleDiagram } from "../components/ArticleDiagram";
-import { hasDiagram } from "../lib/articleDiagram";
-import { useDiagrams } from "../state/diagrams";
 import { DocumentDetails } from "../components/DocumentDetails";
 import { DocumentLinks } from "../components/DocumentLinks";
 import { VideoTranscript } from "../components/VideoTranscript";
@@ -56,7 +53,7 @@ export function Reader() {
   const setShortcuts = usePlayer((s) => s.setShortcutsOpen);
   const record = usePlayer((s) => s.record);
   const readingSummary = usePlayer((s) => s.summary);
-  const { fontSize, wide, highlightStyle, showSummary, showDiagram, showCovers, set } = useSettings();
+  const { fontSize, wide, highlightStyle, showSummary, showCovers, set } = useSettings();
   const theme = getTheme(useThemeId());
   const cycleTheme = useCycleTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -104,13 +101,6 @@ export function Reader() {
   const toggleSummary = () => {
     if (!showSummary && summaryRecord && !hasSummary(summaryRecord)) void useSummaries.getState().request(summaryRecord);
     set("showSummary", !showSummary);
-  };
-  // A saved diagram stays visible without a key, like a summary.
-  const diagramRecord = ready && record?.id === id && (llmReady || hasDiagram(record)) ? record : null;
-  const drawing = useDiagrams((s) => !!(id && s.pending[id]));
-  const toggleDiagram = () => {
-    if (!showDiagram && diagramRecord && !hasDiagram(diagramRecord)) void useDiagrams.getState().request(diagramRecord);
-    set("showDiagram", !showDiagram);
   };
   const detailsRecord = ready && record?.id === id ? record : null;
   const favorited = !!detailsRecord?.favoritedAt;
@@ -195,11 +185,6 @@ export function Reader() {
           {summaryRecord && !readingSummary && (
             <IconButton label={showSummary ? "Hide summary" : "Summarize"} active={showSummary} aria-busy={summarizing || undefined} onClick={toggleSummary}>
               <Sparkles size={20} strokeWidth={1.5} className={summarizing ? "animate-pulse" : undefined} />
-            </IconButton>
-          )}
-          {diagramRecord && !readingSummary && (
-            <IconButton label={showDiagram ? "Hide diagram" : "Draw a diagram"} active={showDiagram} aria-busy={drawing || undefined} onClick={toggleDiagram}>
-              <Workflow size={20} strokeWidth={1.5} className={drawing ? "animate-pulse" : undefined} />
             </IconButton>
           )}
           {bp === "sm" ? (
@@ -304,7 +289,6 @@ export function Reader() {
             />
           )}
           {summaryRecord && showSummary && !readingSummary && <ArticleSummary record={summaryRecord} />}
-          {diagramRecord && showDiagram && !readingSummary && <ArticleDiagram record={diagramRecord} />}
           {ready ? (
             <SentenceText
               paragraphs={doc.paragraphs}
