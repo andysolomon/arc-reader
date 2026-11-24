@@ -48,6 +48,8 @@ for (const width of [390, 1440]) {
     expect(images).toHaveLength(2);
     expect(images).toContain("https://example.com/team.png");
     expect(images.some((src) => src.startsWith("data:image/png;base64,"))).toBe(true);
+    // A pasted link opens paused (22ef0e2); listening is what sends the text to speech.
+    await page.getByRole("button", { name: "Play", exact: true }).click();
     await expect.poll(() => spoken.some((text) => text.includes(explanation))).toBe(true);
     expect(spoken.join(" ")).not.toMatch(/https:|data:image|<svg|readaloud-visual/);
     const pause = page.getByRole("button", { name: "Pause", exact: true });
