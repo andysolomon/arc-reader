@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, ArrowRight, BookOpen } from "lucide-react";
 import { Button, cn } from "@readaloud/ui";
 import type { DocRecord } from "../lib/db";
-import { openDocument } from "../lib/openDoc";
+import { listenTo, openDocument } from "../lib/openDoc";
 import { useBooks, shelves, finished } from "../state/books";
 import { partNames } from "../lib/book";
 import { useLibrary, type LibraryItem } from "../state/library";
@@ -47,7 +47,7 @@ export function BookOffer({ record }: { record: DocRecord }) {
       // The contents page has done its job: read the book from chapter one instead.
       async onFirst(first) {
         const reading = usePlayer.getState().doc?.id === record.id;
-        if (reading && window.location.pathname.endsWith(`/read/${record.id}`)) await openDocument(first, navigate, { autoplay: true, resume: false, replace: true });
+        if (reading && window.location.pathname.endsWith(`/read/${record.id}`)) await listenTo(first, navigate, { resume: false, replace: true });
         else if (reading) usePlayer.getState().close();
         await useLibrary.getState().remove(record.id);
       },
@@ -99,15 +99,20 @@ export function MissingChapters({ record, className }: { record: DocRecord; clas
 /** "Chapter 8 of 27", or "Lecture 8 of 27" in a course */
 export const chapterLabel = (rec: DocRecord) => rec.book ? `${partNames(rec.book).One} ${rec.book.chapter} of ${Math.max(rec.book.chapters, rec.book.chapter)}` : "";
 
-/** Open a chapter where it was left, or from the top once it has been finished. */
-export function useOpenChapter() {
+/** A chapter picks up where it was left, or starts from the top once it has been finished. */
+export function useChapters() {
   const navigate = useNavigate();
-  return (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: true, resume: !finished(it) });
+  return {
+    open: (it: LibraryItem) => void openDocument(it.rec, navigate, { resume: !finished(it) }),
+    listen: (it: LibraryItem) => void listenTo(it.rec, navigate, { resume: !finished(it) }),
+  };
 }
 
 /** The chapters either side of this one, at the foot of the text. */
 export function ChapterNav({ previous, next, book, className }: { previous?: LibraryItem; next?: LibraryItem; /** The open chapter's book: a neighbour from another is in the series' volume before or after */ book?: string; className?: string }) {
-  const open = useOpenChapter();
+  const chapters = useChapters();
+  // Moving to a chapter leaves the player as it was: reading carries on into it, paused stays paused.
+  const open = (it: LibraryItem) => usePlayer.getState().playing ? chapters.listen(it) : chapters.open(it);
   if (!previous && !next) return null;
   const { One } = partNames((previous ?? next)!.rec.book);
   const from = (it: LibraryItem) => book && it.rec.book!.id !== book ? " volume" : "";

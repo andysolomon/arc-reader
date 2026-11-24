@@ -44,7 +44,8 @@ test("a slide that shows a diagram comes with its picture, described for the lis
   await picture.scrollIntoViewIfNeeded();
   await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1280);
 
-  // Listening is what asks for the description; it takes the stand-in's place in the reading.
+  // Listening is what asks for the description; it takes the stand-in's place in the reading. An uploaded PDF opens paused.
+  await page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^Play/ }).click();
   await expect(slide).toContainText(description, { timeout: 30_000 });
   await expect(slide).toContainText("Spoken description");
   expect(asked).toHaveLength(1);

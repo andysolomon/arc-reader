@@ -12,7 +12,7 @@ import { useLibrary } from "../state/library";
 import { toast } from "../state/toast";
 import { fetchReadable, hostOf, isWebAddress, looksLikeUrl, normalizeUrl, readPdfFile } from "../lib/fetchUrl";
 import { EXPLAIN_MS, ReadError } from "../lib/readError";
-import { openDocument } from "../lib/openDoc";
+import { listenTo, openDocument, type Open } from "../lib/openDoc";
 import { finished, importPage, isContentsPage, nextUnread, shelves, useBooks } from "../state/books";
 import { isBookFile, readBookFile } from "../lib/bookFile";
 import type { Fetched } from "../lib/fetchUrl";
@@ -76,7 +76,7 @@ export function Compose() {
   };
 
   /** A pasted link opens paused; only Listen (or Enter) starts reading it. */
-  const readLink = async (raw: string, play = true) => {
+  const readLink = async (raw: string, go: Open) => {
     const input = raw.trim();
     if (!input || busy) return;
     const host = hostOf(normalizeUrl(input));
@@ -86,8 +86,7 @@ export function Compose() {
       const f = await fetchReadable(input);
       const rec = await importPage(f, { source: "url" });
       // A contents page is there to be swapped for its chapters, so it opens without reading itself out.
-      const listen = play && !isContentsPage(f);
-      await openDocument(rec, navigate, { autoplay: listen, resume: false });
+      await (isContentsPage(f) ? openDocument : go)(rec, navigate, { resume: false });
     } catch (e) {
       if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
       else toast(`Couldn't read ${host} — try pasting the text`);
@@ -103,19 +102,19 @@ export function Compose() {
     try {
       const rec = await create({ text: t, title, source: "paste" });
       sessionStorage.removeItem(DRAFT_KEY);
-      await openDocument(rec, navigate, { autoplay: true, resume: false });
+      await listenTo(rec, navigate, { resume: false });
     } finally {
       setBusy(null);
     }
   };
 
   /** A link that ended up in the text box moves to the link field and is fetched from there. */
-  const readLinkFromText = (link: string, play = true) => {
+  const readLinkFromText = (link: string, go: Open) => {
     setText("");
     setTitle(undefined);
     setTextOpen(false);
     setUrl(link);
-    return readLink(link, play);
+    return readLink(link, go);
   };
 
   /** Visible text wins; otherwise the link; a hidden draft is read only when there is no link. */
@@ -123,8 +122,8 @@ export function Compose() {
     if (busy) return;
     const t = text.trim();
     const link = url.trim();
-    if (t && (textOpen || !link)) return isWebAddress(t) ? readLinkFromText(t) : readText(t);
-    if (link) return readLink(link);
+    if (t && (textOpen || !link)) return isWebAddress(t) ? readLinkFromText(t, listenTo) : readText(t);
+    if (link) return readLink(link, listenTo);
     toast("Paste a link or some text first");
     linkRef.current?.focus();
   };
@@ -140,7 +139,7 @@ export function Compose() {
     e.preventDefault();
     if (looksLikeUrl(pasted)) {
       setUrl(pasted);
-      void readLink(pasted, false);
+      void readLink(pasted, openDocument);
       return;
     }
     setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")}\n\n${pasted}` : pasted));
@@ -154,7 +153,7 @@ export function Compose() {
     // Only when the link would be all there is in the box; one pasted into a sentence is part of the text.
     if (busy || !isWebAddress(pasted) || (value.slice(0, selectionStart) + value.slice(selectionEnd)).trim()) return;
     e.preventDefault();
-    void readLinkFromText(pasted, false);
+    void readLinkFromText(pasted, openDocument);
   };
 
   const onLinkKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -171,7 +170,7 @@ export function Compose() {
     }
   };
 
-  /** A PDF is read by the server and opens like a link; there is no text to look over first. */
+  /** A PDF is read by the server and opens paused, like an uploaded book: uploading is not asking to listen. */
   const readPdf = async (file: File) => {
     if (busy) return;
     setBusy("fetch");
@@ -179,7 +178,7 @@ export function Compose() {
     try {
       const f = await readPdfFile(file);
       const rec = await create({ text: f.text, title: f.title || file.name.replace(/\.pdf$/i, ""), source: "file", domain: f.domain, meta: f.meta, links: f.links });
-      await openDocument(rec, navigate, { autoplay: true, resume: false });
+      await openDocument(rec, navigate, { resume: false });
     } catch {
       toast("Couldn't read that PDF. A scanned PDF has no text to read.");
     } finally {
@@ -194,7 +193,7 @@ export function Compose() {
     const { added } = await useBooks.getState().add(book, {
       async onFirst(first) {
         opened = true;
-        await openDocument(first, navigate, { autoplay: false, resume: false });
+        await openDocument(first, navigate, { resume: false });
       },
     });
     if (added || opened) return;
@@ -203,7 +202,7 @@ export function Compose() {
     const shelf = shelves(useLibrary.getState().items).get(book.id);
     if (!shelf) return;
     const next = nextUnread(shelf);
-    await openDocument(next.rec, navigate, { autoplay: false, resume: !finished(next) });
+    await openDocument(next.rec, navigate, { resume: !finished(next) });
   };
 
   /** An EPUB, or a text file with chapters, becomes a book; any other text file opens in the text box. */
@@ -216,7 +215,7 @@ export function Compose() {
       if (f?.book) return await shelveBook(f);
       if (f) {
         const rec = await create({ text: f.text, title: f.title, source: "file", domain: f.domain, meta: f.meta });
-        return await openDocument(rec, navigate, { autoplay: false, resume: false });
+        return await openDocument(rec, navigate, { resume: false });
       }
       setText(await file.text());
       setTitle(file.name.replace(/\.txt$/i, ""));

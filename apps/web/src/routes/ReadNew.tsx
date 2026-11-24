@@ -5,7 +5,7 @@ import { useSettings } from "../state/settings";
 import { toast } from "../state/toast";
 import { fetchReadable, hostOf } from "../lib/fetchUrl";
 import { EXPLAIN_MS, ReadError } from "../lib/readError";
-import { openDocument } from "../lib/openDoc";
+import { listenTo, openDocument } from "../lib/openDoc";
 import { importPage, isContentsPage } from "../state/books";
 
 /**
@@ -19,7 +19,7 @@ export function ReadNew() {
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
-    const autoplay = useSettings.getState().autoplayShare;
+    const go = useSettings.getState().autoplayShare ? listenTo : openDocument;
     const create = useLibrary.getState().create;
     (async () => {
       const text = params.get("text")?.trim() ?? "";
@@ -31,12 +31,12 @@ export function ReadNew() {
           toast(`Fetching ${hostOf(url)}…`);
           const f = await fetchReadable(url);
           const rec = await importPage(f, { source: "share", title });
-          await openDocument(rec, navigate, { autoplay: autoplay && !isContentsPage(f), resume: false, replace: true });
+          await (isContentsPage(f) ? openDocument : go)(rec, navigate, { resume: false, replace: true });
           return;
         }
         if (text) {
           const rec = await create({ text, title, source: "share", domain: "Shared" });
-          await openDocument(rec, navigate, { autoplay, resume: false, replace: true });
+          await go(rec, navigate, { resume: false, replace: true });
           return;
         }
         navigate("/", { replace: true });
