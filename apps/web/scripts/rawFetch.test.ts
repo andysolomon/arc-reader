@@ -44,8 +44,11 @@ function sourceFiles(dir: string): string[] {
 
 describe("raw fetch", () => {
   it("is not called from client code", () => {
-    const problems = SOURCES.flatMap(sourceFiles).filter((file) => !(file in ALLOWED))
-      .flatMap((file) => rawFetches(file, readFileSync(join(ROOT, file), "utf8")).map((line) => `${file}:${line} calls fetch. ${FIX}`));
+    const problems = SOURCES.flatMap(sourceFiles).filter((file) => !(file in ALLOWED)).flatMap((file) => {
+      const text = readFileSync(join(ROOT, file), "utf8");
+      // Parsing is the slow part, and most files never mention fetch.
+      return text.includes("fetch") ? rawFetches(file, text).map((line) => `${file}:${line} calls fetch. ${FIX}`) : [];
+    });
     expect(problems).toEqual([]);
   });
 
