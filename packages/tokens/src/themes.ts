@@ -108,7 +108,6 @@ export function isThemeId(v: unknown): v is ThemeId {
   return typeof v === "string" && THEME_IDS.includes(v as ThemeId);
 }
 
-/** Apply a theme to the document root. */
 export function applyTheme(id: ThemeId, root: HTMLElement = document.documentElement) {
   if (root.dataset.theme !== id) root.dataset.theme = id;
 }

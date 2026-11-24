@@ -80,7 +80,6 @@ function forms(word: string): [string, string][] {
     });
 }
 
-/** A word's comparison keys. */
 export const normal = (word: string): string[] => forms(word).map(([key]) => key);
 
 function distance(a: string, b: string): number {
@@ -119,7 +118,6 @@ function costs(want: string[], got: string[]): Float32Array[] {
   return cost;
 }
 
-/** Edit-distance alignment of two word lists. */
 function alignPieces(want: string[], got: string[]): Op[] {
   const n = want.length, m = got.length;
   const cost = costs(want, got);

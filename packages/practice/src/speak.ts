@@ -4,7 +4,6 @@ import { displayText } from "./words";
 /** Whatever Practice is playing: a word, the passage, or the reader's own take. One at a time. */
 let current: { stop: () => void } | null = null;
 
-/** Stop whatever Practice is playing. */
 export function stopPlayback() {
   current?.stop();
   current = null;

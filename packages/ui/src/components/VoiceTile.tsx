@@ -27,7 +27,6 @@ export interface VoiceTileProps extends Omit<HTMLAttributes<HTMLElement>, "child
   /** `h3` where the name belongs in the page outline. */
   nameAs?: "div" | "h3";
   selected?: boolean;
-  /** Makes the portrait a button that plays a sample. */
   preview?: VoiceTilePreview;
   /** Top-right controls, stacked: favourite, re-record, delete. */
   corner?: ReactNode;

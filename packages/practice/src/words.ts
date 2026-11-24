@@ -8,7 +8,6 @@ export interface Token {
   /** Punctuation before the word, such as an opening quote. */
   pre: string;
   word: string;
-  /** Punctuation after the word. */
   post: string;
   /** Whether a space comes before it; words joined by a dash ("orphan—to") have none. */
   space: boolean;
