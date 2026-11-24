@@ -78,7 +78,8 @@ describe("audio backups", () => {
     await audioCache.put(clip(key("Seven eight."), "GOOD"));
     const backup = await buildBackup([two], { title: "Doc b", voiceName: names });
     const raw = new Uint8Array(await backup.file.arrayBuffer());
-    const at = raw.indexOf(0x47); // the first "G" of the clip
+    const good = new TextEncoder().encode("GOOD");
+    const at = raw.findIndex((_, i) => good.every((byte, j) => raw[i + j] === byte));
     raw[at] = 0x58;
     await audioCache.clear();
     const opened = await openBackup(new Blob([raw]));

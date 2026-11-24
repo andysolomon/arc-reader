@@ -91,7 +91,8 @@ describe("adding a book's chapters on the server", () => {
   });
 
   it("starts an import over HTTP and lists it, refusing other sites", async () => {
-    const server = createServer(bookImportMiddleware(new BookImports(library, page)));
+    const middleware = bookImportMiddleware(new BookImports(library, page));
+    const server = createServer((req, res) => middleware(req, res, () => {}));
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     try {

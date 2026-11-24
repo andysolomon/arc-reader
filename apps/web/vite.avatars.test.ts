@@ -118,7 +118,7 @@ describe("persistent voice avatar generation", () => {
       ...Object.fromEntries([0, 1, 2, 3].map((i) => [`similar_${i}`, { noul: 0.1 }])),
     } }));
     const director = new AvatarDirector(new LlmKeyStore(directory, "jev-secret", "typesafe.json"), undefined, jev);
-    const upstream = vi.fn(async (_url: string, init?: RequestInit) => {
+    const upstream = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const records = await store.list();
       expect(records.records[0].review?.status).toBe("reviewed");
       expect(JSON.parse(init!.body as string).prompt).toContain('"expression":"calm"');

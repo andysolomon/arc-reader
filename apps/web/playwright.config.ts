@@ -74,6 +74,9 @@ export default defineConfig({
         VITE_DEFAULT_ENGINE: "kittentts",
         // The stub answers instantly, so preparation need not wait long after a live request.
         PREPARATION_YIELD_MS: "500",
+        // Background preparation gives way when the host's CPU is oversubscribed (vite.host-pressure.ts).
+        // A busy CI runner or a laptop running other suites would hold it, so tests read no pressure.
+        PREPARATION_PRESSURE_FILE: "/nonexistent",
         VOICESTUDIO_URL: LIVE ? process.env.VOICESTUDIO_URL || localEnv.VOICESTUDIO_URL || "http://127.0.0.1:3900" : `http://127.0.0.1:${voicePort}`,
         VOICESTUDIO_API_KEY: LIVE ? process.env.VOICESTUDIO_API_KEY || localEnv.VOICESTUDIO_API_KEY || "" : "test-key",
         VOICESTUDIO_NAME: "Mac",
