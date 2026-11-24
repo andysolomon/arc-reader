@@ -15,6 +15,8 @@ export interface ShelfJob {
   done: number;
   total: number;
   status?: string;
+  /** While saving onto this device: the passages stored so far */
+  step?: { done: number; total: number };
 }
 
 /** One voice's audio across a book or series. */
@@ -22,6 +24,8 @@ export interface ShelfVoice {
   voice: PreparedVoice;
   /** 0..1 of the whole, each chapter weighted by its length; audio being made counts as it is made */
   fraction: number;
+  /** 0..1 of the whole stored on this device, weighted the same way; audio being saved counts as it is stored */
+  saved: number;
   /** Chapters fully prepared */
   complete: number;
   /** Chapters queued, being made or being saved */
@@ -45,10 +49,10 @@ export function shelfPreparation(chapters: ShelfChapter[], jobs: ShelfJob[]): Sh
   const average = known.length ? known.reduce((sum, c) => sum + c.duration, 0) / known.length : 1;
   const weight = (c: ShelfChapter) => (c.duration > 0 ? c.duration : average);
   const whole = chapters.reduce((sum, c) => sum + weight(c), 0);
-  const voices = new Map<string, { voice: PreparedVoice; done: Map<string, number>; complete: Set<string>; busy: Set<string>; saving: Set<string> }>();
+  const voices = new Map<string, { voice: PreparedVoice; done: Map<string, number>; stored: Map<string, number>; complete: Set<string>; busy: Set<string>; saving: Set<string> }>();
   const entry = (voice: PreparedVoice) => {
     const key = voiceKey(voice);
-    if (!voices.has(key)) voices.set(key, { voice: { ...voice, fraction: 0 }, done: new Map(), complete: new Set(), busy: new Set(), saving: new Set() });
+    if (!voices.has(key)) voices.set(key, { voice: { ...voice, fraction: 0 }, done: new Map(), stored: new Map(), complete: new Set(), busy: new Set(), saving: new Set() });
     return voices.get(key)!;
   };
   const ids = new Set(chapters.map((c) => c.id));
@@ -57,6 +61,7 @@ export function shelfPreparation(chapters: ShelfChapter[], jobs: ShelfJob[]): Sh
       if (voice.fraction <= 0) continue;
       const tally = entry(voice);
       tally.done.set(chapter.id, Math.min(1, voice.fraction));
+      tally.stored.set(chapter.id, Math.min(1, voice.stored ?? voice.fraction));
       if (voice.fraction >= 1) tally.complete.add(chapter.id);
     }
   }
@@ -69,11 +74,16 @@ export function shelfPreparation(chapters: ShelfChapter[], jobs: ShelfJob[]): Sh
     // A run starts its count at zero even when most of the audio is already saved.
     const generated = job.total > 0 ? Math.max(0, Math.min(1, job.done / job.total)) : 0;
     tally.done.set(job.docId, Math.max(tally.done.get(job.docId) ?? 0, generated));
+    // The library reads this device's audio every few seconds; the save under way counts each passage as it lands.
+    if (job.status === "saving" && job.step && job.step.total > 0) tally.stored.set(job.docId, Math.max(tally.stored.get(job.docId) ?? 0, Math.min(1, job.step.done / job.step.total)));
   }
-  return [...voices.values()].map(({ voice, done, complete, busy, saving }) => {
-    let made = 0;
-    for (const chapter of chapters) made += weight(chapter) * (done.get(chapter.id) ?? 0);
-    return { voice, fraction: whole ? Math.min(1, made / whole) : 0, complete: complete.size, busy: busy.size, saving: saving.size, chapters: chapters.length };
+  const share = (of: Map<string, number>) => {
+    let sum = 0;
+    for (const chapter of chapters) sum += weight(chapter) * (of.get(chapter.id) ?? 0);
+    return whole ? Math.min(1, sum / whole) : 0;
+  };
+  return [...voices.values()].map(({ voice, done, stored, complete, busy, saving }) => {
+    return { voice, fraction: share(done), saved: share(stored), complete: complete.size, busy: busy.size, saving: saving.size, chapters: chapters.length };
   });
 }
 

@@ -106,6 +106,53 @@ test("a cover that could not be drawn offers to be drawn again", async ({ page }
   expect(server.ensures.at(-1)?.retry).toBe(true);
 });
 
+test("a cover opens full screen, steps to the next, and the gallery shows them all", async ({ page }) => {
+  await coverServer(page);
+  await read(page);
+  const text = page.getByRole("region", { name: "Document text" });
+  await expect(text.locator("[data-cover=section][data-cover-status=ready]")).toHaveCount(2);
+  const playPause = page.getByRole("region", { name: "Player" }).locator("button[data-playing]");
+  await expect(playPause).toHaveAttribute("data-playing", "true");
+  await playPause.click();
+  await expect(playPause).toHaveAttribute("data-playing", "false");
+
+  // A section's cover opens on itself; the arrow keys step through every cover, the article's first.
+  await text.getByRole("button", { name: "View the cover for Baking full screen" }).click();
+  const viewer = page.getByRole("dialog", { name: "Baking" });
+  await expect(viewer).toBeVisible();
+  await expect(viewer).toContainText("3 of 3");
+  await expect(viewer.getByRole("img", { name: "An ink drawing for Baking." })).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("dialog", { name: "Bread Notes" })).toContainText("1 of 3");
+  // The keys stay with the viewer: nothing plays behind it.
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-image-viewer]")).toHaveCount(0);
+  await expect(playPause).toHaveAttribute("data-playing", "false");
+
+  // The gallery: every cover at once, each opening full screen, and Esc back to the gallery.
+  await text.getByRole("button", { name: "All 3 covers" }).click();
+  const gallery = page.locator("[data-image-viewer=grid]");
+  await expect(gallery).toContainText("3 pictures");
+  await expect(gallery.locator("[data-cover]")).toHaveCount(3);
+  await gallery.getByRole("button", { name: "The starter" }).click();
+  await expect(page.getByRole("dialog", { name: "The starter" })).toContainText("2 of 3");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-image-viewer=grid]")).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.locator("[data-image-viewer]")).toHaveCount(0);
+  await expect(text.getByRole("button", { name: "All 3 covers" })).toBeFocused();
+});
+
+test("a cover still being drawn does not open", async ({ page }) => {
+  await coverServer(page, "generating");
+  await read(page);
+  await expect(page.locator("[data-cover=article]")).toHaveAttribute("data-cover-status", "generating");
+  await expect(page.getByRole("button", { name: /full screen/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /All \d+ covers/ })).toHaveCount(0);
+});
+
 test("the Library shows each article's cover, and Settings turns covers off", async ({ page }) => {
   const server = await coverServer(page);
   await read(page);
@@ -113,12 +160,15 @@ test("the Library shows each article's cover, and Settings turns covers off", as
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await expect(page.locator("main [data-cover-thumb] img").first()).toHaveAttribute("src", "/api/covers/images/article.png");
+  // The cover leads the row, and where the article came from stays on its corner.
+  await expect(page.locator("main [data-source-badge]").first()).toBeVisible();
 
   await page.goto("/settings");
   await page.getByRole("switch", { name: "Covers" }).click();
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await expect(page.locator("[data-cover-thumb]")).toHaveCount(0);
+  await expect(page.locator("[data-source-badge]")).toHaveCount(0);
   const asked = server.ensures.length;
   await page.getByRole("button", { name: "Bread Notes" }).first().click();
   await page.getByRole("region", { name: "Player" }).waitFor();

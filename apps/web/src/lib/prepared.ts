@@ -10,7 +10,10 @@ export interface PreparedVoice {
   voiceId: string;
   name: string;
   engine: string;
+  /** 0..1 of the reading made, saved on this device or on the preparation server */
   fraction: number;
+  /** 0..1 of it saved on this device itself, when the library measured that */
+  stored?: number;
 }
 
 interface Reading {
@@ -65,7 +68,7 @@ export function sharedPassages(plans: ReadingPlan[]): Set<string> {
  * Passages other documents share are left out, so audio saved for a sibling
  * chapter's boilerplate doesn't make this one look partly prepared.
  */
-export function preparedVoices(rec: DocRecord, voices: Voice[], keys: Set<string>, openaiModel: string, shared: Set<string> = new Set(), plan = planReading(rec)): PreparedVoice[] {
+export function preparedVoices(rec: DocRecord, voices: Voice[], keys: Set<string>, openaiModel: string, shared: Set<string> = new Set(), plan = planReading(rec), device?: Set<string>): PreparedVoice[] {
   return voices.flatMap((voice) => {
     if (voice.engine === LOCAL_ENGINE) return [];
     const patois = voice.id === JAMAICAN_PATOIS_VOICE_ID;
@@ -76,17 +79,20 @@ export function preparedVoices(rec: DocRecord, voices: Voice[], keys: Set<string
     const own = passages.flatMap((passage, i) => shared.has(passage.text) ? [] : [i]);
     // A document made only of shared passages (a duplicate import) is measured by all of them.
     const counted = own.length ? own : passages.map((_, i) => i);
-    let total = 0, ready = 0;
+    let total = 0, ready = 0, here = 0;
     for (const i of counted) {
       const passage = passages[i];
       const cached = keys.has(prefix + passageHashes[i]);
+      const onDevice = !!device?.has(prefix + passageHashes[i]);
       for (let s = passage.start; s < Math.min(passage.end, sentences.length); s++) {
         const weight = sentences[s].words.length;
         total += weight;
         if (cached || keys.has(prefix + sentenceHashes[s])) ready += weight;
+        if (onDevice || device?.has(prefix + sentenceHashes[s])) here += weight;
       }
     }
-    return ready && total ? [{ voiceId: voice.id, name: voice.name, engine: voice.engine, fraction: ready / total }] : [];
+    if (!ready || !total) return [];
+    return [{ voiceId: voice.id, name: voice.name, engine: voice.engine, fraction: ready / total, ...(device ? { stored: here / total } : {}) }];
   });
 }
 

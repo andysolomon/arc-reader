@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BookOpen, ChevronLeft, Library, Link2, Maximize2, Minimize2, Sparkles, Star, Headphones, Code2, Check, ImageIcon, X } from "lucide-react";
-import { IconButton, SentenceText, Sheet, Segmented, ThemeIcon, cn } from "@readaloud/ui";
+import { ArrowRight, BookOpen, ChevronLeft, Images, Library, Link2, Maximize2, Minimize2, Sparkles, Star, Headphones, Code2, Check, ImageIcon, X } from "lucide-react";
+import { IconButton, ImageViewer, SentenceText, Sheet, Segmented, ThemeIcon, cn, type ViewerItem } from "@readaloud/ui";
 import { getTheme } from "@readaloud/tokens";
 import { docs } from "../lib/db";
 import { syncLibrary } from "../lib/librarySync";
@@ -27,8 +27,9 @@ import { neighbours } from "../state/books";
 import { useLibrary } from "../state/library";
 import { useFavorites } from "../state/favorites";
 import { Cover } from "../components/Cover";
-import { useCovers, useDocCovers } from "../state/covers";
+import { coverPending, useCovers, useDocCovers } from "../state/covers";
 import { coverPlaces } from "../lib/covers";
+import type { CoverEntry } from "../lib/coverProtocol";
 import { summarySource } from "../lib/summary";
 import { catalogue } from "../lib/postTitle";
 
@@ -114,18 +115,41 @@ export function Reader() {
   const coverVersion = useMemo(() => coverRecord ? summarySource(coverRecord.text) : "", [coverRecord?.text]);
   const covers = useDocCovers(coverRecord?.id, coverVersion, !!coverRecord);
   const redraw = () => { if (coverRecord) void useCovers.getState().ensure(coverRecord.id, true).catch(() => toast("The covers couldn't be asked for. Try again when you're connected.")); };
-  const articleCover = coverRecord && covers?.docId === coverRecord.id && !focus ? covers.covers.find((cover) => cover.kind === "article" && cover.status !== "blocked") : undefined;
+  const coversShown = coverRecord && covers?.docId === coverRecord.id ? covers : undefined;
+  const articleCover = coversShown && !focus ? coversShown.covers.find((cover) => cover.kind === "article" && cover.status !== "blocked") : undefined;
+  // What a cover says above and below its title: the site and byline for the article, the article and the enclosing section for a section.
+  const coverWords = (cover: CoverEntry) => cover.kind === "article"
+    ? { eyebrow: coverRecord!.meta?.site || coverRecord!.domain, foot: [catalogue(coverRecord!).author, coverRecord!.meta?.published].filter(Boolean).join(" · ") || undefined }
+    : { eyebrow: catalogue(coverRecord!).title, foot: cover.path.length > 1 ? cover.path[cover.path.length - 2] : undefined };
+  // Every cover whose art is in, article first and then the sections in reading order: the gallery, and what the viewer steps through.
+  const drawn = useMemo(() => coversShown?.covers.filter((cover) => cover.status === "ready" && cover.url) ?? [], [coversShown]);
+  const stillDrawing = coversShown?.covers.filter(coverPending).length ?? 0;
+  // Held by key, so a cover that arrives while one is open never changes which one is shown.
+  const [viewing, setViewing] = useState<string | null>(null);
+  useEffect(() => setViewing(null), [id]);
+  const viewingIndex = drawn.findIndex((cover) => cover.key === viewing);
+  const viewingAt = viewing === "grid" ? "grid" : viewingIndex >= 0 ? viewingIndex : null;
+  const viewerItems = useMemo<ViewerItem[]>(() => drawn.map((cover) => {
+    const words = coverWords(cover);
+    return {
+      key: cover.key,
+      title: cover.kind === "article" ? cover.heading : cover.path.join(" › "),
+      caption: cover.alt,
+      // 4:5, as large as the screen allows.
+      view: <Cover cover={cover} {...words} style={{ width: "min(100cqw, 80cqh)" }} />,
+      thumb: <Cover cover={cover} {...words} />,
+    };
+  }), [drawn]);
   const sectionCovers = useMemo(() => {
     const inserts = new Map<number, ReactNode>();
-    if (!coverRecord || !ready || focus || covers?.docId !== coverRecord.id) return inserts;
-    const sections = covers.covers.filter((cover) => cover.kind === "section" && cover.status !== "blocked");
-    const eyebrow = catalogue(coverRecord).title;
-    for (const [paragraph, key] of coverPlaces(doc.paragraphs, sections, covers.headings)) {
+    if (!coversShown || !ready || focus) return inserts;
+    const sections = coversShown.covers.filter((cover) => cover.kind === "section" && cover.status !== "blocked");
+    for (const [paragraph, key] of coverPlaces(doc.paragraphs, sections, coversShown.headings)) {
       const cover = sections.find((section) => section.key === key)!;
-      inserts.set(paragraph, <Cover cover={cover} eyebrow={eyebrow} foot={cover.path.length > 1 ? cover.path[cover.path.length - 2] : undefined} onRetry={redraw} className="max-w-[18rem] font-sans" />);
+      inserts.set(paragraph, <Cover cover={cover} {...coverWords(cover)} onRetry={redraw} onOpen={() => setViewing(cover.key)} className="max-w-[18rem] font-sans" />);
     }
     return inserts;
-  }, [coverRecord, covers, doc, ready, focus]);
+  }, [coversShown, doc, ready, focus]);
   const hasLinks = !!ready && links.length > 0;
   const showLinks = hasLinks && linksOpen && !focus;
   const chapter = detailsRecord?.book && !readingSummary ? detailsRecord : null;
@@ -185,6 +209,11 @@ export function Reader() {
           {summaryRecord && !readingSummary && (
             <IconButton label={showSummary ? "Hide summary" : "Summarize"} active={showSummary} aria-busy={summarizing || undefined} onClick={toggleSummary}>
               <Sparkles size={20} strokeWidth={1.5} className={summarizing ? "animate-pulse" : undefined} />
+            </IconButton>
+          )}
+          {bp !== "sm" && drawn.length > 0 && (
+            <IconButton label="Cover gallery" title="Cover gallery" onClick={() => setViewing("grid")}>
+              <Images size={20} strokeWidth={1.5} />
             </IconButton>
           )}
           {bp === "sm" ? (
@@ -250,14 +279,16 @@ export function Reader() {
         <motion.div layoutId="doc-surface" className="mx-auto" style={{ maxWidth: `${wide ? 72 : 62}ch` }}>
           {detailsRecord && !focus && !readingSummary && <BookOffer record={detailsRecord} />}
           {detailsRecord && !focus && !readingSummary && <VideoTranscript record={detailsRecord} />}
-          {articleCover && coverRecord && (
-            <Cover
-              cover={articleCover}
-              eyebrow={coverRecord.meta?.site || coverRecord.domain}
-              foot={[catalogue(coverRecord).author, coverRecord.meta?.published].filter(Boolean).join(" · ") || undefined}
-              onRetry={redraw}
-              className="mb-9 max-w-[21rem]"
-            />
+          {articleCover && (
+            <div className="mb-9">
+              <Cover cover={articleCover} {...coverWords(articleCover)} onRetry={redraw} onOpen={() => setViewing(articleCover.key)} className="max-w-[21rem]" />
+              {drawn.length > 1 && (
+                <button type="button" onClick={() => setViewing("grid")} className="mx-auto mt-3 flex items-center gap-1.5 rounded-pill border-0 bg-transparent px-3 py-1.5 font-sans text-[12px] text-fg2 hover:bg-bg3 hover:text-fg">
+                  <Images size={14} strokeWidth={1.5} aria-hidden />
+                  All {drawn.length} covers
+                </button>
+              )}
+            </div>
           )}
           {ready && !focus && (
             <div className="mb-10 border-b border-line pb-7">
@@ -333,6 +364,13 @@ export function Reader() {
         </aside>
       )}
       </div>
+      <ImageViewer
+        items={viewerItems}
+        at={viewingAt}
+        onChange={(at) => setViewing(typeof at === "number" ? drawn[at]?.key ?? null : at)}
+        label={coverRecord ? `Covers · ${catalogue(coverRecord).title}` : "Covers"}
+        note={stillDrawing ? `${stillDrawing} still being drawn` : undefined}
+      />
       <Sheet open={showLinks && bp === "sm"} onClose={() => setLinksOpen(false)} title="Links">
         <DocumentLinks links={links} read={read} />
       </Sheet>

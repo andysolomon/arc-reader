@@ -60,6 +60,8 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       const byId = new Map(pos.map((p) => [p.docId, p]));
       const allKeys = [...keys, ...serverPreparedKeys()];
       const cached = new Set(allKeys);
+      // Audio the server has made counts as prepared; this device's own keys say how much is stored here.
+      const device = new Set(keys);
       const voices = [...useVoices.getState().voices];
       // Saved voices can outlive a catalogue page or an unavailable speech server.
       for (const key of allKeys) {
@@ -74,7 +76,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
         items: all
           .map((rec, index) => {
             const p = byId.get(rec.id);
-            return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimatedTotal(rec), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, openaiModel, shared, plans[index]) };
+            return { rec, progress: p ? Math.min(1, p.fraction) : 0, duration: p?.total || estimatedTotal(rec), reads: readsOf(p), prepared: preparedVoices(rec, voices, cached, openaiModel, shared, plans[index], device) };
           })
           // Newest first by when the document was added: filing, editing or opening it doesn't move it.
           .sort((a, b) => b.rec.createdAt - a.rec.createdAt),

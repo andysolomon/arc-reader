@@ -8,14 +8,14 @@ import { useSettings } from "../state/settings";
 import { CoverThumb } from "./Cover";
 
 /** Site favicon for articles, via the server so the browser never reports library sites elsewhere. */
-export function SourceIcon({ rec }: { rec: Pick<DocRecord, "source" | "domain"> }) {
+export function SourceIcon({ rec, className }: { rec: Pick<DocRecord, "source" | "domain">; className?: string }) {
   const [failed, setFailed] = useState(false);
   const site = (rec.source === "url" || rec.source === "share") && rec.domain.includes(".") && !/[\s/]/.test(rec.domain);
   if (site && !failed) {
-    return <img src={`/api/favicon?host=${encodeURIComponent(rec.domain)}`} alt="" width={16} height={16} loading="lazy" decoding="async" onError={() => setFailed(true)} className="size-4 shrink-0 rounded-[4px]" />;
+    return <img src={`/api/favicon?host=${encodeURIComponent(rec.domain)}`} alt="" width={16} height={16} loading="lazy" decoding="async" onError={() => setFailed(true)} className={cn("size-4 shrink-0 rounded-[4px]", className)} />;
   }
   const Icon = site ? Globe : rec.source === "file" ? FileText : ClipboardList;
-  return <Icon size={14} strokeWidth={1.5} className="shrink-0 text-fg2" aria-hidden />;
+  return <Icon size={14} strokeWidth={1.5} className={cn("shrink-0 text-fg2", className)} aria-hidden />;
 }
 
 const MARK = "relative grid size-6 shrink-0 place-items-center rounded-[7px]";
@@ -33,14 +33,21 @@ export function SourceMark({ rec, className }: { rec: Pick<DocRecord, "id" | "so
   );
 }
 
-/** What leads a document in the Library: its cover once it has one, until then where it came from. */
+/** What leads a document in the Library: its cover once it has one, with where it came from on its corner; until then where it came from alone. */
 export function DocMark({ rec, className }: { rec: Pick<DocRecord, "id" | "source" | "domain">; className?: string }) {
   const url = useCovers((s) => s.shelf[rec.id]?.url);
   const shown = useSettings((s) => s.showCovers);
   const working = useWorking(useMemo(() => [rec.id], [rec.id]));
   if (!url || !shown) return <SourceMark rec={rec} className={className} />;
   // Taller than a line of title: in a list row it stands beside the title, facts and status together.
-  return <span className={cn("relative row-span-3 grid shrink-0 self-start", working && ORBIT, className)}><CoverThumb url={url} /></span>;
+  return (
+    <span className={cn("relative row-span-3 grid shrink-0 self-start", working && ORBIT, className)}>
+      <CoverThumb url={url} />
+      <span data-source-badge className="absolute -bottom-1 -right-1 grid size-[18px] place-items-center rounded-[5px] bg-bg ring-1 ring-line">
+        <SourceIcon rec={rec} className="size-3.5 rounded-[3px]" />
+      </span>
+    </span>
+  );
 }
 
 /** The tile that leads a series, which stands in for its volumes. */

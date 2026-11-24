@@ -2,6 +2,25 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ImageIcon, Network, ChevronDown, Presentation } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { ParagraphLike } from "../lib/types";
+import { ImageViewer, ViewerImage } from "./ImageViewer";
+
+/** A picture in the text that opens full screen when pressed. */
+function Zoomable({ src, alt, title, caption, children }: { src: string; alt: string; title: string; caption?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" aria-label={`View ${title.toLowerCase()} full screen`} onClick={() => setOpen(true)} className="block w-full cursor-zoom-in border-0 bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+        {children}
+      </button>
+      <ImageViewer
+        items={[{ key: src, title, caption: caption || (alt !== title ? alt : undefined), view: <ViewerImage src={src} alt={alt} /> }]}
+        at={open ? 0 : null}
+        onChange={(at) => setOpen(at !== null)}
+        label={title}
+      />
+    </>
+  );
+}
 
 export function VisualFigure({ visual, active, children }: { visual: NonNullable<ParagraphLike["visual"]>; active: boolean; children: ReactNode }) {
   const [failed, setFailed] = useState(false);
@@ -15,7 +34,7 @@ export function VisualFigure({ visual, active, children }: { visual: NonNullable
       )}>
         {failed ? <p className="m-0 border-b border-line px-5 py-4 text-sm text-fg2" role="status">The picture of this slide is unavailable.</p>
           // Most decks are 16:9; reserving that shape keeps the text from jumping as pictures load.
-          : <img src={visual.src} alt={visual.alt || "Slide"} loading="lazy" decoding="async" onError={() => setFailed(true)} className="block aspect-video w-full border-b border-line bg-bg object-contain" />}
+          : <Zoomable src={visual.src} alt={visual.alt || "Slide"} title="Slide"><img src={visual.src} alt={visual.alt || "Slide"} loading="lazy" decoding="async" onError={() => setFailed(true)} className="block aspect-video w-full border-b border-line bg-bg object-contain" /></Zoomable>}
         <div className="flex flex-wrap items-center gap-2 px-5 pt-3 text-[11px] font-medium uppercase tracking-[0.12em] text-fg2">
           <Presentation size={15} aria-hidden /><span>Slide</span>
           <span className="ml-auto text-[10px] tracking-[0.08em]">{visual.source === "description" ? "Spoken description" : "Not described yet"}</span>
@@ -43,7 +62,7 @@ export function VisualFigure({ visual, active, children }: { visual: NonNullable
         </summary>
         <figure className="m-0 border-t border-line bg-bg p-4">
           {failed ? <p className="m-0 text-sm text-fg2" role="status">The original {label.toLowerCase()} is unavailable. You can still listen to its description.</p>
-            : <img src={visual.src} alt={visual.alt || visual.caption || `Article ${label.toLowerCase()}`} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} className="mx-auto max-h-96 max-w-full rounded-lg object-contain" />}
+            : <Zoomable src={visual.src} alt={visual.alt || visual.caption || `Article ${label.toLowerCase()}`} title={label} caption={visual.caption}><img src={visual.src} alt={visual.alt || visual.caption || `Article ${label.toLowerCase()}`} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} className="mx-auto max-h-96 max-w-full rounded-lg object-contain" /></Zoomable>}
           {visual.caption && <figcaption className="mt-3 text-[12px] leading-relaxed text-fg2">{visual.caption}</figcaption>}
         </figure>
       </details>}
