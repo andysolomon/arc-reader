@@ -24,7 +24,6 @@ export function Meter({ value, of, label }: { value: number; of: number; label: 
   </span>;
 }
 
-/** One choice among a few, as a row of segments. */
 export function Segmented<T extends string>({ label, role, value, options, onChange }: {
   label: string; role: "radiogroup" | "tablist"; value: T; options: { id: T; label: string }[]; onChange: (id: T) => void;
 }) {

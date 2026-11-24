@@ -23,8 +23,7 @@ export interface Result {
   passage: Passage;
   judgement: Judgement;
   score: Score;
-  /** Seconds of speech. */
-  speech: number;
+  speechSeconds: number;
   phrase: string;
   recording: File;
 }
@@ -107,7 +106,7 @@ export function Reading({ deck, onClose, onResult }: { deck: PassageDeck; onClos
         accuracy: score.accuracy, wcpm: score.wcpm, phrasing: judgement.prosody?.phrasing ?? 0, points: score.points,
         missed: score.missed.map((w) => w.word), clean: judgement.words.filter((w) => w.verdict === "correct").map((w) => w.word),
       });
-      onResult({ passage, judgement, score, speech: take.speech, phrase: feedback(score, judgement.prosody?.pace ?? 3), recording: file });
+      onResult({ passage, judgement, score, speechSeconds: take.speech, phrase: feedback(score, judgement.prosody?.pace ?? 3), recording: file });
     } catch (e) {
       if (ac.signal.aborted) return;
       setError(e instanceof Error ? e.message : "Checking the reading failed. Please retry.");

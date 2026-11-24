@@ -32,7 +32,6 @@ export function App() {
   const { load } = deck;
   // A passage for whoever is reading, at their level; switching reader brings one at theirs.
   useEffect(() => { void load(usePractice.getState().band); }, [load, readerId]);
-  // Each screen starts at its top.
   useEffect(() => { window.scrollTo(0, 0); }, [view.name, tab]);
 
   const band = () => usePractice.getState().band;
