@@ -87,8 +87,8 @@ export function LlmKeyField({
             aria-describedby={error ? id : undefined}
             className="min-w-0 flex-1 bg-bg font-mono text-[13px]"
           />
-          <Button type="submit" variant="primary" size="md" loading={busy} disabled={!key.trim()}>Save</Button>
-          {editing && <Button size="md" variant="ghost" onClick={close} disabled={busy}>Cancel</Button>}
+          <Button type="submit" variant="primary" size="md" loading={busy} disabled={!key.trim()} aria-label={`Save ${name} key`}>Save</Button>
+          {editing && <Button size="md" variant="ghost" onClick={close} disabled={busy} aria-label={`Cancel replacing ${name} key`}>Cancel</Button>}
           {error && <p id={id} role="alert" className="m-0 w-full text-[13px] text-danger">{error}</p>}
         </form>
       )}
