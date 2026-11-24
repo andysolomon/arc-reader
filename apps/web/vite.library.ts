@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { writePrivate } from "./vite.files";
 import type { Connect, Plugin } from "vite";
 import type { DocRecord, PositionRecord } from "./src/lib/db";
 import { MAX_LINK_TEXT, MAX_LINK_URL, MAX_LINKS } from "./src/lib/links";
@@ -223,9 +223,7 @@ export class LibraryService {
         positions.set(rec.docId, !current || rec.updatedAt >= current.updatedAt ? mergeReads(rec, current) : mergeReads(current, rec));
       }
       const next = { docs: [...docs.values()], positions: [...positions.values()], deleted: [...deleted] };
-      const temporary = `${this.file}.${randomUUID()}.tmp`;
-      await writeFile(temporary, JSON.stringify(next), { mode: 0o600 });
-      await rename(temporary, this.file);
+      await writePrivate(this.file, JSON.stringify(next));
       const info = await stat(this.file);
       this.cache = { mtimeMs: info.mtimeMs, size: info.size, snapshot: next };
       const added = next.docs.filter((doc) => !before.has(doc.id));
