@@ -45,7 +45,7 @@ Each switch in `PreparationQueue.tla` and `SharedPreparations.tla` (`SavingHolds
 
 ## Does your change touch it?
 
-Coverage, last confirmed against the code at commit `a8d39c6d7c0977bebc4acc766942388b9c9344d0`:
+Coverage, last confirmed against the code at commit `e76665230585d15a581b6f66bea306340254bc9d`:
 
 | Code | Model |
 | --- | --- |
