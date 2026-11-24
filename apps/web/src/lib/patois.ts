@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { readingBlocks, fencedCode } from "./codeBlocks";
 import { visualBlock } from "./visuals";
 import type { DocRecord } from "./db";
@@ -48,10 +49,11 @@ export async function preparePatois(rec: DocRecord, signal: AbortSignal, progres
     if (chunk.visual) { translated.push(text); continue; }
     signal.throwIfAborted();
     progress(`Rewriting into Jamaican Patois… ${index + 1} of ${chunks.length}`, { done: index, total: chunks.length });
-    const response = await fetch(`${BASE}/v1/chat/completions`, {
+    const response = await request(`${BASE}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+      signal,
+      timeoutMs: 120_000,
       body: JSON.stringify({
         model: PATOIS_MODEL, store: false, max_completion_tokens: 6000,
         messages: [{ role: "system", content: INSTRUCTIONS }, { role: "user", content: text }],

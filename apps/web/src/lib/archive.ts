@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import type { BookContents } from "./book";
 import { decodeText, splitBook } from "./bookText";
 import type { DocMeta } from "./db";
@@ -85,15 +86,18 @@ function catalogue(id: string, metadata: Record<string, Field>): { title: string
   return { title: volume && !/\bvol/i.test(name) ? `${name}, volume ${volume}` : name, meta };
 }
 
+/** A whole book's text runs to megabytes. */
+const FILE_TIMEOUT_MS = 60_000;
+
 /** Straight from the Archive, which allows it; through the app's server where the network in between doesn't. */
 async function get(url: string, signal?: AbortSignal): Promise<Response> {
   try {
-    const r = await fetch(url, { signal });
+    const r = await request(url, { signal, timeoutMs: FILE_TIMEOUT_MS });
     if (r.ok) return r;
   } catch (e) {
     if (signal?.aborted) throw e;
   }
-  const r = await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal });
+  const r = await request(`/api/fetch?url=${encodeURIComponent(url)}`, { signal, timeoutMs: FILE_TIMEOUT_MS });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r;
 }

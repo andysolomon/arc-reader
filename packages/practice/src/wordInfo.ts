@@ -1,3 +1,4 @@
+import { request } from "./request";
 import { practiceHost } from "./host";
 import type { Token } from "./words";
 import { wordKey } from "./words";
@@ -101,11 +102,11 @@ export function lookUpWord(word: string, sentence?: string): Promise<WordInfo> {
   if (stored) return Promise.resolve(stored);
   const inFlight = pending.get(key);
   if (inFlight) return inFlight;
-  const request = (async () => {
-    const response = await fetch(`${practiceHost().api}/llm/v1/chat/completions`, {
+  const lookup = (async () => {
+    const response = await request(`${practiceHost().api}/llm/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-opencode-session": "readaloud-practice-word-info" },
-      signal: AbortSignal.timeout(60_000),
+      timeoutMs: 60_000,
       body: JSON.stringify({
         model: WORD_INFO_MODEL,
         max_tokens: 4_000,
@@ -122,7 +123,7 @@ export function lookUpWord(word: string, sentence?: string): Promise<WordInfo> {
     writeStore(key, info);
     return info;
   })();
-  pending.set(key, request);
-  void request.catch(() => undefined).finally(() => pending.delete(key));
-  return request;
+  pending.set(key, lookup);
+  void lookup.catch(() => undefined).finally(() => pending.delete(key));
+  return lookup;
 }

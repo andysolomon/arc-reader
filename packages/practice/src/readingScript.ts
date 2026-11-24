@@ -4,6 +4,7 @@
  * (text.npr.org) is plain HTML with no scripts, so the app's /api/fetch route can read it.
  */
 import { practiceHost } from "./host";
+import { request } from "./request";
 
 export interface ReadingScript {
   text: string;
@@ -110,7 +111,7 @@ export function scriptFromStory(html: string, id: string, random = Math.random, 
 }
 
 async function page(url: string, signal?: AbortSignal): Promise<string> {
-  const r = await fetch(`${practiceHost().api}/fetch?url=${encodeURIComponent(url)}`, { signal });
+  const r = await request(`${practiceHost().api}/fetch?url=${encodeURIComponent(url)}`, { signal, timeoutMs: 30_000 });
   if (!r.ok) throw new Error(`NPR returned ${r.status}`);
   return r.text();
 }

@@ -210,7 +210,7 @@ describe("background preparation client", () => {
     controller.abort();
     submitted(response(status("running", 0)));
     await rejection;
-    expect(fetchMock.mock.calls.at(-1)).toEqual(["/api/preparations/job-id", { method: "DELETE", keepalive: true }]);
+    expect(fetchMock.mock.calls.at(-1)).toEqual(["/api/preparations/job-id", expect.objectContaining({ method: "DELETE", keepalive: true })]);
     expect(hasActivePreparation(requests)).toBe(false);
   });
 

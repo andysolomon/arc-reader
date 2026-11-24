@@ -11,7 +11,7 @@ import { toast } from "../state/toast";
 import { ApiUsage } from "../components/ApiUsage";
 import { StorageSettings } from "../components/StorageSettings";
 import { ShortcutsGrid } from "../components/ShortcutsDialog";
-import { studioJson, jsonBody } from "../lib/studio";
+import { STUDIO_TIMEOUT, studioJson, jsonBody } from "../lib/studio";
 import { DEFAULT_ENGINE, OPENAI_STANDARD_MODEL, OPENAI_STEADY_MODEL, hasApi, hasOpenAI } from "../engine/providers";
 import { writeClipboardText } from "../lib/clipboard";
 import { isBundledApp } from "../lib/native";
@@ -277,7 +277,7 @@ export function SettingsPage() {
                     <Chip key={e.id} size="sm" selected={activeEngine === e.id} disabled={engineBusy} onClick={() => {
                       if (activeEngine === e.id) return;
                       setEngineBusy(true);
-                      void studioJson("/engines/select", jsonBody({ family: "tts", backend_id: e.id }))
+                      void studioJson("/engines/select", { ...jsonBody({ family: "tts", backend_id: e.id }), timeoutMs: STUDIO_TIMEOUT.work })
                         .then(() => useVoices.getState().load())
                         .catch((error: Error) => toast(error.message))
                         .finally(() => setEngineBusy(false));

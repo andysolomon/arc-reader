@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { prepareVisualDescriptions } from "../lib/visualDescriptions";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -153,7 +154,7 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   cancel(id) {
     const job = get().jobs.find((job) => job.id === id);
     if (job?.remote && job.serverId) {
-      void fetch(`/api/preparations/${job.serverId}`, { method: "DELETE" }).then((response) => {
+      void request(`/api/preparations/${job.serverId}`, { method: "DELETE", timeoutMs: 10_000 }).then((response) => {
         if (!response.ok) throw new Error("Could not cancel server audio preparation.");
         return get().refreshShared();
       }).catch((error) => set({ sharedError: (error as Error).message }));

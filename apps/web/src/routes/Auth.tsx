@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { request } from "@readaloud/practice/request";
 import { useNavigate } from "react-router-dom";
 import { Button, Input } from "@readaloud/ui";
 import { useSettings } from "../state/settings";
@@ -16,7 +17,7 @@ export function AuthPage() {
     setBusy(true);
     try {
       if (usesBuiltInProxy()) {
-        const r = await fetch(`${API_BASE}/auth/magic-link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+        const r = await request(`${API_BASE}/auth/magic-link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }), timeoutMs: 15_000 });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
       }
       setSent(true);

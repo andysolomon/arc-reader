@@ -11,7 +11,7 @@ import { Transcription } from "../components/studio/Transcription";
 import { Dubbing } from "../components/studio/Dubbing";
 import { ModelTerms } from "../components/studio/ModelTerms";
 import { ErrorNotice } from "../components/studio/shared";
-import { studioJson } from "../lib/studio";
+import { STUDIO_TIMEOUT, studioJson } from "../lib/studio";
 
 const TABS = [["gallery", "Voice gallery"], ["clone", "Clone"], ["design", "Design"], ["dub", "Dub video"], ["dictate", "Dictate"], ["transcribe", "Transcribe"]];
 interface Check { label: string; value: string; ok: boolean }
@@ -25,9 +25,9 @@ function useReadiness() {
     const ac = new AbortController();
     setChecks(null);
     void Promise.all([
-      studioJson<{ models_ready: boolean }>("/setup/status", { signal: ac.signal }),
-      studioJson<{ ready: boolean }>("/dictation/readiness?purpose=transcribe", { signal: ac.signal }),
-      studioJson<{ tts: { active: string; backends: { id: string; supports_cloning?: boolean }[] } }>("/engines", { signal: ac.signal }),
+      studioJson<{ models_ready: boolean }>("/setup/status", { signal: ac.signal, timeoutMs: STUDIO_TIMEOUT.read }),
+      studioJson<{ ready: boolean }>("/dictation/readiness?purpose=transcribe", { signal: ac.signal, timeoutMs: STUDIO_TIMEOUT.read }),
+      studioJson<{ tts: { active: string; backends: { id: string; supports_cloning?: boolean }[] } }>("/engines", { signal: ac.signal, timeoutMs: STUDIO_TIMEOUT.read }),
     ]).then(([models, asr, engines]) => {
       const cloning = !!engines.tts.backends.find((e) => e.id === engines.tts.active)?.supports_cloning;
       setChecks([

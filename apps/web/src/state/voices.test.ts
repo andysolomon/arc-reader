@@ -139,7 +139,7 @@ describe("voice providers", () => {
     profiles.splice(0, 1);
     vi.mocked(fetchServerVoices).mockResolvedValue({ voices: [{ id: "mine", name: "My voice", type: "profile" }], engines: [] });
     await useVoices.getState().remove("lib");
-    expect(studioFetch).toHaveBeenCalledWith("/profiles/lib", { method: "DELETE" });
+    expect(studioFetch).toHaveBeenCalledWith("/profiles/lib", expect.objectContaining({ method: "DELETE" }));
     expect(useVoices.getState().voices.some((v) => v.id === "lib")).toBe(false);
     expect(getVoice("mine").id).toBe("mine");
   });

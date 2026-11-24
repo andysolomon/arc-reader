@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { readingBlocks, fencedCode } from "./codeBlocks";
 import { visualText } from "./visuals";
 import type { DocRecord } from "./db";
@@ -40,11 +41,11 @@ export async function summarize(rec: DocRecord, model: SummaryModel): Promise<No
   const text = articleText(rec);
   if (!text) throw new Error("There is no text to summarize.");
   if (text.length > MAX_CHARS) throw new Error("This document is too long to summarize in one go.");
-  const response = await fetch("/api/llm/v1/chat/completions", {
+  const response = await request("/api/llm/v1/chat/completions", {
     method: "POST",
     // A stable session per document lets OpenCode Go route and cache repeat requests.
     headers: { "Content-Type": "application/json", "x-opencode-session": `readaloud-summary-${rec.id}` },
-    signal: AbortSignal.timeout(300_000),
+    timeoutMs: 300_000,
     body: JSON.stringify({
       // Reasoning models spend most of this thinking before they write.
       model, max_tokens: 16_000,

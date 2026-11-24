@@ -1,3 +1,5 @@
+import type { RequestOptions } from "./request";
+
 /**
  * What the engine needs from the app it runs in. ReadAloud and Cadence each call
  * `configurePractice` once, before anything is read aloud; the defaults suit an app served at
@@ -7,7 +9,7 @@ export interface PracticeHost {
   /** Root of the ReadAloud server's API routes: "/api", or under a path when the app is served from one. */
   api: string;
   /** A request to the speech server for `path` (such as "/transcribe"): where it goes, and how it is authorised. */
-  speechRequest: (path: string, init: RequestInit) => { url: string; init: RequestInit };
+  speechRequest: (path: string, init: RequestOptions) => { url: string; init: RequestOptions };
   /**
    * Speech for `text` in the app's voice. A clip with no audio has the browser's own voice say
    * the text in `lang`. The clip rejects with a message to show.

@@ -53,7 +53,7 @@ export function resolveApiBase(configured: string, bundled: boolean, override = 
 }
 
 /** Attach the device-held key only when the request leaves the device. */
-export function withSpeechAuth(url: string, init: RequestInit = {}): RequestInit {
+export function withSpeechAuth<T extends RequestInit>(url: string, init: T): T & RequestInit {
   const key = current.key;
   if (!key || !/^https?:\/\//i.test(url)) return init;
   const headers = new Headers(init.headers);

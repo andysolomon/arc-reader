@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@readaloud/ui";
-import { jsonBody, studioJson } from "../../lib/studio";
+import { jsonBody, STUDIO_TIMEOUT, studioJson } from "../../lib/studio";
 import { ErrorNotice, useOperation } from "./shared";
 
 interface ModelTerms {
@@ -17,7 +17,7 @@ export function ModelTerms() {
   const op = useOperation();
   useEffect(() => {
     const ac = new AbortController();
-    void Promise.all(MODELS.map((repo) => studioJson<ModelTerms>(`/models/licenses/details/${repo}`, { signal: ac.signal })))
+    void Promise.all(MODELS.map((repo) => studioJson<ModelTerms>(`/models/licenses/details/${repo}`, { signal: ac.signal, timeoutMs: STUDIO_TIMEOUT.read })))
       .then(setModels).catch((e: Error) => { if (!ac.signal.aborted) setError(e.message); });
     return () => ac.abort();
   }, []);
@@ -33,7 +33,7 @@ export function ModelTerms() {
         {model.info.evidence_url?.startsWith("https://") && <a className="underline" href={model.info.evidence_url} target="_blank" rel="noreferrer">Read model terms and evidence</a>}
         <label className="flex items-start gap-2"><input className="mt-1" type="checkbox" checked={!!checked[model.repo_id]} onChange={(e) => setChecked((c) => ({ ...c, [model.repo_id]: e.target.checked }))} /><span>I have reviewed these terms and have the rights required for my use of {model.repo_id}.</span></label>
         <Button className="self-start" disabled={!checked[model.repo_id] || op.busy} onClick={() => void op.run(async (signal) => {
-          const acceptance = await studioJson<ModelTerms["acceptance"]>("/models/licenses/accept", { ...jsonBody({ repo_id: model.repo_id, fingerprint: model.acceptance.fingerprint, accepted: true }), signal });
+          const acceptance = await studioJson<ModelTerms["acceptance"]>("/models/licenses/accept", { ...jsonBody({ repo_id: model.repo_id, fingerprint: model.acceptance.fingerprint, accepted: true }), signal, timeoutMs: STUDIO_TIMEOUT.read });
           setModels((before) => before.map((m) => m.repo_id === model.repo_id ? { ...m, acceptance } : m));
         })}>Accept terms for this model</Button>
       </div>)}

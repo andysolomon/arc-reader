@@ -1,3 +1,4 @@
+import { request, type RequestOptions } from "@readaloud/practice/request";
 import { activeApiBase } from "../engine/providers";
 import { errorMessage } from "@readaloud/practice/errorMessage";
 import { withSpeechAuth } from "./speechServer";
@@ -7,16 +8,26 @@ export { errorMessage };
 export const studioUrl = (path: string) => `${activeApiBase() || "/api/vs"}${path}`;
 export const idPath = encodeURIComponent;
 
-export async function studioFetch(path: string, init: RequestInit = {}): Promise<Response> {
+/** How long a VoiceStudio call may take, by what it asks for. */
+export const STUDIO_TIMEOUT = {
+  /** A list, a setting or a small change, which a server that is up answers at once. */
+  read: 15_000,
+  /** Work done while the caller waits: a voice made from a recording, an engine loaded, lines translated. */
+  work: 5 * 60_000,
+  /** An upload, a transcription, or a task's progress stream: as long as the proxy in front of VoiceStudio holds a request (vite.proxy.ts). */
+  long: 30 * 60_000,
+} as const;
+
+export async function studioFetch(path: string, init: RequestOptions): Promise<Response> {
   const url = studioUrl(path);
-  const response = await fetch(url, withSpeechAuth(url, init));
+  const response = await request(url, withSpeechAuth(url, init));
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body ? errorMessage(body) : `VoiceStudio returned HTTP ${response.status}`);
   }
   return response;
 }
-export async function studioJson<T>(path: string, init?: RequestInit): Promise<T> {
+export async function studioJson<T>(path: string, init: RequestOptions): Promise<T> {
   return (await studioFetch(path, init)).json() as Promise<T>;
 }
 export const jsonBody = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -74,7 +85,7 @@ export async function readEvents(response: Response, onEvent: (event: TaskEvent)
 }
 export async function waitForTask(taskId: string, signal: AbortSignal, progress: (message: string) => void, terminal = "done") {
   let completed = false;
-  await readEvents(await studioFetch(`/tasks/stream/${idPath(taskId)}`, { signal }), (event) => {
+  await readEvents(await studioFetch(`/tasks/stream/${idPath(taskId)}`, { signal, timeoutMs: STUDIO_TIMEOUT.long }), (event) => {
     const stages: Record<string, string> = { extract_start: "Extracting audio…", demucs_start: "Separating speech and background…", scene_start: "Preparing video…", assembling: "Assembling dubbed audio…" };
     if (event.message || event.stage) progress(event.message || event.stage!);
     else if (event.type === "progress" && event.current !== undefined && event.total) progress(`Rendering line ${event.current + 1} of ${event.total}…`);
@@ -90,7 +101,7 @@ export async function transcribe(file: File, dictation: boolean, signal: AbortSi
   // VoiceStudio serves "fast" with Whisper Turbo (built for dictation); "accurate" needs the larger model.
   body.set("mode", dictation ? "fast" : "accurate");
   body.set("dictation", String(dictation));
-  return studioJson<Transcript>("/transcribe", { method: "POST", body, signal });
+  return studioJson<Transcript>("/transcribe", { method: "POST", body, signal, timeoutMs: STUDIO_TIMEOUT.long });
 }
 export function downloadText(text: string, filename: string, type = "text/plain") {
   const url = URL.createObjectURL(new Blob([text], { type }));

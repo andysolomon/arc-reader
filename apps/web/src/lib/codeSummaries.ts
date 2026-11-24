@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import type { DocRecord } from "./db";
 import { codeKey, readingBlocks, safeCodeSummary, type CodeSummaries } from "./codeBlocks";
 import type { SummaryModel } from "./summary";
@@ -9,13 +10,13 @@ interface Example { id: string; language: string; code: string; context: string 
 const pending = new Map<string, { controller: AbortController; promise: Promise<CodeSummaries>; users: number }>();
 
 async function generate(id: string, title: string, examples: Example[], model: SummaryModel, signal: AbortSignal): Promise<CodeSummaries> {
-  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(180_000)]);
-  const config = await fetch("/api/llm/config", { signal: requestSignal });
+  const config = await request("/api/llm/config", { signal, timeoutMs: 8000 });
   if (!config.ok || !(await config.json() as { configured?: boolean }).configured) return {};
-  const response = await fetch("/api/llm/v1/chat/completions", {
+  const response = await request("/api/llm/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-opencode-session": `readaloud-code-${id}` },
-    signal: requestSignal,
+    signal,
+    timeoutMs: 180_000,
     body: JSON.stringify({ model, max_tokens: 8000, messages: [
       { role: "system", content: INSTRUCTIONS },
       { role: "user", content: JSON.stringify({ title, blocks: examples }) },
