@@ -18,18 +18,21 @@ const READER = /\/read\/(?!new\b)[^/?]+$/;
 
 const playPause = (page: Page) => page.getByRole("region", { name: "Player" }).getByRole("button", { name: /^(Play|Pause)/ });
 
+/** Imports, chapters and the first passage's audio all come through the app server. */
+const SERVER = { timeout: 15_000 };
+
 /** Listening starts in the same step that opens the document, so its first frame already says so. */
 async function expectPaused(page: Page, shows: string) {
   await page.waitForURL(READER);
-  await expect(page.getByRole("region", { name: "Document text" })).toContainText(shows);
+  await expect(page.getByRole("region", { name: "Document text" })).toContainText(shows, SERVER);
   await expect(page.getByRole("status").filter({ hasText: /^(Ready to listen|Paused)$/ })).toBeVisible();
   await expect(playPause(page)).toHaveAttribute("data-playing", "false");
 }
 
 async function expectPlaying(page: Page, shows: string) {
   await page.waitForURL(READER);
-  await expect(page.getByRole("region", { name: "Document text" })).toContainText(shows);
-  await expect(playPause(page)).toHaveAttribute("data-playing", "true");
+  await expect(page.getByRole("region", { name: "Document text" })).toContainText(shows, SERVER);
+  await expect(playPause(page)).toHaveAttribute("data-playing", "true", SERVER);
 }
 
 async function paste(page: Page, text: string, into?: string) {
