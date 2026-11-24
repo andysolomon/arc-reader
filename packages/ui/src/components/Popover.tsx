@@ -6,7 +6,6 @@ export interface PopoverProps extends HTMLAttributes<HTMLDivElement> {
   onClose: () => void;
   /** Horizontal alignment relative to the anchor wrapper */
   align?: "center" | "end" | "start";
-  /** Which side of the anchor it opens on */
   side?: "top" | "bottom";
   /** Distance from the anchor's far edge (px) */
   offset?: number;

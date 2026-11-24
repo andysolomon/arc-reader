@@ -1,7 +1,6 @@
 import type { Judgement, WordResult } from "./judge";
 
 export interface Score {
-  /** Words the reader got right. */
   correct: number;
   /** Words that count: every word except unsure ones. */
   counted: number;

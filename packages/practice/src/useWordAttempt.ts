@@ -52,9 +52,7 @@ export function useWordAttempt(word: string, line: string, onClean: (word: strin
   return {
     attempt, status, speaking, hear,
     recording: mic.recording,
-    /** The microphone is starting or the clip is being checked. */
     busy: mic.starting || attempt.state === "checking",
-    /** Start a take, or stop the one being recorded. */
     toggle: () => mic.recording ? mic.stop() : record(),
     /** The record button's words. */
     action: mic.recording ? "Stop" : attempt.state === "done" || attempt.state === "error" ? "Try again" : "Try this word",

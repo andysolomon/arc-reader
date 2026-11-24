@@ -67,7 +67,6 @@ export interface EngineOptions {
 
 type Listener = (s: EngineSnapshot) => void;
 
-/** Human message for a failed generation. */
 export function unavailableMessage(e: unknown): string {
   if (e instanceof ApiUnreachable) return "Speech server unreachable.";
   if (e instanceof ApiBusy) return "The speech server is busy.";
@@ -83,8 +82,8 @@ const PREFETCH_PASSAGES = 2;
 const PAID_PREFETCH = 1;
 /** Render time ÷ audio time above which a voice cannot keep up with playback. */
 export const SLOW_FACTOR = 1.5;
-/** Seconds of a clip's trailing silence that are still played before the next passage starts. */
-const TAIL_KEEP = 0.25;
+/** A clip's trailing silence that is still played before the next passage starts. */
+const TAIL_KEEP_SECONDS = 0.25;
 /** A passage never plays below this share of its own level when matched to its neighbours (−6 dB). */
 const MIN_GAIN = 0.5;
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -414,8 +413,6 @@ export class PlaybackEngine {
     return out;
   }
 
-  // ---- internals ----
-
   private total() {
     return this.durations.reduce((a, b) => a + b, 0);
   }
@@ -678,7 +675,6 @@ export class PlaybackEngine {
     const match = voices.find((v) => v.lang.replace("_", "-").toLowerCase() === this.doc!.lang.toLowerCase()) ?? voices.find((v) => v.lang.startsWith(this.doc!.lang.slice(0, 2)));
     if (match) u.voice = match;
     this.utterWordBase = startWord;
-    // Snap the clock to the start of that word.
     this.offset = (startWord / s.words.length) * this.durations[this.index];
     const starts: number[] = [];
     let acc = 0;
@@ -762,7 +758,7 @@ export class PlaybackEngine {
     if (!this.audio || this.audio.paused || this.audio.readyState < 2) return false;
     this.readAudioPosition();
     const c = this.current!;
-    if (c.tail && c.tail > TAIL_KEEP && this.audio.currentTime >= c.duration - c.tail + TAIL_KEEP) {
+    if (c.tail && c.tail > TAIL_KEEP_SECONDS && this.audio.currentTime >= c.duration - c.tail + TAIL_KEEP_SECONDS) {
       this.finishPassage();
       return true;
     }

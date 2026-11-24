@@ -96,8 +96,6 @@ export function readOggOpus(bytes: Uint8Array): OpusStream | null {
   return { head: packets[0], packets: audio, ...head, samples: Math.max(0, end - head.preSkip) };
 }
 
-// --- EBML (Matroska/WebM) ---
-
 const ID = {
   EBML: 0x1a45dfa3, EBMLVersion: 0x4286, EBMLReadVersion: 0x42f7, EBMLMaxIDLength: 0x42f2, EBMLMaxSizeLength: 0x42f3,
   DocType: 0x4282, DocTypeVersion: 0x4287, DocTypeReadVersion: 0x4285,
@@ -209,7 +207,6 @@ export function writeWebmOpus(stream: OpusStream): Uint8Array {
   return concat([header, el(ID.Segment, [seekHead([infoAt, tracksAt, at]), info, tracks, ...clusters.map((c) => c.bytes), cues])]);
 }
 
-/** An Ogg Opus file as WebM, or null when it is not Ogg Opus. */
 export function oggToWebm(bytes: Uint8Array): Uint8Array | null {
   const stream = readOggOpus(bytes);
   return stream ? writeWebmOpus(stream) : null;
@@ -231,7 +228,6 @@ function readVint(bytes: Uint8Array, pos: number, keepMarker: boolean): { value:
   return { value, length };
 }
 
-/** The child elements of one element's body. */
 function* children(bytes: Uint8Array, start: number, end: number): Generator<{ id: number; start: number; end: number }> {
   let pos = start;
   while (pos < end) {
@@ -252,7 +248,6 @@ const readUint = (bytes: Uint8Array, start: number, end: number) => {
   return value;
 };
 
-/** The Opus packets of a WebM file, or null when it is anything else. */
 export function readWebmOpus(bytes: Uint8Array): OpusStream | null {
   try {
     let head: Uint8Array | undefined;

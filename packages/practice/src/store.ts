@@ -54,9 +54,7 @@ export interface RoundInput {
   points: number;
   title?: string;
   author?: string;
-  /** Words read cleanly this round. */
   clean: string[];
-  /** Words missed this round. */
   missed: string[];
 }
 
@@ -116,7 +114,6 @@ export const NAME_MAX = 24;
 const cleanName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, NAME_MAX);
 const dataOf = ({ band, points, streak, history, words }: PracticeData): PracticeData => ({ band, points, streak, history, words });
 
-/** Keep the current reader under `others` and make `id` current. */
 export function switchTo(state: PracticeData & Readers, id: string): PracticeData & Readers {
   const next = state.others[id];
   if (!next || id === state.readerId) return state;

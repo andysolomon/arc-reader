@@ -22,7 +22,6 @@ const fieldClass = "h-9 w-full min-w-0 bg-bg px-3 text-[14px]";
 /** Catalogue record above the Reader text: link, bibliographic details, category, summary and notes. Edits save when a field loses focus. */
 export function DocumentDetails({ record, summaryAvailable, onShowSummary, onClose }: {
   record: DocRecord;
-  /** Summaries can be made or read on this server */
   summaryAvailable: boolean;
   onShowSummary: () => void;
   onClose: () => void;

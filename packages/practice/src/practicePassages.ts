@@ -7,7 +7,6 @@ export interface BundledPassage {
   /** Work title, e.g. "Narrative of the Life of Frederick Douglass". */
   title: string;
   author: string;
-  /** The work's Project Gutenberg page, https://www.gutenberg.org/ebooks/<n>. */
   url: string;
   text: string;
 }
@@ -17,7 +16,6 @@ export interface BundledPassage {
  * plain-text edition (whitespace collapsed, italic underscores dropped), ordered by band.
  */
 export const PRACTICE_PASSAGES: BundledPassage[] = [
-  // 6-8
   {
     id: "tom-sawyer-saturday-morning",
     band: "6-8",
@@ -98,7 +96,6 @@ export const PRACTICE_PASSAGES: BundledPassage[] = [
     url: "https://www.gutenberg.org/ebooks/16",
     text: "All children, except one, grow up. They soon know that they will grow up, and the way Wendy knew was this. One day when she was two years old she was playing in a garden, and she plucked another flower and ran with it to her mother. I suppose she must have looked rather delightful, for Mrs. Darling put her hand to her heart and cried, “Oh, why can’t you remain like this for ever!”",
   },
-  // 9-12
   {
     id: "douglass-narrative-birth",
     band: "9-12",
@@ -179,7 +176,6 @@ export const PRACTICE_PASSAGES: BundledPassage[] = [
     url: "https://www.gutenberg.org/ebooks/8",
     text: "With malice toward none; with charity for all; with firmness in the right, as God gives us to see the right, let us strive on to finish the work we are in; to bind up the nation's wounds; to care for him who shall have borne the battle, and for his widow, and his orphan--to do all which may achieve and cherish a just and lasting peace among ourselves, and with all nations.",
   },
-  // college
   {
     id: "emerson-self-reliance-trust-thyself",
     band: "college",
@@ -260,7 +256,6 @@ export const PRACTICE_PASSAGES: BundledPassage[] = [
     url: "https://www.gutenberg.org/ebooks/815",
     text: "Amongst the novel objects that attracted my attention during my stay in the United States, nothing struck me more forcibly than the general equality of conditions. I readily discovered the prodigious influence which this primary fact exercises on the whole course of society, by giving a certain direction to public opinion, and a certain tenor to the laws; by imparting new maxims to the governing powers, and peculiar habits to the governed. I speedily perceived that the influence of this fact extends far beyond the political character and the laws of the country, and that it has no less empire over civil society than over the Government; it creates opinions, engenders sentiments, suggests the ordinary practices of life, and modifies whatever it does not produce.",
   },
-  // advanced
   {
     id: "moby-dick-circumambulate",
     band: "advanced",

@@ -3,7 +3,7 @@ import { composeAndListen } from "./helpers";
 
 test("favorites a document, estimates a premium read, and has Jev judge it", async ({ page }) => {
   await composeAndListen(page);
-  await page.keyboard.press("Space"); // pause
+  await page.keyboard.press("Space");
   await page.goto("/library");
   // The sidebar lists the document too; the Library's row is the one with the actions.
   const row = page.locator('[data-screen="library"]').getByRole("listitem").filter({ hasText: "quick brown fox" });
@@ -39,7 +39,7 @@ test("favorites a document, estimates a premium read, and has Jev judge it", asy
 
 test("favorites the open document from the reader's toolbar", async ({ page }) => {
   await composeAndListen(page);
-  await page.keyboard.press("Space"); // pause
+  await page.keyboard.press("Space");
   const star = page.locator("header").getByRole("button", { name: "Favorite", exact: true });
   await star.click();
   await expect(star).toHaveAttribute("aria-pressed", "true");

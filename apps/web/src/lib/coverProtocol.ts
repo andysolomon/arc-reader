@@ -17,7 +17,6 @@ export interface CoverEntry {
   status: CoverStatus;
   /** The art, once it is ready: a picture with no lettering, set under the title by the app */
   url?: string;
-  /** What the art shows */
   alt: string;
   error?: string;
   updated: number;

@@ -22,7 +22,7 @@ export function decodeText(bytes: ArrayBuffer | Uint8Array): string {
 /** About 25 minutes of listening: the size of a part when a book's chapters can't be told apart */
 const PART_CHARS = 24_000;
 /** A heading with less text than this under it is still the contents list, not yet the book */
-const MIN_BODY = 1500;
+const MIN_BODY_CHARS = 1500;
 /** A part or volume heading this close above a chapter heading belongs to that chapter */
 const CARRY_CHARS = 600;
 
@@ -281,9 +281,9 @@ function sections(items: Item[], kinds: string[]): Section[] | null {
   const head = (i: number) => items[heads[i]] as Heading;
   const bodies = heads.map((at, i) => size(items.slice(at + 1, heads[i + 1] ?? items.length).filter((item): item is string => !isHead(item))));
   // The last entry of a contents list has the preface or an unmarked first chapter under it; the numbering starts again after it.
-  const endsContents = (i: number) => i >= 2 && bodies[i - 1] < MIN_BODY && bodies[i - 2] < MIN_BODY && i + 1 < heads.length
+  const endsContents = (i: number) => i >= 2 && bodies[i - 1] < MIN_BODY_CHARS && bodies[i - 2] < MIN_BODY_CHARS && i + 1 < heads.length
     && !!head(i).n && !!head(i + 1).n && head(i + 1).n! <= head(i).n!;
-  const start = bodies.findIndex((body, i) => body >= MIN_BODY && !endsContents(i));
+  const start = bodies.findIndex((body, i) => body >= MIN_BODY_CHARS && !endsContents(i));
   if (start < 0 || heads.length - start < 3) return null;
 
   // The part the first chapter opens is announced just above it.
@@ -319,7 +319,7 @@ function sections(items: Item[], kinds: string[]): Section[] | null {
   out.push(current);
   out[1].blocks = afterList(out[1].blocks);
   // What precedes the first heading found is the first chapter when its own heading was misread, or a preface.
-  if (size(opening) < MIN_BODY) out.shift();
+  if (size(opening) < MIN_BODY_CHARS) out.shift();
   else if (head(start).n === 2) out[0].head = { kind: head(start).kind, token: "", n: 1, title: "" };
   return out;
 }

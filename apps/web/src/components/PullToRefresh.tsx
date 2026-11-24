@@ -6,8 +6,7 @@ import { toast } from "../state/toast";
 
 /** How far the finger travels before the indicator moves at all, so taps and small drags stay taps. */
 const SLOP = 10;
-/** Indicator travel (px) that reloads on release. */
-export const PULL_THRESHOLD = 72;
+export const PULL_THRESHOLD_PX = 72;
 const MAX_PULL = 110;
 
 /** The finger's travel, damped so the indicator lags it like iOS's own pull. */
@@ -81,12 +80,12 @@ export function PullToRefresh({ target }: { target: RefObject<HTMLElement | null
 
     const onEnd = () => {
       if (!start) return;
-      const ready = engaged && pullRef.current >= PULL_THRESHOLD;
+      const ready = engaged && pullRef.current >= PULL_THRESHOLD_PX;
       start = null;
       engaged = false;
       if (!ready) return set(0);
       setReloading(true);
-      set(PULL_THRESHOLD);
+      set(PULL_THRESHOLD_PX);
       // Reloading while the server is out of reach would swap a working page
       // for the "Can't reach ReadAloud" screen, so check first.
       void serverReachable().then((ok) => {
@@ -110,7 +109,7 @@ export function PullToRefresh({ target }: { target: RefObject<HTMLElement | null
   }, [target]);
 
   if (!pull && !reloading) return null;
-  const ready = pull >= PULL_THRESHOLD;
+  const ready = pull >= PULL_THRESHOLD_PX;
   return (
     <div
       data-testid="pull-to-refresh"
@@ -128,7 +127,7 @@ export function PullToRefresh({ target }: { target: RefObject<HTMLElement | null
           size={18}
           strokeWidth={1.75}
           className={cn(reloading && "animate-spin motion-reduce:animate-none")}
-          style={reloading ? undefined : { transform: `rotate(${Math.min(1, pull / PULL_THRESHOLD) * 270}deg)`, opacity: 0.4 + 0.6 * Math.min(1, pull / PULL_THRESHOLD) }}
+          style={reloading ? undefined : { transform: `rotate(${Math.min(1, pull / PULL_THRESHOLD_PX) * 270}deg)`, opacity: 0.4 + 0.6 * Math.min(1, pull / PULL_THRESHOLD_PX) }}
         />
       </span>
     </div>

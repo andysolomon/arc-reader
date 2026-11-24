@@ -8,7 +8,6 @@ export interface PassageDeck {
   passage: Passage | null;
   loading: boolean;
   failed: boolean;
-  /** A new passage at `band`. */
   load: (band: Band) => Promise<void>;
   /** Put a particular passage up, to read it again. */
   show: (passage: Passage) => void;

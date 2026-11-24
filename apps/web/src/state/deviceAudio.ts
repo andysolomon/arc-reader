@@ -12,10 +12,9 @@ export interface DeviceAudio {
   saved: Set<string>;
   /** Each voice's bytes per character, learned from those clips */
   rates: AudioRates;
-  /** Bytes of audio saved, as last measured */
-  used: number;
-  /** Bytes of audio this device keeps before removing the oldest */
-  limit: number;
+  usedBytes: number;
+  /** Audio this device keeps before removing the oldest */
+  limitBytes: number;
 }
 
 /** Passages are saved in bursts: look again at most this often. */
@@ -31,18 +30,18 @@ export function useDeviceAudio(wanted: boolean): DeviceAudio | null {
     if (!wanted) { setAudio(null); return; }
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let learned: { at: number; rates: AudioRates; used: number; limit: number } | null = null;
+    let learned: { at: number; rates: AudioRates; usedBytes: number; limitBytes: number } | null = null;
     const refresh = async () => {
       try {
         if (!learned || Date.now() - learned.at > RELEARN_MS) {
           const [sizes, storage] = await Promise.all([audioCache.sizes(), deviceStorage()]);
           learned = { at: Date.now(), rates: learnRates(useLibrary.getState().items.map((it) => planReading(it.rec)), sizes),
-            used: [...sizes.values()].reduce((a, b) => a + b, 0), limit: audioLimitFor(storage.allowed, choice) };
-          if (live) setAudio({ saved: new Set(sizes.keys()), rates: learned.rates, used: learned.used, limit: learned.limit });
+            usedBytes: [...sizes.values()].reduce((a, b) => a + b, 0), limitBytes: audioLimitFor(storage.allowed, choice) };
+          if (live) setAudio({ saved: new Set(sizes.keys()), rates: learned.rates, usedBytes: learned.usedBytes, limitBytes: learned.limitBytes });
           return;
         }
         const keys = await audioCache.keys();
-        if (live) setAudio({ saved: new Set(keys), rates: learned.rates, used: learned.used, limit: learned.limit });
+        if (live) setAudio({ saved: new Set(keys), rates: learned.rates, usedBytes: learned.usedBytes, limitBytes: learned.limitBytes });
       } catch { /* storage unavailable: no estimate */ }
     };
     void refresh();

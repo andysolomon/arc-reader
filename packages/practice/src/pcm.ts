@@ -89,7 +89,6 @@ export function analyzePcm(samples: Float32Array, sampleRate: number, partWords:
   const tail = Math.max(0, duration - (last + 1) * FRAME_SECONDS);
   const loudness = 20 * Math.log10(Math.sqrt(voicedPower / Math.max(1, voicedCount)));
 
-  // Pauses between the first and last voiced frames.
   const gaps: { start: number; end: number }[] = [];
   const minFrames = Math.round(MIN_GAP_SECONDS / FRAME_SECONDS);
   for (let f = first, run = 0; f <= last; f++) {
@@ -157,7 +156,6 @@ export async function analyzeClip(blob: Blob, fallbackDuration: number, partWord
   return analyzePcm(mono(buf), buf.sampleRate, partWords);
 }
 
-/** A recording decoded to mono samples, or null when the browser can't decode it. */
 export async function decodeMono(blob: Blob): Promise<{ samples: Float32Array; sampleRate: number } | null> {
   const buf = await decode(blob);
   return buf && buf.length ? { samples: mono(buf), sampleRate: buf.sampleRate } : null;
@@ -228,7 +226,6 @@ export interface JoinedClip extends Omit<ClipAnalysis, "starts">, Pick<JoinedPcm
   audio: Blob;
 }
 
-/** Decode sentence clips and join them into one passage clip; null when any clip cannot be decoded. */
 export async function joinClips(blobs: Blob[]): Promise<JoinedClip | null> {
   const bufs: AudioBuffer[] = [];
   for (const blob of blobs) {
