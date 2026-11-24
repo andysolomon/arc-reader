@@ -27,6 +27,10 @@ vi.mock("../engine/preparation", async (original) => ({ ...await original<typeof
 vi.mock("../lib/patois", async (original) => ({ ...await original<typeof import("../lib/patois")>(), preparePatois: vi.fn() }));
 const [bella, jasper] = PRESET_VOICES;
 const record = (id: string): DocRecord => ({ id, title: id, text: `First ${id}.\n\nSecond ${id}.`, voice: null, chars: 20, source: "paste", domain: "Text", createdAt: 0, updatedAt: 0 });
+/** Where a passage of `record(id)` is saved on this device. */
+const keyOf = (text: string, voice = bella) => cacheKey({ text, voice: voice.id, engine: voice.engine, openaiModel: "tts-1" });
+const savedOf = (ids: string[], voices = [bella]) => ids.flatMap((id) => voices.flatMap((voice) => [`First ${id}.`, `Second ${id}.`].map((text) => keyOf(text, voice)))).sort();
+const saved = async () => (await audioCache.keys()).sort();
 const settled = async () => vi.waitFor(() => expect(usePreparation.getState().jobs.some(isPreparing)).toBe(false), { timeout: 5000 });
 function holdBackgroundJobs() {
   const pending: { signal: AbortSignal; release: () => void; activate: (worker: string) => void }[] = [];
@@ -48,9 +52,10 @@ beforeEach(async () => {
   const database = await db();
   await Promise.all([database.clear("docs"), database.clear("audio")]);
   await Promise.all([docs.put(record("a")), docs.put(record("b"))]);
+  // Stands in for the speech server: the clip it returns is saved, with word timings when asked for.
   vi.mocked(synthesize).mockImplementation(async (req) => {
     const audio = new Blob(["audio"]);
-    await audioCache.put({ key: cacheKey(req), blob: audio, mime: "audio/mpeg", duration: 1, createdAt: 0 });
+    await audioCache.put({ key: cacheKey(req), blob: audio, mime: "audio/mpeg", duration: 1, createdAt: 0, ...(req.wordTimings ? { words: [{ start: 0, end: 1 }] } : {}) });
     return { source: "api", audio, duration: 1 };
   });
 });
@@ -94,9 +99,9 @@ describe("Library preparation queue", () => {
     expect(usePreparation.getState().jobs.map((j) => [j.docId, j.status, j.done])).toEqual([
       ["a", "ready", 2], ["b", "ready", 2], ["ready", "ready", 1], ["cancelled", "cancelled", 1], ["error", "error", 1],
     ]);
-    expect(prepareInBackground).toHaveBeenCalledTimes(2);
-    expect(synthesize).toHaveBeenCalledTimes(4);
-    expect(synthesize).toHaveBeenCalledWith(expect.objectContaining({ openaiModel: "tts-1", wordTimings: true }));
+    // Both restored readings are saved whole, with the model and word timings they were queued with.
+    expect(await saved()).toEqual(savedOf(["a", "b"]));
+    expect((await audioCache.get(keyOf("First a.")))?.words).toBeDefined();
     const persisted = JSON.parse(localStorage.getItem("readaloud:preparation-queue")!).state.jobs;
     expect(persisted[0]).toMatchObject({ status: "ready", done: 2 });
     expect(persisted[0].message).toBeUndefined();
@@ -135,14 +140,13 @@ describe("Library preparation queue", () => {
     expect(generated).toEqual(["First a.", "Second a."]);
   });
 
-  it("finishes a reading already saved on this device without asking the server again", async () => {
+  it("finishes a reading already saved on this device without asking for any passage again", async () => {
     for (const text of ["First a.", "Second a."]) {
-      await audioCache.put({ key: cacheKey({ text, voice: bella.id, engine: bella.engine, openaiModel: "tts-1" }), blob: new Blob(["audio"]), mime: "audio/mpeg", duration: 1, createdAt: 0 });
+      await audioCache.put({ key: keyOf(text), blob: new Blob(["audio"]), mime: "audio/mpeg", duration: 1, createdAt: 0 });
     }
     usePreparation.getState().enqueue([record("a")], [bella]);
     await settled();
     expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "ready", done: 2, total: 2 });
-    expect(prepareInBackground).not.toHaveBeenCalled();
     expect(synthesize).not.toHaveBeenCalled();
   });
 
@@ -165,7 +169,8 @@ describe("Library preparation queue", () => {
     usePreparation.getState().cancel(usePreparation.getState().jobs[0].id);
     await settled();
     expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["cancelled", "ready"]);
-    expect(synthesize).toHaveBeenCalledTimes(3);
+    // Nothing of the cancelled reading is saved; the next one is saved whole.
+    expect(await saved()).toEqual(savedOf(["b"]));
   });
 
   it("says a reading is being sent until the server accepts it, then that the server can't be reached", async () => {
@@ -308,8 +313,7 @@ describe("Library preparation queue", () => {
     expect(usePreparation.getState().jobs.map((job) => [job.docId, job.voice.id, job.status, job.done, job.total])).toEqual([
       ["a", bella.id, "ready", 2, 2], ["a", jasper.id, "ready", 2, 2], ["b", bella.id, "ready", 2, 2], ["b", jasper.id, "ready", 2, 2],
     ]);
-    expect(await audioCache.keys()).toHaveLength(8);
-    expect(prepareInBackground).toHaveBeenCalledTimes(4);
+    expect(await saved()).toEqual(savedOf(["a", "b"], [bella, jasper]));
     expect((await docs.get("a"))?.voice).toBeNull();
   });
 
@@ -340,7 +344,8 @@ describe("Library preparation queue", () => {
     await settled();
     expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["ready", "ready", "cancelled", "cancelled"]);
     expect(await docs.get("b")).toBeUndefined();
-    expect(prepareInBackground).toHaveBeenCalledTimes(4);
+    // Cancelling sends nothing new to the server.
+    expect(pending).toHaveLength(4);
   });
 
   it("aborts every active reading on cancel all and allows new work afterwards", async () => {
