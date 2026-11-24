@@ -63,7 +63,7 @@ test("phone: opens on the Library, with the other screens as icons and Compose o
 test("desktop: the sidebar is the library, and a document opens beside it", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await composeAndListen(page);
-  await page.keyboard.press("Space"); // pause
+  await page.keyboard.press("Space");
   const nav = page.getByRole("navigation", { name: "Primary" });
   const documents = nav.getByRole("list", { name: "Documents" });
   const entry = documents.getByRole("link", { name: /quick brown fox/ });

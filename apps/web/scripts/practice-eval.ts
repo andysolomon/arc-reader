@@ -42,8 +42,8 @@ const recordings = flag("--recordings");
 const dump = flag("--dump");
 const dumped: unknown[] = [];
 const liveMode = args.includes("--live");
-/** Seconds of reading between two live transcripts, about what the app manages. */
-const LIVE_STEP = 2.6;
+/** Reading between two live transcripts, about what the app manages. */
+const LIVE_STEP_SECONDS = 2.6;
 const work = mkdtempSync(join(tmpdir(), "practice-eval-"));
 
 type Expected = Record<number, Exclude<Verdict, "correct" | "unsure">>;
@@ -99,7 +99,7 @@ async function liveRun(passage: string, wav: Buffer) {
   const { samples, rate } = pcmOf(wav);
   const duration = samples.length / rate;
   let state = LIVE_START, asks = 0;
-  for (let t = LIVE_STEP; ; t += LIVE_STEP) {
+  for (let t = LIVE_STEP_SECONDS; ; t += LIVE_STEP_SECONDS) {
     const until = Math.min(t, duration);
     if (until - state.audioFrom >= 2) {
       const window = samples.subarray(Math.round(state.audioFrom * rate), Math.round(until * rate));
