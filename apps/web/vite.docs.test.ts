@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { docPages, servedDoc } from "./vite.docs";
+import { DOCS_DIR, docPages, servedDoc } from "./vite.docs";
 import { DOC_LINKS } from "./src/lib/docs";
 
 describe("hosted docs", () => {
@@ -53,6 +55,13 @@ describe("hosted docs", () => {
     expect(html).toContain(`href="../readaloud-bpmn.html"`);
     expect(html).toContain(`href="https://example.com/x.md"`);
     expect(html).toContain(`href="#top"`);
+  });
+
+  it("shows a diagram's code references with the line their code is on now", () => {
+    const line = readFileSync(resolve(DOCS_DIR, "../apps/web/src/engine/engine.ts"), "utf8").split("\n").findIndex((l) => l.startsWith("export class PlaybackEngine")) + 1;
+    const html = servedDoc(`<body><script>const SRC = "apps/web/src/"; const code = [SRC + "engine/engine.ts#export class PlaybackEngine", SRC + "main.tsx"];</script>`, "readaloud-bpmn.html");
+    expect(line).toBeGreaterThan(0);
+    expect(html).toContain(`const code = [SRC + "engine/engine.ts:${line}", SRC + "main.tsx"];`);
   });
 
   it("leaves a link that climbs out of the repo alone", () => {
