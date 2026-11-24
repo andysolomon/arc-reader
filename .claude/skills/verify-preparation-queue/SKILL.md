@@ -23,8 +23,8 @@ Each line ends in `ok` or `FAIL`. The run passes when each config gives its expe
 | `PreparationQueue.179a031.cfg` | `PlacesComeBack` fails | replays the bug 179a031 fixed |
 | `PreparationQueue.86d7c09-resend.cfg` | `NoResendAfterReload` fails | replays the merge bug 86d7c09 fixed |
 | `PreparationQueue.86d7c09-rewalk.cfg` | `NoRewalk` fails | replays the save-loop bug 86d7c09 fixed |
-| `PreparationQueue.starvation.cfg` | `QueuedReachServer` fails | a finding on the current code |
-| `PreparationQueue.reload-mid-clip.cfg` | `NoResendAfterReload` fails | a finding on the current code |
+| `PreparationQueue.reload-mid-clip.cfg` | `NoResendAfterReload` fails | replays the reload bug t3/save-retry-stays-saving fixed |
+| `PreparationQueue.starvation.cfg` | `QueuedReachServer` fails | replays the timeout bug t3/save-retry-stays-saving fixed |
 | `SharedPreparations.cfg` | every property holds | the current code |
 | `SharedPreparations.847a4bc.cfg` | `ClearedStayCleared` fails | replays the bug 847a4bc fixed |
 | `SharedPreparations.text-changes.cfg` | `ClearedStayCleared` fails | a finding on the current code |
@@ -34,23 +34,25 @@ Each line ends in `ok` or `FAIL`. The run passes when each config gives its expe
 | Property | The promise | The harm when it breaks |
 | --- | --- | --- |
 | `PlacesComeBack` | A reading that takes one of the `PREPARATION_QUEUE_LIMIT` places gives it back, even if its save hangs. | Hung saves hold every place and the server sits idle with readings queued (179a031). |
-| `NoResendAfterReload` | A reload does not send a reading the server already made back to the server. | Every reading being saved goes back to the server's queue after a reload (86d7c09). |
+| `NoResendAfterReload` | A reload does not send a reading the server already made back to the server, also when it cuts off a clip download. | Every reading being saved goes back to the server's queue after a reload (86d7c09, t3/save-retry-stays-saving). |
 | `NoRewalk` | No passage already saved on this device is asked for again. | A reload or retry walks every passage again (86d7c09). |
 | `ClearedStayCleared` | A reading cleared from the queue does not come back, across syncs and reloads. | Cleared server rows reappear after a reload (847a4bc). |
-| `QueuedReachServer` | A reading waiting on this device reaches the server, even if no save ever finishes. | Later readings are never sent. |
+| `QueuedReachServer` | A reading waiting on this device reaches the server, even if no save ever finishes. | Readings whose clips keep timing out take every place, and later readings are never sent (t3/save-retry-stays-saving). |
 
-Each switch in `PreparationQueue.tla` and `SharedPreparations.tla` (`SavingHoldsSlot`, `ClipWaitsForever`, `RestoreSavingAsQueued`, `WalkSavedPassages`, `HiddenInMemory`) puts one fixed bug back. Its comment names the pre-fix line, for example `git show 179a031^:apps/web/src/state/preparation.ts`.
+Code tests replay each property on the real code. In `apps/web/src/state/preparation.test.ts`, "sends more readings to the server while this device saves" replays `PlacesComeBack`. "Goes back to saving after a reload" replays `NoResendAfterReload` and `NoRewalk`, and "resumes saving after a lost connection" replays `NoRewalk` and the in-session retry. In `apps/web/tests/e2e/library.spec.ts`, "a reload while a clip downloads goes back to saving" replays `NoResendAfterReload` in Chromium. In `apps/web/src/state/preparation.shared.test.ts`, "keeps it hidden across syncs and reloads" replays `ClearedStayCleared`.
+
+Each switch in `PreparationQueue.tla` and `SharedPreparations.tla` (`SavingHoldsSlot`, `ClipWaitsForever`, `RestoreSavingAsQueued`, `WalkSavedPassages`, `RetryRequeues`, `HiddenInMemory`) puts one fixed bug back. Its comment names the pre-fix code, for example `git show 179a031^:apps/web/src/state/preparation.ts`.
 
 ## Does your change touch it?
 
-Coverage, last confirmed against the code at commit `a8d39c6d7c0977bebc4acc766942388b9c9344d0`:
+Coverage, last confirmed against the code at commit `e76665230585d15a581b6f66bea306340254bc9d`:
 
 | Code | Model |
 | --- | --- |
 | `state/preparation.ts` `drain()` and the `active` map | `Drain`, `Entry`, `HoldsPlace` |
 | `state/preparation.ts` `run()`: the cache check, `serverDone`, `prepareInBackground`, `entry.saving` | `CheckCache`, `ServerAnswers`, `ToSaving` |
 | `state/preparation.ts` `saveTurn()`, `SAVE_CONCURRENCY`, the save loop over `missing` | `TakeTurn`, `ClipArrives`, `EndRun` |
-| `state/preparation.ts` `run()`'s catch for transient errors | `ClipTimesOut` |
+| `state/preparation.ts` `run()`'s catch for transient errors | `AfterRetry`, `ClipTimesOut`, and `Reload` with `UnloadFailsClips` |
 | `state/preparation.ts` persist `partialize`, `merge`, `onRehydrateStorage` | `Reload` in both specs |
 | `state/preparation.ts` `refreshShared`, `dismissFinished`, the linger timer, `hiddenShared` | `Fetch`, `Apply`, `Dismiss`, `Linger` |
 | `engine/preparation.ts` `preparedAudio` (`CLIP_TIMEOUT_MS`), `submit()` reuse of a finished job | `ClipTimesOut`, `CheckCache` |
@@ -80,12 +82,10 @@ The queue model has 3 readings of 2 passages, 1 place (`PREPARATION_QUEUE_LIMIT`
 
 Left out: cancel, prioritize, non-transient errors, cloud voices that this device prepares itself, Patois, code and image descriptions, the server's machine scheduling, and the wake-up order inside `saveTurn`. Every reading is server-prepared. The server's own queue is unbounded.
 
-Two assumptions keep the current configs passing, and each has a finding config that turns it off. `UnloadFailsClips` is FALSE: a reload changes nothing the old page persists. `TextChanges` is FALSE: the document's text stays the same.
+`PreparationQueue.cfg` sets `UnloadFailsClips`: a reload fails the clip downloads in flight, and the old page persists what `run()`'s catch does about them. `SharedPreparations.cfg` assumes the document's text stays the same (`TextChanges` is FALSE), and `SharedPreparations.text-changes.cfg` turns that off.
 
 `ClearedStayCleared` holds only because the server drops ended readings oldest first. If a newer reading of the same document leaves the catalogue before an older cleared one, the older one comes back.
 
 ## Findings on the current code
 
-- **Starvation** (`PreparationQueue.starvation.cfg`). A reading whose clip times out goes back to "queued" at its old place in the list (`run()`'s catch), and `drain()` hands places out in list order. When every clip times out, two readings can trade the one place forever while a third is never sent. The model needs no timing for this. In the app, it takes more readings timing out than there are places, so it is unlikely but possible on a weak connection.
-- **Reload mid-clip** (`PreparationQueue.reload-mid-clip.cfg`). A reload fails the clip download in flight. `run()`'s catch on the old page treats it as a lost connection and persists the reading as "queued" before the page unloads. The reloaded page then sends the reading back to the server, which is the symptom 86d7c09 fixed. Readings are downloading clips for most of the time they are saving, so this is the common case. Replayed in Chromium: the reloaded page restored the reading as "queued" with "Waiting for the speech server to reconnect…" and submitted it a second time. The `test.fail` e2e test "a reload while a clip downloads goes back to saving without sending the reading again" in `apps/web/tests/e2e/library.spec.ts` keeps that replay. Drop `test.fail` when the finding is fixed.
 - **Edit and undo** (`SharedPreparations.text-changes.cfg`). `refreshShared` forgets a cleared reading as soon as `sharedPreparationJobs` stops listing it. Editing the document's text stops the listing. After the edit is undone, the cleared reading's row comes back.

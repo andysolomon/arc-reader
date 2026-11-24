@@ -20,7 +20,8 @@ CONSTANTS
     SavingHoldsSlot,       \* 179a031^ :209 drain counted every active entry, so a saving reading kept its place
     ClipWaitsForever,      \* 179a031^ engine/preparation.ts:333 the clip fetch in preparedAudio had no time limit
     RestoreSavingAsQueued, \* 86d7c09^ :180 merge put a saving reading back to "queued"
-    WalkSavedPassages      \* 86d7c09^ :314 run() asked for every passage, saved on this device or not
+    WalkSavedPassages,     \* 86d7c09^ :314 run() asked for every passage, saved on this device or not
+    RetryRequeues          \* before t3/save-retry-stays-saving: run()'s catch put a saving reading back to "queued"
 
 ASSUME QueueLimit >= 1 /\ SaveConcurrency >= 1
 
@@ -174,16 +175,20 @@ ClipArrives(j) ==
                       /\ UNCHANGED <<status, active, pc, savingNow, restored>>
     /\ UNCHANGED <<server, reloads>>
 
+\* run()'s catch for a lost connection (:359-370): a reading the server has made stays saving,
+\* so only its download is retried; any other reading goes back to "queued".
+AfterRetry(j) == IF status[j] = "saving" /\ ~RetryRequeues THEN "saving" ELSE "queued"
+
 (***************************************************************************)
 (* The clip has not arrived within CLIP_TIMEOUT_MS (engine/preparation.ts: *)
-(* 341). run() releases the turn, treats the timeout as a lost connection  *)
-(* (:359-368) and puts the reading back to "queued"; drain() runs again.   *)
+(* 341). run() releases the turn and treats the timeout as a lost          *)
+(* connection; drain() runs again.                                         *)
 (***************************************************************************)
 ClipTimesOut(j) ==
     /\ ~ClipWaitsForever
     /\ pc[j] = "walking"
     /\ savingNow' = savingNow - 1
-    /\ EndRun(j, "queued")
+    /\ EndRun(j, AfterRetry(j))
     /\ UNCHANGED <<stored, server, reloads, rewalked>>
 
 (***************************************************************************)
@@ -191,12 +196,12 @@ ClipTimesOut(j) ==
 (* onRehydrateStorage (:186) drains. In-memory state is gone; audioCache   *)
 (* and the server's jobs stay. With UnloadFailsClips, the browser fails    *)
 (* the clip downloads in flight first, and run()'s catch on the old page   *)
-(* may persist those readings as "queued" (:360-361) before it unloads.    *)
+(* may persist what it does about them (AfterRetry) before it unloads.     *)
 (***************************************************************************)
 Reload ==
     /\ reloads < MaxReloads
     /\ \E failed \in SUBSET {j \in Jobs : UnloadFailsClips /\ pc[j] = "walking"} :
-          LET left == [j \in Jobs |-> IF j \in failed THEN "queued" ELSE status[j]]
+          LET left == [j \in Jobs |-> IF j \in failed THEN AfterRetry(j) ELSE status[j]]
               st == [j \in Jobs |-> IF left[j] = "saving" /\ RestoreSavingAsQueued THEN "queued" ELSE left[j]]
           IN  Settle(st, [j \in Jobs |-> "none"], [j \in Jobs |-> "idle"])
     /\ todo' = [j \in Jobs |-> {}]

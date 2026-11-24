@@ -119,7 +119,7 @@ describe("Library preparation queue", () => {
     expect(usePreparation.getState().jobs.map((j) => j.id)).toEqual(["failed"]);
   }, READY_LINGER_MS + 10_000);
 
-  it("resumes downloading after a restart and reuses passages already saved on the device", async () => {
+  it("resumes saving after a lost connection, reusing saved passages and never sending the reading again", async () => {
     const generate = vi.mocked(synthesize).getMockImplementation()!;
     let disconnected = false;
     const generated: string[] = [];
@@ -134,10 +134,13 @@ describe("Library preparation queue", () => {
       return generate(req);
     });
     usePreparation.getState().enqueue([record("a")], [bella]);
-    await vi.waitFor(() => expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "queued", done: 1, message: expect.stringContaining("reconnect") }));
+    // The server has made it, so the reading stays saving while only the download is retried.
+    await vi.waitFor(() => expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "saving", done: 1, message: "Waiting to save on this device" }));
     await settled();
     expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "ready", done: 2 });
     expect(generated).toEqual(["First a.", "Second a."]);
+    // The server was asked for the reading once.
+    expect(prepareInBackground).toHaveBeenCalledTimes(1);
   });
 
   it("finishes a reading already saved on this device without asking for any passage again", async () => {
@@ -162,10 +165,13 @@ describe("Library preparation queue", () => {
     expect(vi.mocked(synthesize).mock.calls.map(([r]) => r.text)).toEqual(["Second a."]);
   });
 
-  it("cancels a reading waiting for reconnection and advances the queue", async () => {
+  it("cancels a reading waiting to retry its save and advances the queue", async () => {
     vi.mocked(synthesize).mockRejectedValueOnce(new TypeError("Server restarted"));
     usePreparation.getState().enqueue([record("a"), record("b")], [bella]);
-    await vi.waitFor(() => expect(usePreparation.getState().jobs[0].message).toContain("reconnect"));
+    await vi.waitFor(() => {
+      expect(vi.mocked(synthesize).mock.calls.some(([req]) => req.docId === "a")).toBe(true);
+      expect(usePreparation.getState().jobs[0]).toMatchObject({ status: "saving", message: "Waiting to save on this device" });
+    });
     usePreparation.getState().cancel(usePreparation.getState().jobs[0].id);
     await settled();
     expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["cancelled", "ready"]);
