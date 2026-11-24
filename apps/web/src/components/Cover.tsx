@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
+import { Expand } from "lucide-react";
 import { cn } from "@readaloud/ui";
 import type { CoverEntry } from "../lib/coverProtocol";
 
@@ -24,10 +25,13 @@ export interface CoverProps {
   /** Beside the rule at the foot */
   foot?: string;
   onRetry?: () => void;
+  /** Opens the cover full screen; offered once the art is in */
+  onOpen?: () => void;
   className?: string;
+  style?: CSSProperties;
 }
 
-export function Cover({ cover, eyebrow, foot, onRetry, className }: CoverProps) {
+export function Cover({ cover, eyebrow, foot, onRetry, onOpen, className, style }: CoverProps) {
   const [shown, setShown] = useState(false);
   const [broken, setBroken] = useState(false);
   const article = cover.kind === "article";
@@ -37,9 +41,9 @@ export function Cover({ cover, eyebrow, foot, onRetry, className }: CoverProps) 
     <figure
       data-cover={cover.kind}
       data-cover-status={broken ? "failed" : cover.status}
-      className={cn("relative m-0 mx-auto w-full overflow-hidden rounded-[10px] font-sans shadow-[0_1px_2px_rgba(0,0,0,.18),0_10px_28px_-12px_rgba(0,0,0,.35)]", className)}
+      className={cn("group/cover relative m-0 mx-auto w-full overflow-hidden rounded-[10px] font-sans shadow-[0_1px_2px_rgba(0,0,0,.18),0_10px_28px_-12px_rgba(0,0,0,.35)]", className)}
       // Isolated, so the art multiplies onto this page and never onto whatever theme is behind it.
-      style={{ aspectRatio: "4 / 5", background: PAPER, color: INK, containerType: "inline-size", isolation: "isolate" }}
+      style={{ aspectRatio: "4 / 5", background: PAPER, color: INK, containerType: "inline-size", isolation: "isolate", ...style }}
     >
       {/* The words are the page's own title or heading, which follows as text: a screen reader hears it there, and the art's description here. */}
       <div className="absolute inset-0 flex flex-col" style={{ padding: "6.5cqw 6.7cqw 5.2cqw" }}>
@@ -70,6 +74,16 @@ export function Cover({ cover, eyebrow, foot, onRetry, className }: CoverProps) 
         </div>
       </div>
       {!art && <figcaption className="sr-only">{failed ? `The cover for ${cover.heading} could not be drawn.` : `The cover for ${cover.heading} is being drawn.`}</figcaption>}
+      {art && onOpen && (
+        <button
+          type="button" onClick={onOpen} aria-label={`View the cover for ${cover.heading} full screen`}
+          className="absolute inset-0 cursor-zoom-in rounded-[10px] border-0 bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#4050FF]"
+        >
+          <span aria-hidden className="absolute right-[3.4cqw] top-[3.4cqw] grid place-items-center rounded-full opacity-0 transition-opacity duration-fast group-focus-within/cover:opacity-100 [@media(hover:hover)]:group-hover/cover:opacity-100" style={{ width: "9cqw", height: "9cqw", minWidth: 26, minHeight: 26, background: PAPER, color: INK, boxShadow: `0 0 0 1px ${RULE}` }}>
+            <Expand size={14} strokeWidth={1.75} />
+          </span>
+        </button>
+      )}
       {failed && onRetry && (
         <button
           type="button" onClick={onRetry}
