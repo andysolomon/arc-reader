@@ -36,6 +36,17 @@ describe("shelfPreparation", () => {
     expect(tally.saving).toBe(2);
   });
 
+  it("measures what is stored on this device apart from what is made", () => {
+    const [tally] = shelfPreparation([
+      { id: "made", duration: 100, prepared: [{ ...bella, fraction: 1 }] },
+      { id: "downloading", duration: 100, prepared: [{ ...bella, fraction: 0.2 }] },
+      { id: "waiting", duration: 200, prepared: [] },
+    ], [{ ...job("downloading", 10, 10), status: "saving", step: { done: 6, total: 10 } }, { ...job("waiting", 10, 10), status: "saving" }]);
+    expect(tally.fraction).toBe(1);
+    // made: 100 of 400; downloading: 6 of 10 passages stored, ahead of the library's last read; waiting: nothing yet
+    expect(tally.saved).toBeCloseTo((100 + 60) / 400);
+  });
+
   it("ignores queue entries for other documents and keeps voices apart", () => {
     const voices = shelfPreparation([
       { id: "one", duration: 100, prepared: [{ ...bella, fraction: 1 }, { voiceId: "jasper", name: "Jasper", engine: "voicestudio", fraction: 0.5 }] },
