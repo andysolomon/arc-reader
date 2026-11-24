@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
+import { pinRefs } from "./scripts/diagrams.mjs";
 import { DOC_LINKS, DOCS_SECTION } from "./src/lib/docs";
 
 /**
@@ -13,7 +14,8 @@ import { DOC_LINKS, DOCS_SECTION } from "./src/lib/docs";
  * Each page gets a bar across the top with a link back to Settings and a menu of the
  * other pages, because the installed app and the iOS shell have no browser Back button.
  * Links to files the app doesn't serve (README.md, the Markdown notes) point at GitHub
- * instead.
+ * instead. Code references on the diagram pages get the line numbers the code has now
+ * (scripts/diagrams.mjs).
  */
 
 export const DOCS_PATH = "/docs/";
@@ -78,10 +80,10 @@ function coverViewport(html: string): string {
     /viewport-fit/.test(content) ? whole : `<meta name="viewport" content="${content.replace(/[,\s]+$/, "")}, viewport-fit=cover"`);
 }
 
-/** The page as the app serves it: the bar across the top, the safe areas, and repo links for files outside the docs. */
+/** The page as the app serves it: the bar across the top, the safe areas, code references at their lines, and repo links for files outside the docs. */
 export function servedDoc(html: string, page: string): string {
   const here = posix.dirname(`docs/${page}`);
-  const linked = html.replace(/\bhref="([^"#:?]+?\.(?:md|ts|tsx|json|yaml))"/g, (whole, target: string) => {
+  const linked = pinRefs(html).html.replace(/\bhref="([^"#:?]+?\.(?:md|ts|tsx|json|yaml))"/g, (whole, target: string) => {
     const path = posix.normalize(posix.join(here, target));
     return path.startsWith("..") ? whole : `href="${REPO}${path}" target="_blank" rel="noopener"`;
   });

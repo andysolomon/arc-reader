@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { create } from "zustand";
 import type { LlmConfig } from "../../vite.llm";
 
@@ -12,8 +13,8 @@ export interface KeyState {
 
 /** A provider key saved on this ReadAloud server; the browser only learns whether it is set. */
 function keyStore(path: string) {
-  async function request(init?: RequestInit): Promise<LlmConfig> {
-    const response = await fetch(path, { ...init, headers: { "Content-Type": "application/json" } });
+  async function send(init?: RequestInit): Promise<LlmConfig> {
+    const response = await request(path, { ...init, headers: { "Content-Type": "application/json" }, timeoutMs: 30_000 });
     const data = await response.json().catch(() => null) as (LlmConfig & { error?: { message?: string } }) | null;
     if (!response.ok || !data) throw new Error(data?.error?.message || `The server couldn't update the key (HTTP ${response.status}).`);
     return data;
@@ -21,11 +22,11 @@ function keyStore(path: string) {
   return create<KeyState>()((set) => ({
     config: null,
     load: async () => {
-      const config = await request().catch(() => null);
+      const config = await send().catch(() => null);
       if (config) set({ config });
     },
-    save: async (key) => set({ config: await request({ method: "PUT", body: JSON.stringify({ key }) }) }),
-    remove: async () => set({ config: await request({ method: "DELETE" }) }),
+    save: async (key) => set({ config: await send({ method: "PUT", body: JSON.stringify({ key }) }) }),
+    remove: async () => set({ config: await send({ method: "DELETE" }) }),
   }));
 }
 

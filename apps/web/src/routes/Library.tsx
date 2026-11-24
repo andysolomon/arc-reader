@@ -10,7 +10,7 @@ import { usePlayer } from "../state/player";
 import { usePreparation } from "../state/preparation";
 import { toast } from "../state/toast";
 import { agoLabel, dateLabel } from "../lib/dates";
-import { openDocument } from "../lib/openDoc";
+import { listenTo, openDocument } from "../lib/openDoc";
 import { FOCUS_SEARCH_EVENT } from "../hooks/useShortcuts";
 import { useBreakpoint, useIsTouch } from "../hooks/useMedia";
 import { audioCache } from "../lib/db";
@@ -214,8 +214,8 @@ export function LibraryPage() {
   });
 
   const act = {
-    open: (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: false, resume: it.progress < 1 }),
-    resume: (it: LibraryItem) => void openDocument(it.rec, navigate, { autoplay: true, resume: it.progress < 1 }),
+    open: (it: LibraryItem) => void openDocument(it.rec, navigate, { resume: it.progress < 1 }),
+    resume: (it: LibraryItem) => void listenTo(it.rec, navigate, { resume: it.progress < 1 }),
     revoice: (it: LibraryItem) => navigate(`/voices?for=${it.rec.id}`),
     prepare: (it: LibraryItem) => setPrepareIds([it.rec.id]),
     details: setDetails,

@@ -6,7 +6,6 @@ test.describe("keyboard flow", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "What should I read to you?" })).toBeVisible();
 
-    // Listen via ⌘/Ctrl+Enter from inside the text area
     await composeText(page, TEXT);
     await page.keyboard.press("ControlOrMeta+Enter");
     await page.waitForURL(/\/read\//);
@@ -20,7 +19,6 @@ test.describe("keyboard flow", () => {
     const article = page.locator("article");
     await expect(article.locator('[data-i="0"]')).toHaveClass(/bg-hl/);
 
-    // Space pauses
     await page.keyboard.press("Space");
     await expect(playPause).toHaveAttribute("data-playing", "false");
     await expect(page.locator('[aria-live="polite"]').first()).toContainText("Paused");
@@ -30,7 +28,6 @@ test.describe("keyboard flow", () => {
     await expect(article.locator('[data-i="1"]')).toHaveClass(/bg-hl/);
     await expect(article.locator('[data-i="0"]')).toHaveClass(/text-fg2/);
 
-    // [ slows down by 0.25
     await page.keyboard.press("[");
     await expect(player.getByRole("button", { name: /^Speed 0\.75×/ })).toBeVisible();
     await page.keyboard.press("]");
@@ -42,7 +39,6 @@ test.describe("keyboard flow", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 
-    // ? opens the shortcuts dialog, Esc closes it
     await page.keyboard.press("?");
     await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
     await page.keyboard.press("Escape");

@@ -66,7 +66,6 @@ export default function App() {
     });
     // Saved audio is managed behind playback; say when that changed what is kept on this device.
     const stopNotices = audioCache.onNotice((notice) => toast(audioNoticeMessage(notice), 6000));
-    // Keep as much audio as chosen in Settings → Storage.
     void chooseAudioLimit(useSettings.getState().audioLimit);
     const stopLimit = useSettings.subscribe((state) => void chooseAudioLimit(state.audioLimit));
     const stopCovers = startCoverSync();

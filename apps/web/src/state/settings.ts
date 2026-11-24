@@ -27,13 +27,11 @@ export interface Settings {
   linkToasts: boolean;
   /** TTS engine id from the speech server, or "local" for the browser voice */
   engine: EngineId;
-  /** Phase 4: derive word timings from the server's transcription endpoint (extra request per passage) */
+  /** Derive word timings from the server's transcription endpoint (extra request per passage) */
   wordTimings: boolean;
   /** OpenAI reading model: the steady model, or the cheaper standard one */
   openaiModel: string;
-  /** LLM that writes article summaries */
   summaryModel: SummaryModel;
-  /** Show the summary panel above the text in the Reader */
   showSummary: boolean;
   /** Show each article's cover and its sections' covers, and ask for them when a document is opened */
   showCovers: boolean;
@@ -41,7 +39,6 @@ export interface Settings {
   wide: boolean;
   railOpen: boolean;
   libView: "list" | "grid";
-  /** Library order: newest added first, or by listening time */
   libSort: LibrarySort;
   apiKey: string;
   email: string | null;

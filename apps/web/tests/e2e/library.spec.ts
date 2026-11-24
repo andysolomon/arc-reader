@@ -1,33 +1,6 @@
 import { expect, test, type Page } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
-import { libraryOption } from "./helpers";
-
-async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null]) {
-  await page.goto("/library");
-  await page.getByRole("heading", { name: "Library", exact: true }).waitFor();
-  await page.evaluate(async (voices) => {
-    const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("readaloud");
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    await new Promise<void>((resolve, reject) => {
-      const tx = database.transaction("docs", "readwrite");
-      for (const [index, voice] of voices.entries()) {
-        const id = ["First", "Second", "Third", "Fourth"][index] ?? `Extra ${index + 1}`;
-        tx.objectStore("docs").put({
-          id, title: `${id} document`, text: `${id} paragraph.\n\nMore ${id.toLowerCase()} text.`, voice,
-          source: "paste", domain: "Pasted text", chars: 40, createdAt: 1, updatedAt: 1,
-        });
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    database.close();
-  }, voiceIds);
-  await page.reload();
-  await expect(page.locator('[data-screen="library"] li').getByRole("button", { name: / document$/ })).toHaveCount(voiceIds.length);
-}
+import { libraryOption, seedLibrary } from "./helpers";
 
 /** Rows carry no checkboxes: Select starts picking, and the bar that appears picks every document shown. */
 async function selectAll(page: Page, name = "Select all") {
@@ -225,6 +198,44 @@ test("shows live server progress before audio is downloaded, then distinguishes 
     await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
     await page.reload();
     await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
+  } finally { release(); }
+});
+
+// The reload fails the clip download in flight, and run() on the old page must not persist the reading
+// as "queued" before it unloads (PreparationQueue.reload-mid-clip.cfg replays the bug in the model).
+test("a reload while a clip downloads goes back to saving without sending the reading again", async ({ page }) => {
+  await seedLibrary(page, [null]);
+  const status = { id: "", state: "running", done: 0, total: 2 };
+  let submissions = 0;
+  await page.route("**/api/preparations", async (route) => {
+    // Nothing is offered for reuse, so a reading sent back to the server is submitted again.
+    if (route.request().method() === "GET") return route.fulfill({ json: { jobs: [] } });
+    if (route.request().method() !== "POST") return route.fallback();
+    submissions++;
+    const response = await route.fetch();
+    status.id = (await response.json()).id;
+    await route.fulfill({ response, json: status });
+  });
+  await page.route("**/api/preparations/*", (route) => route.fulfill({ json: status }));
+  let downloads = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/preparations/*/audio/*", async (route) => {
+    downloads++;
+    await gate;
+    await route.continue();
+  });
+  try {
+    await selectAll(page);
+    await page.getByRole("button", { name: "Prepare selected" }).click();
+    await page.getByRole("dialog", { name: "Prepare audio", exact: true }).getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
+    Object.assign(status, { done: 2, state: "done" });
+    await expect(page.getByRole("img", { name: "Bella: 0% saved on this device", exact: true })).toBeVisible();
+    await expect.poll(() => downloads).toBeGreaterThan(0);
+    await page.reload();
+    release();
+    await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
+    expect(submissions).toBe(1);
   } finally { release(); }
 });
 

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "./fixtures";
 import { DOC_LINKS, docUrl } from "../../src/lib/docs";
 
@@ -37,6 +38,16 @@ test("the bar's title opens another doc, and Settings comes back at the list of 
   await page.locator("[data-docs-bar]").getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings#how-it-works$/);
   await expect(page.getByRole("navigation", { name: "How it works" })).toBeInViewport();
+});
+
+test("the diagram pages cite code at the line it is on in this build", async ({ request }) => {
+  const engine = readFileSync(new URL("../../src/engine/engine.ts", import.meta.url), "utf8").split("\n");
+  const line = engine.findIndex((l) => l.trim().startsWith("private ensureChunk(")) + 1;
+  for (const d of DIAGRAMS) {
+    const html = await (await request.get(docUrl(d.page))).text();
+    expect(html, d.page).toContain(`SRC + "engine/engine.ts:${line}"`);
+    expect(html, d.page).not.toMatch(/SRC \+ "[\w./-]+#|"(apps|packages)\/[\w./-]+#|"compose\.yaml#/);
+  }
 });
 
 for (const d of DIAGRAMS) {

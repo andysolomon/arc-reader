@@ -1,6 +1,9 @@
 import * as moddle from "bpmn-moddle";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PAGES, describesChange, loadModel, resolveRefs } from "./diagrams.mjs";
+import { PAGES, ROOT, describesChange, loadModel, pinRefs } from "./diagrams.mjs";
 
 // bpmn-moddle's default export, however this runtime presents it.
 const BpmnModdle = (moddle as any).default?.default ?? (moddle as any).default ?? (moddle as any).BpmnModdle;
@@ -8,26 +11,56 @@ const BpmnModdle = (moddle as any).default?.default ?? (moddle as any).default ?
 /* The diagram pages in docs/ carry their models as plain scripts; a broken model blocks a merge. */
 
 describe("diagram code references", () => {
-  it("all point at code that still exists", () => {
-    const { problems, count } = resolveRefs();
-    expect(count).toBeGreaterThan(100);
-    // Fix: point the reference at the code it describes, then run `node apps/web/scripts/diagrams.mjs refs`.
+  it.each(PAGES)("%s: each names a line the code still has", (page) => {
+    const { problems, count } = pinRefs(readFileSync(resolve(ROOT, page), "utf8"));
     expect(problems).toEqual([]);
+    expect(count).toBeGreaterThan(100);
+  });
+
+  const root = mkdtempSync(join(tmpdir(), "diagram-refs-"));
+  mkdirSync(join(root, "apps/web/src/engine"), { recursive: true });
+  const code = (...lines: string[]) => writeFileSync(join(root, "apps/web/src/engine/engine.ts"), lines.join("\n"));
+  const page = `code: [SRC + "engine/engine.ts#private ensureChunk(", "apps/web/src/engine/engine.ts#async play( … } catch (e"]`;
+
+  it("get the line their code is on now, wherever it has moved", () => {
+    code("class E {", "  async play() {", "    try {", "    } catch (e) {}", "  }", "  private ensureChunk(passage: number) {}", "}");
+    expect(pinRefs(page, root)).toEqual({ html: `code: [SRC + "engine/engine.ts:6", "apps/web/src/engine/engine.ts:4"]`, problems: [], count: 2 });
+    code("// A line added above both.", "class E {", "  async play() {", "    try {", "    } catch (e) {}", "  }", "  private ensureChunk(passage: number, signal: AbortSignal) {}", "}");
+    expect(pinRefs(page, root).html).toBe(`code: [SRC + "engine/engine.ts:7", "apps/web/src/engine/engine.ts:5"]`);
+  });
+
+  it("that name no line say which, and how to fix them", () => {
+    code("class E {", "  async play() {}", "  private ensureChunk(a: number) {}", "  private ensureChunk(b: string) {}", "}");
+    expect(pinRefs(page, root).problems).toEqual([
+      "apps/web/src/engine/engine.ts#private ensureChunk(: 2 lines start with “private ensureChunk(”. Make it longer, or name a line above it first: “<line above> … private ensureChunk(”.",
+      "apps/web/src/engine/engine.ts#async play( … } catch (e: no line below line 2 starts with “} catch (e”. Change the text after # to the start of the line this describes.",
+    ]);
+    code("class E {", "  private chunkFor(passage: number) {}", "}");
+    expect(pinRefs(page, root).problems[0]).toBe("apps/web/src/engine/engine.ts#private ensureChunk(: no line starts with “private ensureChunk(”. Change the text after # to the start of the line this describes.");
+    expect(pinRefs(`[SRC + "engine/gone.ts#x"]`, root).problems).toEqual(["apps/web/src/engine/gone.ts#x: the file no longer exists. Point the reference at the file that has this code now."]);
+  });
+
+  it("written as line numbers fail, saying how to cite the line instead", () => {
+    expect(pinRefs(`code: [SRC + "state/preparation.ts:204", "compose.yaml:82", SRC + "main.tsx"]`, root).problems).toEqual([
+      `apps/web/src/state/preparation.ts:204: a line number goes stale when code above it moves. Cite how the line it describes starts instead: SRC + "state/preparation.ts#<start of that line>"`,
+      `compose.yaml:82: a line number goes stale when code above it moves. Cite how the line it describes starts instead: "compose.yaml#<start of that line>"`,
+    ]);
   });
 });
 
 describe("diagram staleness reminder", () => {
   const diff = (...lines: string[]) => ["--- a/docs/x.html", "+++ b/docs/x.html", "@@ -1 +1 @@", ...lines].join("\n");
 
-  it("ignores pages whose only change is re-pointed line numbers", () => {
+  it("ignores pages whose only change is a reference following its code within the same file", () => {
     expect(describesChange(diff(
-      `-  code: [SRC + "engine/engine.ts:443", "apps/web/vite.prepare.ts:240"] },`,
-      `+  code: [SRC + "engine/engine.ts:451", "apps/web/vite.prepare.ts:236"] },`,
+      `-  code: [SRC + "engine/engine.ts#private ensureChunk(", "apps/web/vite.prepare.ts#async submit("] },`,
+      `+  code: [SRC + "engine/engine.ts#private chunkFor(", "apps/web/vite.prepare.ts#async submit(job"] },`,
     ))).toBe(false);
   });
 
   it("counts a change to what a page says", () => {
-    expect(describesChange(diff(`-  d: "VoiceStudio voices only.", code: [SRC + "a.ts:1"] },`, `+  d: "VoiceStudio and Phonon voices.", code: [SRC + "a.ts:2"] },`))).toBe(true);
+    expect(describesChange(diff(`-  d: "VoiceStudio voices only.", code: [SRC + "a.ts#x"] },`, `+  d: "VoiceStudio and Phonon voices.", code: [SRC + "a.ts#y"] },`))).toBe(true);
+    expect(describesChange(diff(`-  code: [SRC + "a.ts#x"] },`, `+  code: [SRC + "b.ts#x"] },`))).toBe(true);
     expect(describesChange(diff(`+  { id: "X_phonon", n: "Phonon" },`))).toBe(true);
     expect(describesChange(diff(`-  { id: "X_old", n: "Old" },`))).toBe(true);
   });

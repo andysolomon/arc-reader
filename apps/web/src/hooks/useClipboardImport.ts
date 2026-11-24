@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { useNavigate } from "react-router-dom";
 import { fetchReadable, hostOf, isWebAddress, normalizeUrl } from "../lib/fetchUrl";
 import { EXPLAIN_MS, ReadError } from "../lib/readError";
-import { openDocument } from "../lib/openDoc";
+import { listenTo, openDocument } from "../lib/openDoc";
 import { useLibrary } from "../state/library";
 import { importPage } from "../state/books";
 import { toast } from "../state/toast";
@@ -36,18 +36,18 @@ export function useClipboardImportController(enabled: boolean): ClipboardImport 
       const create = useLibrary.getState().create;
       let rec;
       // Pasted text is read out at once; a pasted link opens paused so the page can be looked over first.
-      let listen = true;
+      let go = listenTo;
       if (isWebAddress(text)) {
         const host = hostOf(normalizeUrl(text));
         failure = `Couldn't read ${host} — try copying the article text`;
         toast(`Fetching ${host}…`);
         const article = await fetchReadable(text);
         rec = await importPage(article, { source: "url" });
-        listen = false;
+        go = openDocument;
       } else {
         rec = await create({ text, source: "paste" });
       }
-      await openDocument(rec, navigate, { autoplay: listen, resume: false });
+      await go(rec, navigate, { resume: false });
     } catch (e) {
       if (e instanceof ReadError) toast(e.message, EXPLAIN_MS);
       else toast(failure);

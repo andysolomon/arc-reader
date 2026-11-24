@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { fencedCode, readingBlocks } from "./codeBlocks";
 import { visualBlock, type ArticleVisual } from "./visuals";
 import { articleVisual } from "./articleVisuals";
@@ -285,12 +286,12 @@ async function fetchStylesheetWith(href: string, either: AbortSignal): Promise<s
     return text;
   };
   try {
-    return await read(await fetch(href, { signal: either, mode: "cors", credentials: "omit" }));
+    return await read(await request(href, { signal: either, timeoutMs: STYLESHEET_TIMEOUT_MS, mode: "cors", credentials: "omit" }));
   } catch {
     if (either.aborted) return "";
   }
   try {
-    return await read(await fetch(`/api/fetch?url=${encodeURIComponent(href)}`, { signal: either }));
+    return await read(await request(`/api/fetch?url=${encodeURIComponent(href)}`, { signal: either, timeoutMs: STYLESHEET_TIMEOUT_MS }));
   } catch {
     return "";
   }
@@ -361,9 +362,16 @@ export async function readChapterPage(r: Response, url: string, signal?: AbortSi
   return page;
 }
 
+/** A page straight from its site; the server gives a site as long (vite.fetch.ts). */
+const DIRECT_TIMEOUT_MS = 20_000;
+/** A page through a proxy, which waits 20 s for the site, or 2 minutes for a PDF (vite.fetch.ts). */
+const PROXIED_TIMEOUT_MS = 150_000;
+/** A PDF of tens of megabytes sent over a phone's uplink, then read on the server. */
+const PDF_UPLOAD_TIMEOUT_MS = 5 * 60_000;
+
 /** A PDF chosen from the device, read by the server into the same shape as a fetched page. */
 export async function readPdfFile(file: File, signal?: AbortSignal): Promise<Fetched> {
-  const r = await fetch(`/api/fetch/pdf?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file, headers: { "content-type": "application/pdf" }, signal });
+  const r = await request(`/api/fetch/pdf?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file, headers: { "content-type": "application/pdf" }, signal, timeoutMs: PDF_UPLOAD_TIMEOUT_MS });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return { ...htmlToText(await r.text(), ""), domain: file.name };
 }
@@ -376,11 +384,11 @@ async function pageHtml(url: string, signal: AbortSignal): Promise<string> {
     return r.text();
   };
   try {
-    return await read(await fetch(url, { signal, mode: "cors" }));
+    return await read(await request(url, { signal, timeoutMs: DIRECT_TIMEOUT_MS, mode: "cors" }));
   } catch (e) {
     if (signal.aborted) throw e;
   }
-  return read(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }));
+  return read(await request(`/api/fetch?url=${encodeURIComponent(url)}`, { signal, timeoutMs: PROXIED_TIMEOUT_MS }));
 }
 
 /**
@@ -465,16 +473,16 @@ export async function fetchReadable(input: string, signal?: AbortSignal): Promis
     if (e instanceof ReadError || signal?.aborted) throw e;
   }
   try {
-    return await withPartSections(await withParentBook(await readResponse(await fetch(url, { signal, mode: "cors" }), url, domain, signal), signal), signal);
+    return await withPartSections(await withParentBook(await readResponse(await request(url, { signal, timeoutMs: DIRECT_TIMEOUT_MS, mode: "cors" }), url, domain, signal), signal), signal);
   } catch (e) {
     if (e instanceof ReadError || signal?.aborted) throw e;
   }
   try {
-    return await withPartSections(await withParentBook(await readResponse(await fetch(`/api/fetch?url=${encodeURIComponent(url)}`, { signal }), url, domain, signal), signal), signal);
+    return await withPartSections(await withParentBook(await readResponse(await request(`/api/fetch?url=${encodeURIComponent(url)}`, { signal, timeoutMs: PROXIED_TIMEOUT_MS }), url, domain, signal), signal), signal);
   } catch (e) {
     if (!PROXY || e instanceof ReadError || signal?.aborted) throw e;
   }
-  const r = await fetch(PROXY.replace("{url}", url), { signal, headers: { Accept: "text/plain" } });
+  const r = await request(PROXY.replace("{url}", url), { signal, timeoutMs: PROXIED_TIMEOUT_MS, headers: { Accept: "text/plain" } });
   if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
   const md = await r.text();
   const title = md.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || domain;

@@ -42,8 +42,8 @@ const recordings = flag("--recordings");
 const dump = flag("--dump");
 const dumped: unknown[] = [];
 const liveMode = args.includes("--live");
-/** Seconds of reading between two live transcripts, about what the app manages. */
-const LIVE_STEP = 2.6;
+/** Reading between two live transcripts, about what the app manages. */
+const LIVE_STEP_SECONDS = 2.6;
 const work = mkdtempSync(join(tmpdir(), "practice-eval-"));
 
 type Expected = Record<number, Exclude<Verdict, "correct" | "unsure">>;
@@ -90,7 +90,7 @@ function wavOf(samples: Int16Array, rate: number): Blob {
   head.write("RIFF", 0); head.writeUInt32LE(36 + samples.length * 2, 4); head.write("WAVEfmt ", 8);
   head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22); head.writeUInt32LE(rate, 24);
   head.writeUInt32LE(rate * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34); head.write("data", 36); head.writeUInt32LE(samples.length * 2, 40);
-  return new Blob([head, Buffer.from(samples.buffer, samples.byteOffset, samples.length * 2)], { type: "audio/wav" });
+  return new Blob([new Uint8Array(head), new Uint8Array(samples.slice().buffer)], { type: "audio/wav" });
 }
 
 /** The live coach's state after hearing a take the way the app does: the unsettled audio every few seconds. */
@@ -99,7 +99,7 @@ async function liveRun(passage: string, wav: Buffer) {
   const { samples, rate } = pcmOf(wav);
   const duration = samples.length / rate;
   let state = LIVE_START, asks = 0;
-  for (let t = LIVE_STEP; ; t += LIVE_STEP) {
+  for (let t = LIVE_STEP_SECONDS; ; t += LIVE_STEP_SECONDS) {
     const until = Math.min(t, duration);
     if (until - state.audioFrom >= 2) {
       const window = samples.subarray(Math.round(state.audioFrom * rate), Math.round(until * rate));

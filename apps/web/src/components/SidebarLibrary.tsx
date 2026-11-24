@@ -46,7 +46,7 @@ export function SidebarLibrary() {
   const choose = (e: MouseEvent, it: LibraryItem) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();
-    if (it.rec.id !== current) void openDocument(it.rec, navigate, { autoplay: false, resume: it.progress < 1 });
+    if (it.rec.id !== current) void openDocument(it.rec, navigate, { resume: it.progress < 1 });
   };
   const toggle = (id: string) => {
     if (!openBooks.delete(id)) openBooks.add(id);

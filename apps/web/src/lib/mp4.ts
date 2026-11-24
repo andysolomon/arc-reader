@@ -31,8 +31,7 @@ export interface BookTags {
   album?: string;
 }
 
-/** Samples in every AAC-LC frame */
-export const AAC_FRAME = 1024;
+export const SAMPLES_PER_AAC_FRAME = 1024;
 
 const SAMPLE_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
 
@@ -179,7 +178,7 @@ function audioTrak(track: AacTrack, mediaDuration: number, movieDuration: number
     : full("stsc", 0, 0, be([4, 2], [4, 1], [4, CHUNK], [4, 1], [4, chunks], [4, last], [4, 1]));
   const stbl = box("stbl",
     full("stsd", 0, 0, be([4, 1]), mp4a),
-    full("stts", 0, 0, be([4, 1], [4, frames], [4, AAC_FRAME])),
+    full("stts", 0, 0, be([4, 1], [4, frames], [4, SAMPLES_PER_AAC_FRAME])),
     stsc, sizesBox(track.sizes), chunkOffsets(offsets),
   );
   return box("trak",
@@ -245,7 +244,7 @@ export function muxM4b(track: AacTrack, chapters: Chapter[], tags: BookTags): Bl
   const frames = track.sizes.length;
   if (!frames) throw new Error("There is no audio to write");
   const timescale = track.sampleRate;
-  const mediaDuration = frames * AAC_FRAME;
+  const mediaDuration = frames * SAMPLES_PER_AAC_FRAME;
   const movieDuration = Math.round((mediaDuration / timescale) * 1000);
   const ordered = (chapters.length ? chapters : [{ title: tags.title, start: 0 }])
     .map((c) => ({ ...c, start: Math.max(0, Math.min(mediaDuration - 1, Math.round(c.start))) }))

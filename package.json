@@ -4,10 +4,13 @@
   "version": "0.1.0",
   "packageManager": "pnpm@12.9.1",
   "scripts": {
+    "prepare": "[ ! -f scripts/install-git-hooks.sh ] || sh scripts/install-git-hooks.sh",
     "dev": "pnpm --filter @readaloud/web dev",
     "build": "pnpm -r --filter './packages/**' build && pnpm --filter @readaloud/web build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "check": "pnpm typecheck && pnpm test",
+    "verify:preparation": "node apps/web/verification/preparation/check.mjs",
     "test:e2e": "pnpm --filter @readaloud/web test:e2e",
     "cadence": "pnpm --filter @readaloud/cadence dev",
     "test:e2e:cadence": "pnpm --filter @readaloud/cadence test:e2e",
@@ -15,7 +18,6 @@
     "contrast": "pnpm --filter @readaloud/tokens contrast",
     "ios:sync": "pnpm --filter @readaloud/web ios:sync",
     "ios:open": "pnpm --filter @readaloud/web ios:open",
-    "diagrams:refs": "node apps/web/scripts/diagrams.mjs refs",
     "diagrams:stale": "node apps/web/scripts/diagrams.mjs stale"
   },
   "devDependencies": {

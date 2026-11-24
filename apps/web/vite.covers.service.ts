@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { writePrivate } from "./vite.files";
 import { Clock, Context, Effect, Layer, Option, Queue, Schedule, Schema, Semaphore } from "effect";
 import type { DocRecord } from "./src/lib/db";
 import { ARTICLE_COVER, COVER_STYLE, coverPlan, type CoverSection } from "./src/lib/covers";
@@ -161,12 +162,6 @@ export class CoverFiles extends Context.Service<CoverFiles, {
       const folder = { docs: join(directory, "docs"), assets: join(directory, "assets"), images: join(directory, "images") };
       const attempt = <A>(task: () => Promise<A>) => Effect.tryPromise({ try: task, catch: (cause) => new CoverStorageError({ cause }) });
       const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
-      /** A reader never sees half a file: write beside it, then rename over it. */
-      const atomic = async (file: string, data: string | Uint8Array) => {
-        const temporary = `${file}.${randomUUID()}.tmp`;
-        await writeFile(temporary, data, { mode: 0o600 });
-        await rename(temporary, file);
-      };
       const json = async <S extends Schema.Top>(file: string, schema: S): Promise<Option.Option<S["Type"]>> => {
         let text: string;
         try { text = await readFile(file, "utf8"); }
@@ -188,20 +183,20 @@ export class CoverFiles extends Context.Service<CoverFiles, {
           }
           return found;
         }),
-        saveManifest: (manifest) => attempt(() => atomic(join(folder.docs, `${sha256(manifest.docId)}.json`), JSON.stringify(manifest))),
+        saveManifest: (manifest) => attempt(() => writePrivate(join(folder.docs, `${sha256(manifest.docId)}.json`), JSON.stringify(manifest))),
         removeManifest: (docId) => attempt(() => rm(join(folder.docs, `${sha256(docId)}.json`), { force: true })),
         sheet: (asset) => HEX.test(asset) ? attempt(() => json(join(folder.assets, `${asset}.json`), Sheet)) : Effect.succeed(Option.none()),
         saveArt: (sheet, bytes, format) => attempt(async () => {
           const saved: Sheet = { ...sheet, image: `${sheet.asset}-${randomUUID()}.${format}` };
-          await atomic(join(folder.images, saved.image), bytes);
-          await atomic(join(folder.assets, `${sheet.asset}.json`), JSON.stringify(saved));
+          await writePrivate(join(folder.images, saved.image), bytes);
+          await writePrivate(join(folder.assets, `${sheet.asset}.json`), JSON.stringify(saved));
           return saved;
         }),
         image: (name) => IMAGE_NAME.test(name)
           ? Effect.promise(() => readFile(join(folder.images, name)).then((bytes) => Option.some(bytes), () => Option.none<Buffer>()))
           : Effect.succeed(Option.none()),
         usage: attempt(async () => Option.match(await json(join(directory, "usage.json"), Usage), { onNone: () => [], onSome: (usage) => usage.drawn })),
-        saveUsage: (drawn) => attempt(() => atomic(join(directory, "usage.json"), JSON.stringify({ drawn }))),
+        saveUsage: (drawn) => attempt(() => writePrivate(join(directory, "usage.json"), JSON.stringify({ drawn }))),
       });
     }),
   );

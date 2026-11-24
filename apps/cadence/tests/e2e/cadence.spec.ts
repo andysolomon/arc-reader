@@ -235,7 +235,6 @@ test("readers keep separate progress: add, switch, rename and remove", async ({ 
   await guest.getByRole("button", { name: "Remove?" }).click();
   await expect(sheet.getByRole("radio", { name: /Guest/ })).toHaveCount(0);
 
-  // Rename the current reader.
   await sheet.getByRole("button", { name: "Rename" }).click();
   await sheet.getByLabel("Reader's name", { exact: true }).fill("Andy");
   await sheet.getByRole("button", { name: "Save" }).click();

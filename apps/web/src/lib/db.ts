@@ -14,11 +14,8 @@ export interface DocMeta {
   author?: string;
   /** As published: a YYYY-MM-DD date when the page gave one */
   published?: string;
-  /** Publication or site name */
   site?: string;
-  /** The page's own description */
   description?: string;
-  /** Your research notes */
   notes?: string;
 }
 
@@ -384,7 +381,6 @@ export const audioCache = {
     stored = null;
     notifyAudio();
   },
-  /** Each saved clip's size by key. */
   async sizes(): Promise<Map<string, number>> {
     const sizes = new Map<string, number>();
     for (let cur = await (await db()).transaction("audio").store.openCursor(); cur; cur = await cur.continue()) sizes.set(cur.key, sizeOf(cur.value));

@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { create } from "zustand";
 import { docs as docStore, type DocRecord, type DocSource } from "../lib/db";
 import { fetchReadable, hostOf, type Fetched } from "../lib/fetchUrl";
@@ -71,7 +72,7 @@ const POLL_MS = 1500;
 let polling = false;
 
 const listImports = async (): Promise<BookImportJob[]> => {
-  const r = await fetch("/api/books/import", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+  const r = await request("/api/books/import", { cache: "no-store", timeoutMs: 15_000 });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json() as { jobs: BookImportJob[] }).jobs;
 };
@@ -210,7 +211,7 @@ export const useBooks = create<BooksState>()((set, get) => ({
     try {
       // What is saved here and not yet on the server would otherwise be added twice.
       await syncLibrary();
-      const r = await fetch("/api/books/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ book }), signal: AbortSignal.timeout(30_000) });
+      const r = await request("/api/books/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ book }), timeoutMs: 30_000 });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       job = (await r.json() as { job: BookImportJob }).job;
     } catch {

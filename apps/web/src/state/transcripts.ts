@@ -24,7 +24,6 @@ interface TranscriptsState {
 const busy = (status: TranscriptStatus | undefined) => status?.state === "waiting" || status?.state === "fetching" || status?.state === "transcribing";
 export const transcribing = busy;
 
-/** Documents whose transcription is being followed */
 const following = new Set<string>();
 let pollMs = POLL_MS;
 /** Tests poll without the wait. */

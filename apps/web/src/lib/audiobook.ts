@@ -105,11 +105,10 @@ export async function makeAudiobook(chapters: BookChapter[], opts: AudiobookOpti
 
 // Playback's own polish, so the book sounds as it does in the app: passages start just before the
 // voice does, long trailing silences are shortened, and louder passages are brought down to the rest.
-const LEAD_KEEP = 0.05;
-const TAIL_KEEP = 0.25;
+const LEAD_KEEP_SECONDS = 0.05;
+const TAIL_KEEP_SECONDS = 0.25;
 const MIN_GAIN = 0.5;
-/** Silence between chapters, in seconds */
-const CHAPTER_GAP = 1.5;
+const CHAPTER_GAP_SECONDS = 1.5;
 /** Encoded audio is gathered into a Blob this often, so the frames don't pile up as separate arrays. */
 const FLUSH_BYTES = 4 * 1024 * 1024;
 
@@ -175,8 +174,8 @@ async function encodeM4b(chapters: BookChapter[], config: AudioEncoderConfig, op
           throw new Error(`A passage of “${chapter.title}” couldn't be decoded`);
         }
         const pcm = mono(buffer);
-        const from = clip.lead ? Math.floor(Math.max(0, clip.lead - LEAD_KEEP) * rate) : 0;
-        const cut = clip.tail && clip.tail > TAIL_KEEP ? Math.floor((clip.tail - TAIL_KEEP) * rate) : 0;
+        const from = clip.lead ? Math.floor(Math.max(0, clip.lead - LEAD_KEEP_SECONDS) * rate) : 0;
+        const cut = clip.tail && clip.tail > TAIL_KEEP_SECONDS ? Math.floor((clip.tail - TAIL_KEEP_SECONDS) * rate) : 0;
         const samples = pcm.slice(Math.min(from, pcm.length), Math.max(from, pcm.length - cut));
         if (reference !== null && typeof clip.loudness === "number" && Number.isFinite(clip.loudness)) {
           const gain = Math.max(MIN_GAIN, Math.min(1, 10 ** ((reference - clip.loudness) / 20)));
@@ -185,7 +184,7 @@ async function encodeM4b(chapters: BookChapter[], config: AudioEncoderConfig, op
         await feed(samples);
         opts.onProgress?.(++done, total);
       }
-      if (index < chapters.length - 1) await feed(new Float32Array(Math.round(CHAPTER_GAP * rate)));
+      if (index < chapters.length - 1) await feed(new Float32Array(Math.round(CHAPTER_GAP_SECONDS * rate)));
     }
     await audioEncoder.flush();
   } finally {

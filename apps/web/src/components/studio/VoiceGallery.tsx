@@ -7,7 +7,7 @@ import { useVoices } from "../../state/voices";
 import { galleryFavoriteKey, useGallery } from "../../state/gallery";
 import { usePreviews } from "../../state/previews";
 import { hueFor } from "../../data/voices";
-import { studioJson, studioUrl, idPath, type Archetype, type PreviewSource } from "../../lib/studio";
+import { STUDIO_TIMEOUT, studioJson, studioUrl, idPath, type Archetype, type PreviewSource } from "../../lib/studio";
 import { GALLERY_FACETS, NO_GALLERY_FILTERS, activeFilterCount, galleryParams, matchesGallery, type GalleryFilters } from "../../lib/filters";
 import { ActiveFilters, FilterSelect, VOICE_GRID } from "../Filters";
 import { ICON_ON } from "../IconMenu";
@@ -72,7 +72,7 @@ export function VoiceGallery() {
     const timer = setTimeout(() => {
       const params = new URLSearchParams([["q", query], ["limit", String(PAGE_SIZE)], ["offset", String(page * PAGE_SIZE)], ...galleryParams(filters)]);
       if (featured) params.set("featured", "true");
-      void studioJson<{ items: Archetype[]; total: number }>(`/archetypes?${params}`, { signal: ac.signal })
+      void studioJson<{ items: Archetype[]; total: number }>(`/archetypes?${params}`, { signal: ac.signal, timeoutMs: STUDIO_TIMEOUT.read })
         .then((data) => { if (!ac.signal.aborted) { setItems(data.items); setTotal(data.total); } })
         .catch((e: Error) => { if (!ac.signal.aborted) setLoadError(e.message); })
         .finally(() => { if (!ac.signal.aborted) setLoading(false); });
@@ -89,7 +89,7 @@ export function VoiceGallery() {
         const voice = queue.shift()!;
         let source: PreviewSource["source"] | "unknown" = "unknown";
         try {
-          const state = await studioJson<PreviewSource>(`/archetypes/${idPath(voice.id)}/preview/state`, { signal: AbortSignal.any([ac.signal, AbortSignal.timeout(10_000)]), cache: "no-cache" });
+          const state = await studioJson<PreviewSource>(`/archetypes/${idPath(voice.id)}/preview/state`, { signal: ac.signal, timeoutMs: 10_000, cache: "no-cache" });
           source = state.source;
         } catch { /* Status failure must not block browsing or trying a preview. */ }
         if (!ac.signal.aborted) setSources((before) => ({ ...before, [voice.id]: source }));
@@ -155,7 +155,7 @@ export function VoiceGallery() {
             <p className="m-0 [overflow-wrap:anywhere]">{voice.instruct}</p>
           </div>
           <button type="button" disabled={op.busy} className="mt-auto inline-flex h-[34px] w-full select-none items-center justify-center gap-1.5 rounded-pill border border-line bg-bg2 text-[13px] font-semibold text-fg hover:bg-bg3 disabled:pointer-events-none disabled:opacity-50" onClick={() => void op.run(async (signal) => {
-            const result = await studioJson<{ profile_id: string; name: string }>(`/archetypes/${idPath(voice.id)}/use`, { method: "POST", signal });
+            const result = await studioJson<{ profile_id: string; name: string }>(`/archetypes/${idPath(voice.id)}/use`, { method: "POST", signal, timeoutMs: STUDIO_TIMEOUT.work });
             await useVoices.getState().load(); op.setStatus(`${result.name} added to Voices.`);
           })}><Plus size={14} strokeWidth={2} aria-hidden />Add to Voices</button>
         </VoiceTile>;

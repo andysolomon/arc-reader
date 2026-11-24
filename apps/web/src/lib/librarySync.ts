@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { create } from "zustand";
 import { db, pendingChange, subscribeLibraryWrites, type DocRecord } from "./db";
 import type { LibraryDocs, LibraryManifest, PendingChange } from "./libraryProtocol";
@@ -99,9 +100,9 @@ async function store(records: DocRecord[]) {
 async function download(ids: string[]) {
   let remaining = ids;
   while (remaining.length) {
-    const response = await fetch("/api/library/docs", {
+    const response = await request("/api/library/docs", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ids: remaining }), signal: AbortSignal.timeout(30_000), cache: "no-store",
+      body: JSON.stringify({ ids: remaining }), timeoutMs: 30_000, cache: "no-store",
     });
     if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Library server unavailable.");
     const result = await response.json() as LibraryDocs;
@@ -138,10 +139,10 @@ export function syncLibrary(): Promise<boolean> {
         let wanted: string[] = [];
         for (const sent of batches) {
           // The answer lists document versions, not bodies, so a quiet poll stays a few kilobytes.
-          const response = await fetch("/api/library/sync", {
+          const response = await request("/api/library/sync", {
             method: "POST", headers: { "content-type": "application/json" },
             body: JSON.stringify({ changes: sent.map((item) => item.change), view: "manifest" }),
-            signal: AbortSignal.timeout(20_000), cache: "no-store",
+            timeoutMs: 20_000, cache: "no-store",
           });
           if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "Library server unavailable.");
           snapshot = await response.json() as LibraryManifest;

@@ -26,7 +26,6 @@ export interface PdfItem {
 export interface PdfDrawing {
   /** Each picture placed on the page: the share of the page it covers, its place and size, and which picture the file says it is */
   images: { area: number; at: string; id: string }[];
-  /** Shapes and lines drawn */
   paths: number;
 }
 
@@ -68,7 +67,6 @@ interface Entry {
   bulleted: boolean;
 }
 
-/** Served as a PDF, going by its content type alone. */
 export const isPdfType = (contentType: string) => /application\/(?:x-)?pdf/i.test(contentType);
 
 /** A PDF by its type or by its opening bytes, since many servers send one as a plain download. */
@@ -208,7 +206,6 @@ export interface Slide {
   page: number;
   title: string;
   points: string[];
-  /** It shows a picture or diagram, not only text */
   pictured: boolean;
 }
 

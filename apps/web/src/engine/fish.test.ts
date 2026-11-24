@@ -1,76 +1,96 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installBrowser, replies, serve } from "./fakeSpeech";
 import { apiSynthesize, cacheKey, fetchFishVoices, fishSynthesize, synthesize } from "./providers";
 import { ApiBusy, ApiRejected } from "./types";
 import { audioCache } from "../lib/db";
+import { getUsageSnapshot } from "../lib/usage";
 
-vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
-vi.mock("../lib/usage", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/usage")>(), addUsage: vi.fn() }));
+const browser = installBrowser();
+let server = serve(replies());
+beforeEach(async () => { browser.clearStorage(); await audioCache.clear(); server = serve(replies()); });
+afterEach(() => { vi.unstubAllEnvs(); });
+
 const req = { text: "Hello from Fish Audio.", voice: "fish:voice-123", engine: "fish" };
 const audio = () => new Response(new Uint8Array(64), { headers: { "Content-Type": "audio/mpeg" } });
-const fetchMock = vi.fn();
-beforeEach(() => { vi.clearAllMocks(); fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock); });
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+const usage = () => getUsageSnapshot().rows;
 
 describe("Fish Audio", () => {
-  it("routes speech to Fish with its reference ID, selected model and fixed synthesis speed", async () => {
-    fetchMock.mockResolvedValueOnce(audio());
-    const signal = new AbortController().signal;
-    const chunk = await apiSynthesize({ ...req, signal });
-    expect(fetchMock).toHaveBeenCalledWith("/api/fish/v1/tts", expect.objectContaining({
-      method: "POST", signal,
-      headers: { "Content-Type": "application/json", Accept: "audio/mpeg", model: "s2.1-pro" },
-      body: JSON.stringify({ text: req.text, reference_id: "voice-123", format: "mp3", prosody: { speed: 1 } }),
-    }));
+  it("routes speech to Fish with its reference ID, selected model and fixed speed, and bills it by UTF-8 byte", async () => {
+    server = serve(replies(audio()));
+    const chunk = await apiSynthesize({ ...req, signal: new AbortController().signal });
+    const [sent, ...rest] = server.sent;
+    expect(rest).toEqual([]);
+    expect(sent).toMatchObject({ url: "/api/fish/v1/tts", method: "POST", body: { text: req.text, reference_id: "voice-123", format: "mp3", prosody: { speed: 1 } } });
+    expect(Object.fromEntries(sent.headers)).toEqual({ "content-type": "application/json", accept: "audio/mpeg", model: "s2.1-pro" });
     expect(chunk).toMatchObject({ source: "api", mime: "audio/mpeg" });
     expect(chunk.duration).toBeGreaterThan(0);
+    const [row] = usage();
+    expect(row).toMatchObject({ provider: "fish", model: "s2.1-pro", requests: 1, bytes: req.text.length, pricing: "$15 / 1M UTF-8 bytes" });
+    expect(row.costUsd).toBeCloseTo(req.text.length * 15 / 1e6, 12);
   });
 
   it("keeps Fish routing independent of the legacy VoiceStudio contract", async () => {
     vi.resetModules();
     vi.stubEnv("VITE_TTS_PROVIDER", "readaloud");
     const providers = await import("./providers");
-    fetchMock.mockResolvedValueOnce(audio());
+    server = serve(replies(audio()));
     await providers.apiSynthesize(req);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/fish/v1/tts");
+    expect(server.sent.map((s) => s.url)).toEqual(["/api/fish/v1/tts"]);
   });
 
-  it("includes the Fish model in cache identity and returns cached audio without requesting it again", async () => {
-    expect(cacheKey(req)).toContain("fish:s2.1-pro|fish:voice-123|");
-    expect(cacheKey(req)).not.toBe(cacheKey({ ...req, engine: "openai" }));
-    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob(["audio"]), mime: "audio/mpeg", duration: 1, createdAt: 0 });
+  it("plays its cached audio without paying for it again, and never another model's or engine's", async () => {
+    server = serve(replies(audio(), audio(), audio()));
+    await synthesize(req);
     expect((await synthesize(req)).source).toBe("cache");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(server.generated()).toHaveLength(1);
+    expect(usage()).toEqual([expect.objectContaining({ requests: 1 })]);
+    expect((await synthesize({ ...req, engine: "openai" })).source).toBe("api");
+    vi.resetModules();
+    vi.stubEnv("VITE_FISH_TTS_MODEL", "s1");
+    const otherModel = await import("./providers");
+    expect((await otherModel.synthesize(req)).source).toBe("api");
+    expect(server.generated().at(-1)!.headers.get("model")).toBe("s1");
+    expect(await audioCache.get(cacheKey(req))).toBeDefined();
   });
 
-  it("reports insufficient credit and uses local fallback without marking other providers offline", async () => {
-    fetchMock.mockResolvedValueOnce(Response.json({ message: "Insufficient balance" }, { status: 402 }));
+  it("tells the reader the account is out of credit, reads with the browser voice, and blames no other provider", async () => {
+    const noCredit = () => Response.json({ message: "Insufficient balance" }, { status: 402 });
+    server = serve(replies(noCredit(), noCredit()));
     const onRejected = vi.fn(), onOffline = vi.fn();
-    expect((await synthesize({ ...req, onRejected, onOffline })).source).toMatch(/local|estimate/);
-    expect(onRejected).toHaveBeenCalledWith("Insufficient balance");
+    const c = await synthesize({ ...req, onRejected, onOffline });
+    expect(c.source).toMatch(/local|estimate/);
+    expect(onRejected).toHaveBeenCalledExactlyOnceWith("Insufficient balance");
     expect(onOffline).not.toHaveBeenCalled();
+    expect(usage()).toEqual([]);
+    expect(await audioCache.get(cacheKey(req))).toBeUndefined();
+    // A caller that won't fall back hears the same reason.
+    await expect(synthesize({ ...req, fallbackLocal: false })).rejects.toThrow("Insufficient balance");
   });
 
   it("rejects empty audio, HTML responses, invalid keys, and rate limits", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(""));
+    server = serve(replies(
+      new Response(""),
+      new Response("<html>app</html>", { headers: { "Content-Type": "text/html" } }),
+      new Response("", { status: 401 }),
+      new Response("", { status: 429 }),
+    ));
     await expect(fishSynthesize(req)).rejects.toBeInstanceOf(ApiRejected);
-    fetchMock.mockResolvedValueOnce(new Response("<html>app</html>", { headers: { "Content-Type": "text/html" } }));
     await expect(fishSynthesize(req)).rejects.toThrow("no playable audio");
-    fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
     await expect(fishSynthesize(req)).rejects.toThrow("rejected the API key");
-    fetchMock.mockResolvedValueOnce(new Response("", { status: 429 }));
     await expect(fishSynthesize(req)).rejects.toBeInstanceOf(ApiBusy);
+    expect(usage()).toEqual([]);
   });
 
   it("does not send cancelled requests or retry an abort as a local voice", async () => {
     const controller = new AbortController();
     controller.abort();
     await expect(synthesize({ ...req, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(server.sent).toEqual([]);
   });
 
   it("loads voice metadata and drops malformed entries", async () => {
-    fetchMock.mockResolvedValueOnce(Response.json({ items: [{ _id: "v1", title: "Narrator", languages: ["en"] }, { title: "Missing ID" }] }));
+    server = serve(replies(Response.json({ items: [{ _id: "v1", title: "Narrator", languages: ["en"] }, { title: "Missing ID" }] })));
     expect(await fetchFishVoices()).toEqual([{ _id: "v1", title: "Narrator", languages: ["en"] }]);
-    expect(fetchMock.mock.calls[0][0]).toContain("/api/fish/model?");
+    expect(server.sent[0].url).toContain("/api/fish/model?");
   });
 });

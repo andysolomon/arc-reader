@@ -23,7 +23,6 @@ const TAG = { warm: "tag tag-warm", accent: "tag tag-accent", plain: "tag" };
 
 export const Tag = ({ word }: { word: PracticeWord }) => <span className={TAG[word.tone]}>{word.label}</span>;
 
-/** Clean reads toward mastering a word, out of three. */
 export function CleanReads({ word }: { word: string }) {
   const clean = usePractice((s) => s.words[wordKey(word)]?.clean ?? 0);
   return <Meter value={clean} of={CLEAN_TO_MASTER} label={`${clean} of ${CLEAN_TO_MASTER} clean reads`} />;

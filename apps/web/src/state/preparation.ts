@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { prepareVisualDescriptions } from "../lib/visualDescriptions";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -153,7 +154,7 @@ export const usePreparation = create<PreparationState>()(persist((set, get) => (
   cancel(id) {
     const job = get().jobs.find((job) => job.id === id);
     if (job?.remote && job.serverId) {
-      void fetch(`/api/preparations/${job.serverId}`, { method: "DELETE" }).then((response) => {
+      void request(`/api/preparations/${job.serverId}`, { method: "DELETE", timeoutMs: 10_000 }).then((response) => {
         if (!response.ok) throw new Error("Could not cancel server audio preparation.");
         return get().refreshShared();
       }).catch((error) => set({ sharedError: (error as Error).message }));
@@ -358,14 +359,17 @@ async function run(job: PreparationJob, signal: AbortSignal) {
     update(job.id, { status: "ready" });
   } catch (error) {
     if (!signal.aborted && (isTransientPreparationError(error) || error instanceof ApiUnreachable || error instanceof ApiBusy)) {
-      update(job.id, { status: "queued", worker: undefined, waitingFor: undefined, message: "Waiting for the speech server to reconnect…" });
+      // The server has made a reading that is saving, so only its download is retried. It stays saving,
+      // also when a reload cut the download off, so drain() resumes the save and never sends it again.
+      const saving = usePreparation.getState().jobs.find((other) => other.id === job.id)?.status === "saving";
+      update(job.id, saving ? { message: WAITING_TO_SAVE } : { status: "queued", worker: undefined, waitingFor: undefined, message: "Waiting for the speech server to reconnect…" });
       await new Promise<void>((resolve) => {
         const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
         const timer = setTimeout(finish, 1500);
         signal.addEventListener("abort", finish, { once: true });
         if (signal.aborted) finish();
       });
-      update(job.id, { status: signal.aborted ? "cancelled" : "queued", message: undefined });
+      if (signal.aborted || !saving) update(job.id, { status: signal.aborted ? "cancelled" : "queued", message: undefined });
     } else {
       update(job.id, signal.aborted ? { status: "cancelled", message: undefined } : { status: "error", message: unavailableMessage(error) });
     }

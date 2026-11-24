@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@readaloud/ui";
 import { useVoices } from "../../state/voices";
-import { studioJson, jsonBody, type Design, type Profile } from "../../lib/studio";
+import { STUDIO_TIMEOUT, studioJson, jsonBody, type Design, type Profile } from "../../lib/studio";
 import { DESIGN_SETTINGS, explainDesign, type DesignExplanation } from "../../lib/voiceDesign";
 import { Field, ErrorNotice, Recorder, LocalAudio, SavedVoiceAvatar, fieldClass, panelClass, useOperation } from "./shared";
 import { ReadingScriptCard, ScriptedReferenceNote, useScriptedReference } from "./ReadingScript";
@@ -25,7 +25,7 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
     body.set("ref_text", reference.trim());
     if (mode === "clone" && file) body.set("ref_audio", file);
     if (mode === "design" && design) { body.set("vd_states", JSON.stringify(design.result.attrs)); body.set("instruct", design.result.instruct); body.set("seed", "42"); }
-    const result = await studioJson<Profile>("/profiles", { method: "POST", body, signal });
+    const result = await studioJson<Profile>("/profiles", { method: "POST", body, signal, timeoutMs: STUDIO_TIMEOUT.work });
     setSaved(result); await useVoices.getState().load();
     op.setStatus(`${result.name} saved to Voices.`);
   });
@@ -44,7 +44,7 @@ export function VoiceWorkshop({ mode }: { mode: "clone" | "design" }) {
     </> : <>
       <Field label="Describe your voice"><textarea className={fieldClass} rows={4} maxLength={2000} value={description} onChange={(e) => { setDescription(e.target.value); setDesign(null); setSaved(null); }} placeholder="A middle-aged British woman with a low pitch." /></Field>
       <Button className="self-start" disabled={!description.trim()} loading={op.busy} onClick={() => void op.run(async (signal) => {
-        const describe = (text: string) => studioJson<Design>("/design/describe", { ...jsonBody({ description: text }), signal });
+        const describe = (text: string) => studioJson<Design>("/design/describe", { ...jsonBody({ description: text }), signal, timeoutMs: STUDIO_TIMEOUT.read });
         const result = await describe(description);
         setDesign({ result, explanation: await explainDesign(description, result, describe) }); setSaved(null);
       })}>Interpret description</Button>

@@ -458,7 +458,7 @@ function useSpaceNeeded(jobs: PreparationJob[]) {
       byJob.set(job.id, bytes);
       total += bytes;
     }
-    return { byJob, total, used: device.used, limit: device.limit };
+    return { byJob, total, used: device.usedBytes, limit: device.limitBytes };
   }, [device, items, jobs]);
 }
 

@@ -1,4 +1,3 @@
-/** Waiting for the judge, with a way out. */
 export function JudgingPanel({ onCancel }: { onCancel: () => void }) {
   return <div role="status" className="flex items-center gap-3.5 rounded-panel border border-line bg-bg2 py-3.5 pl-4 pr-2">
     <span className="listening-bars shrink-0" data-active="true" aria-hidden><i /><i /><i /><i /></span>

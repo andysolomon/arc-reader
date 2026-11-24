@@ -17,7 +17,6 @@ BRANCH=$(git branch --show-current)
 ## 1. Commit
 
 - Run `git status --short`. Stage the task's changes and commit with a message that says what changed and why.
-- Never add `Co-Authored-By` or "Generated with" trailers. Commits are authored solely by Andrew Solomon.
 - If there is nothing to commit and `git log --oneline main..HEAD` is empty, the work is already shipped. Say so, then skip to step 5 to confirm the deploy.
 
 ## 2. Bring main into the branch
@@ -34,29 +33,25 @@ Resolve conflicts if any, keeping both sides' intent.
 
 ## 2a. Keep the diagram pages in step
 
-`docs/readaloud-bpmn.html` and `docs/readaloud-sequence.html` cite code by line. From the worktree root:
+`docs/readaloud-bpmn.html` and `docs/readaloud-sequence.html` cite code by how a line starts (`SRC + "engine/engine.ts#private ensureChunk("`). The app adds the line numbers when it serves them, so moving code never needs a page edit. From the worktree root:
 
 ```sh
-pnpm diagrams:refs    # re-points references at the lines in docs/diagram-anchors.json
 pnpm diagrams:stale   # diagrams whose cited code this branch changed
 ```
 
-- If `diagrams:refs` changed the pages, commit them with the anchors file ("Re-point diagram code references").
-- If it reports a broken reference, the cited line is gone or changed beyond its name. Point that reference at the code it describes on the page, then run it again. A conflict in these three files resolves the same way: take either side and rerun `diagrams:refs`.
 - `diagrams:stale` is a reminder, not a gate. When it lists diagrams and the change alters the behaviour they describe, update what they say before merging. Mention any you left as they were in the report.
 
 ## 3. Verify before merging
 
-From `apps/web`:
+From the worktree root:
 
 ```sh
-pnpm typecheck
-pnpm vitest run
+pnpm check   # typecheck and unit tests in every package; CI runs the same command
 ```
 
-`pnpm vitest run` includes `scripts/diagrams.test.ts`, which fails on a broken diagram: an unresolvable code reference, a flow or walkthrough step pointing at nothing, or a BPMN export with warnings.
+It includes `scripts/diagrams.test.ts`, which fails on a broken diagram: an unresolvable code reference, a flow or walkthrough step pointing at nothing, or a BPMN export with warnings.
 
-Then run the Playwright specs that cover the changed area, for example `pnpm playwright test tests/e2e/library.spec.ts`.
+Then run the Playwright specs that cover the changed area from `apps/web`, for example `pnpm playwright test tests/e2e/library.spec.ts`. CI runs every spec on pull requests and pushes to main.
 
 - E2E ports 4173, 3998 and 3999 are shared across worktrees. Check `ss -ltnp | grep -E ':(4173|3998|3999) '` is empty first; if another session holds them, wait or ask.
 - The keyboard spec's "position persists" test can flake in a full parallel run. Rerun it alone before calling it a regression.
@@ -70,6 +65,8 @@ git -C "$MAIN" merge --no-ff -m "Merge <one-line summary of the change>" "$BRANC
 ```
 
 If the main checkout is dirty or not on `main`, stop and tell the user rather than stashing or switching. The stash stack is shared with other sessions.
+
+The versioned `pre-merge-commit` hook (scripts/git-hooks, linked by `pnpm install`) runs `pnpm check` first and refuses the merge if it fails; then run `git -C "$MAIN" merge --abort` and fix the branch. Never pass `--no-verify`.
 
 The `post-merge` hook in the shared `.git/hooks` starts `deploy/kind/deploy.sh` in the background (build the web image, load it into kind, roll out) and logs to `.git/docker-rebuild.log`.
 

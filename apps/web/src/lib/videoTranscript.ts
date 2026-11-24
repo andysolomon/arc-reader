@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import type { DocRecord } from "./db";
 
 /**
@@ -62,7 +63,7 @@ async function answer(response: Response): Promise<TranscriptStatus> {
 }
 
 /** What the server knows about the video on a post, without starting anything. */
-export const transcriptStatus = async (url: string, signal?: AbortSignal) => answer(await fetch(endpoint(url), { signal }));
+export const transcriptStatus = async (url: string, signal?: AbortSignal) => answer(await request(endpoint(url), { signal, timeoutMs: 10_000 }));
 
 /** Start transcribing the post's video, or join the transcription already under way. */
-export const startTranscript = async (url: string) => answer(await fetch(endpoint(url), { method: "POST" }));
+export const startTranscript = async (url: string) => answer(await request(endpoint(url), { method: "POST", timeoutMs: 20_000 }));

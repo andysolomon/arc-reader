@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 interface Activity { playing: boolean; loading: boolean; preparing: string | null }
 interface ActivityStore { getState(): Activity; subscribe(listener: (state: Activity) => void): () => void }
 
@@ -42,7 +43,7 @@ export function reloadOnNewBuild(store: ActivityStore) {
   let reloading = false;
   document.addEventListener("visibilitychange", async () => {
     if (document.hidden || reloading) return;
-    const page = async () => (await fetch("/", { cache: "no-store" })).text();
+    const page = async () => (await request("/", { cache: "no-store", timeoutMs: 15_000 })).text();
     if (reloading || !(await serverHasNewBuild(running, page))) return;
     reloading = true;
     reloadWhenIdle(store);
@@ -57,9 +58,9 @@ export const PROBE_QUERY = "reachable";
  * (common right after the phone changes networks) can leave a request hanging
  * for a minute, so give up early rather than wait.
  */
-export async function serverReachable(timeoutMs = 5000, load: typeof fetch = fetch): Promise<boolean> {
+export async function serverReachable(timeoutMs = 5000, load: typeof request = request): Promise<boolean> {
   try {
-    const res = await load(`/?${PROBE_QUERY}=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+    const res = await load(`/?${PROBE_QUERY}=${Date.now()}`, { cache: "no-store", timeoutMs });
     return res.ok;
   } catch {
     return false;

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PreparationService } from "./vite.prepare";
@@ -632,7 +632,11 @@ describe("server-owned audio preparation", () => {
   it("holds back preparation on this computer while other programs need its CPU", async () => {
     await addPhonon();
     const pressure = join(directory, "pressure");
-    const busy = (avg10: number) => writeFile(pressure, `some avg10=${avg10.toFixed(2)} avg60=0.00 avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n`);
+    // Replaced whole, as the kernel's file is: a check mid-write would read no pressure and free every slot.
+    const busy = async (avg10: number) => {
+      await writeFile(`${pressure}.next`, `some avg10=${avg10.toFixed(2)} avg60=0.00 avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n`);
+      await rename(`${pressure}.next`, pressure);
+    };
     await busy(40);
     const service = new PreparationService({ ...env, PHONON_PREPARATION_SLOTS: "2", PREPARATION_PRESSURE_FILE: pressure, PREPARATION_PRESSURE_INTERVAL_MS: "30" }, directory);
     phononGate = deferred();
@@ -641,7 +645,7 @@ describe("server-owned audio preparation", () => {
     // The first check gives up one slot: the earlier reading goes on, the later one is held.
     await expect.poll(async () => (await service.get(second.id)).held).toBe(true);
     expect(await service.get(second.id)).toMatchObject({ state: "running", queued: false, worker: "Phonon" });
-    expect(phononCalls.map((call) => call.body.input)).toEqual(["a1"]);
+    await expect.poll(() => phononCalls.map((call) => call.body.input)).toEqual(["a1"]);
     // Pressure stays high, so the next check gives up the other slot after the passage in hand.
     await new Promise((resolve) => setTimeout(resolve, 80));
     phononGate.resolve();

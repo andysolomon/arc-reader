@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { writePrivate } from "./vite.files";
 import type { Connect, Plugin } from "vite";
 import { HttpError } from "./vite.llm";
 import { sendJson } from "./vite.json";
@@ -353,10 +354,7 @@ export class VideoTranscripts {
   }
 
   private async save(id: string, saved: Saved) {
-    await mkdir(this.directory, { recursive: true });
-    const partial = `${this.path(id)}.${process.pid}.tmp`;
-    await writeFile(partial, JSON.stringify(saved));
-    await rename(partial, this.path(id));
+    await writePrivate(this.path(id), JSON.stringify(saved));
   }
 }
 

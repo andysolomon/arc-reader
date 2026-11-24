@@ -1,8 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { writePrivate } from "./vite.files";
 import type { Connect } from "vite";
 import { drawPages, type SlidePictures } from "./vite.pdf";
 
@@ -46,12 +47,8 @@ export class SlideStore implements SlidePictures {
     if (!pages.length || this.jobs.has(deck)) return;
     const missing = await this.missing(deck, pages);
     if (!missing.length) return;
-    await mkdir(resolve(this.directory, deck), { recursive: true, mode: 0o700 });
-    for (const [name, data] of [["source.pdf", bytes], ["pages.json", JSON.stringify(pages)]] as const) {
-      const temporary = this.file(deck, `${name}.${randomUUID()}.tmp`);
-      await writeFile(temporary, data, { mode: 0o600 });
-      await rename(temporary, this.file(deck, name));
-    }
+    await writePrivate(this.file(deck, "source.pdf"), bytes);
+    await writePrivate(this.file(deck, "pages.json"), JSON.stringify(pages));
     this.start(deck);
   }
 
@@ -70,9 +67,7 @@ export class SlideStore implements SlidePictures {
         const missing = await this.missing(deck, pages);
         if (missing.length) {
           await this.draw(await readFile(this.file(deck, "source.pdf")), missing, async (page, jpeg) => {
-            const temporary = this.file(deck, `${page}.${randomUUID()}.tmp`);
-            await writeFile(temporary, jpeg, { mode: 0o600 });
-            await rename(temporary, this.file(deck, page));
+            await writePrivate(this.file(deck, page), jpeg);
             for (const tell of job.drawn) tell(page);
           });
         }

@@ -78,7 +78,6 @@ export function voicedShare(samples: Float32Array, sampleRate: number): number |
   return audible > 0 ? voiced / audible : undefined;
 }
 
-/** True when a decoded clip is almost entirely unvoiced noise rather than speech. */
 export function isGarbled(samples: Float32Array, sampleRate: number): boolean {
   const share = voicedShare(samples, sampleRate);
   return share !== undefined && share < GARBLED_BELOW;

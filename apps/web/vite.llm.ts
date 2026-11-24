@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { writePrivate } from "./vite.files";
 import type { Connect, Plugin } from "vite";
 
 /** What the browser may learn about the key: never the key itself. */
@@ -38,10 +38,7 @@ export class LlmKeyStore {
     return { configured: !!key, source, hint: key ? key.slice(-4) : null };
   }
   async save(key: string) {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    const temporary = `${this.file}.${randomUUID()}.tmp`;
-    await writeFile(temporary, JSON.stringify({ key }), { mode: 0o600 });
-    await rename(temporary, this.file);
+    await writePrivate(this.file, JSON.stringify({ key }));
   }
   remove = () => rm(this.file, { force: true });
 }

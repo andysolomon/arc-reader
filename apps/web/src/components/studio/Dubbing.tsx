@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@readaloud/ui";
-import { studioJson, studioUrl, jsonBody, idPath, waitForTask, type Segment, type Profile } from "../../lib/studio";
+import { STUDIO_TIMEOUT, studioJson, studioUrl, jsonBody, idPath, waitForTask, type Segment, type Profile } from "../../lib/studio";
 import { ErrorNotice, Field, fieldClass, panelClass, useOperation } from "./shared";
 
 const KEY = "readaloud:dub-draft:v1";
@@ -19,7 +19,7 @@ export function Dubbing() {
   const op = useOperation();
   useEffect(() => {
     const ac = new AbortController();
-    void studioJson<Profile[]>("/profiles", { signal: ac.signal }).then(setProfiles).catch((e: Error) => { if (!ac.signal.aborted) setProfilesError(e.message); });
+    void studioJson<Profile[]>("/profiles", { signal: ac.signal, timeoutMs: STUDIO_TIMEOUT.read }).then(setProfiles).catch((e: Error) => { if (!ac.signal.aborted) setProfilesError(e.message); });
     return () => ac.abort();
   }, []);
   useEffect(() => {
@@ -37,7 +37,7 @@ export function Dubbing() {
     if (!file) return;
     op.setStatus("Uploading and preparing video…");
     const body = new FormData(); body.set("video", file);
-    const job = await studioJson<{ job_id: string; task_id: string }>("/dub/upload", { method: "POST", body, signal });
+    const job = await studioJson<{ job_id: string; task_id: string }>("/dub/upload", { method: "POST", body, signal, timeoutMs: STUDIO_TIMEOUT.long });
     const next: Draft = { jobId: job.job_id, taskId: job.task_id, filename: file.name, segments: [], stage: "preparing", language: "en", profile: profiles[0]?.id || "" };
     setDraft(next); await finishTask(next, signal);
   });
@@ -53,22 +53,22 @@ export function Dubbing() {
         <div className="flex flex-wrap gap-3">
           <Button disabled={!editable} loading={op.busy} onClick={() => void op.run(async (signal) => {
             op.setStatus("Transcribing video…");
-            const result = await studioJson<{ segments: Segment[]; source_lang?: string }>(`/dub/transcribe/${idPath(draft.jobId)}`, { method: "POST", signal });
+            const result = await studioJson<{ segments: Segment[]; source_lang?: string }>(`/dub/transcribe/${idPath(draft.jobId)}`, { method: "POST", signal, timeoutMs: STUDIO_TIMEOUT.long });
             update({ segments: result.segments, stage: "ready", renderedLanguage: undefined, language: LANGUAGES.some(([code]) => code === result.source_lang) ? result.source_lang! : draft.language });
             op.setStatus(result.segments.length ? "Review and edit the script below." : "No speech detected. Import subtitles to provide a script.");
           })}>Transcribe video</Button>
           <Button disabled={op.busy || !!draft.taskId} onClick={() => { setDraft(null); setFile(null); op.setStatus(""); }}>Start another video</Button>
           {op.busy && <Button onClick={op.cancel}>Stop waiting</Button>}
           {draft.taskId && !op.busy && <Button onClick={() => void op.run(async (signal) => {
-            await studioJson(`/tasks/cancel/${idPath(draft.taskId!)}`, { method: "POST", signal });
-            await studioJson(`/dub/abort/${idPath(draft.jobId)}`, { method: "POST", signal });
+            await studioJson(`/tasks/cancel/${idPath(draft.taskId!)}`, { method: "POST", signal, timeoutMs: STUDIO_TIMEOUT.read });
+            await studioJson(`/dub/abort/${idPath(draft.jobId)}`, { method: "POST", signal, timeoutMs: STUDIO_TIMEOUT.read });
             update({ taskId: undefined, stage: "ready", renderedLanguage: undefined }); op.setStatus("Job cancelled.");
           })}>Cancel server job</Button>}
         </div>
         <Field label="Or import timed subtitles (SRT or VTT)"><input className={fieldClass} type="file" accept=".srt,.vtt" disabled={!editable} onChange={(e) => {
           const subtitle = e.target.files?.[0]; e.target.value = "";
           if (!subtitle) return;
-          void op.run(async (signal) => { const body = new FormData(); body.set("file", subtitle); const result = await studioJson<{ segments: Segment[] }>(`/dub/import-srt/${idPath(draft.jobId)}`, { method: "POST", body, signal }); update({ segments: result.segments, stage: "ready", renderedLanguage: undefined }); op.setStatus("Subtitles imported."); });
+          void op.run(async (signal) => { const body = new FormData(); body.set("file", subtitle); const result = await studioJson<{ segments: Segment[] }>(`/dub/import-srt/${idPath(draft.jobId)}`, { method: "POST", body, signal, timeoutMs: STUDIO_TIMEOUT.work }); update({ segments: result.segments, stage: "ready", renderedLanguage: undefined }); op.setStatus("Subtitles imported."); });
         }} /></Field>
       </>}
       <p role="status" className="text-sm text-fg2">{op.status}</p><ErrorNotice error={op.error || profilesError || storageError} />
@@ -81,7 +81,7 @@ export function Dubbing() {
       <Field label="Translation"><select className={fieldClass} disabled={!editable} value={provider} onChange={(e) => setProvider(e.target.value)}><option value="manual">Keep script / edit manually</option><option value="google">Google Translate — sends transcript online</option></select></Field>
       {provider !== "manual" && <Button className="self-start" disabled={!editable} onClick={() => void op.run(async (signal) => {
         op.setStatus("Translating script…");
-        const result = await studioJson<{ translated: { id: string; text: string; error?: string }[] }>("/dub/translate", { ...jsonBody({ job_id: draft.jobId, target_lang: draft.language, provider, segments: draft.segments.map((s, i) => ({ ...s, id: segmentIds[i] })) }), signal });
+        const result = await studioJson<{ translated: { id: string; text: string; error?: string }[] }>("/dub/translate", { ...jsonBody({ job_id: draft.jobId, target_lang: draft.language, provider, segments: draft.segments.map((s, i) => ({ ...s, id: segmentIds[i] })) }), signal, timeoutMs: STUDIO_TIMEOUT.work });
         const error = result.translated.find((s) => s.error); if (error) throw new Error(`Translation failed: ${error.error}`);
         const translated = new Map(result.translated.map((s) => [s.id, s.text]));
         if (segmentIds.some((id) => !translated.has(id))) throw new Error("Translation returned an incomplete script. Your original script has been kept.");
@@ -92,7 +92,7 @@ export function Dubbing() {
       </div>
       <Button className="self-start" variant="primary" disabled={!editable || !draft.profile || !draft.segments.some((s) => s.text.trim())} onClick={() => void op.run(async (signal) => {
         op.setStatus("Starting dub render…");
-        const result = await studioJson<{ task_id: string }>(`/dub/generate/${idPath(draft.jobId)}`, { ...jsonBody({ segments: draft.segments.map((s) => ({ ...s, profile_id: draft.profile })), segment_ids: segmentIds, language: LANGUAGES.find(([code]) => code === draft.language)?.[1], language_code: draft.language, timing_strategy: "strict_slot" }), signal });
+        const result = await studioJson<{ task_id: string }>(`/dub/generate/${idPath(draft.jobId)}`, { ...jsonBody({ segments: draft.segments.map((s) => ({ ...s, profile_id: draft.profile })), segment_ids: segmentIds, language: LANGUAGES.find(([code]) => code === draft.language)?.[1], language_code: draft.language, timing_strategy: "strict_slot" }), signal, timeoutMs: STUDIO_TIMEOUT.work });
         const next = { ...draft, taskId: result.task_id, stage: "rendering" as const, renderedLanguage: draft.language }; setDraft(next); await finishTask(next, signal);
       })}>Render dubbed video</Button>
     </div>}

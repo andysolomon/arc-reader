@@ -3,7 +3,7 @@ import { composeAndListen } from "./helpers";
 
 test("files a new document with Jev, keeps edited details, and finds it by them in the Library", async ({ page }) => {
   await composeAndListen(page);
-  await page.keyboard.press("Space"); // pause
+  await page.keyboard.press("Space");
   await page.getByRole("button", { name: "Details" }).click();
   const details = page.getByRole("region", { name: "Details" });
   // Jev (stubbed) files new documents in the background.

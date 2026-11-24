@@ -20,10 +20,14 @@ export interface ImageViewerProps {
   /** The picture shown, or "grid" for all of them at once; null when closed */
   at: number | "grid" | null;
   onChange: (at: number | "grid" | null) => void;
-  /** Names the gallery, e.g. "Covers" */
   label?: string;
   /** Said under the gallery's name, e.g. how many are still being drawn */
   note?: string;
+}
+
+/** A picture that fits the viewer's stage whatever its shape. */
+export function ViewerImage({ src, alt }: { src: string; alt: string }) {
+  return <img src={src} alt={alt} decoding="async" referrerPolicy="no-referrer" className="block rounded-[6px] object-contain" style={{ maxWidth: "100cqw", maxHeight: "100cqh" }} />;
 }
 
 /**
@@ -31,11 +35,6 @@ export interface ImageViewerProps {
  * out of the grid it goes back to the grid), the arrow keys and a swipe step through them. The
  * screen is dark whatever the theme, so every picture is seen against the same ground.
  */
-/** A picture that fits the viewer's stage whatever its shape. */
-export function ViewerImage({ src, alt }: { src: string; alt: string }) {
-  return <img src={src} alt={alt} decoding="async" referrerPolicy="no-referrer" className="block rounded-[6px] object-contain" style={{ maxWidth: "100cqw", maxHeight: "100cqh" }} />;
-}
-
 export function ImageViewer({ items, at, onChange, label = "Images", note }: ImageViewerProps) {
   const ref = useRef<HTMLDivElement>(null);
   const prev = useRef<Element | null>(null);
@@ -46,7 +45,6 @@ export function ImageViewer({ items, at, onChange, label = "Images", note }: Ima
   const grid = at === "grid";
   const many = items.length > 1;
   const step = (by: number) => { if (index >= 0 && many) onChange((index + by + items.length) % items.length); };
-  // From a picture opened out of the grid, Esc goes back to the grid.
   const close = () => onChange(fromGrid && !grid && many ? "grid" : null);
 
   useEffect(() => { if (grid) setFromGrid(true); else if (at === null) setFromGrid(false); }, [at, grid]);
@@ -83,7 +81,6 @@ export function ImageViewer({ items, at, onChange, label = "Images", note }: Ima
     };
   }, [open]);
 
-  // A swipe across the picture steps to the next or the one before.
   const swipe = useRef<{ x: number; y: number } | null>(null);
 
   if (!open) return null;

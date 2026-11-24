@@ -1,0 +1,8 @@
+#!/bin/sh
+# Commits here are authored by the configured git user alone. Agents keep adding attribution
+# lines (d291646, 05f5989, db6fd4b, 125fbe1), so the message is refused until they are gone.
+found=$(grep -inE '^[[:space:]]*co-authored-by:|^[^[:alnum:]]*generated with ' "$1" | grep -v '^[0-9]*:#')
+[ -z "$found" ] && exit 0
+echo "commit-msg: remove these lines and commit again; commits carry no Co-authored-by or \"Generated with\" attribution:" >&2
+echo "$found" | sed 's/^/  line /' >&2
+exit 1

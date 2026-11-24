@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { DEFAULT_VOICE_ID, FALLBACK_VOICE_ID, LOCAL_VOICE, LOCAL_VOICE_ID, OPENAI_VOICES, OPENAI_ACCENT_VOICES, FISH_DEFAULT_VOICE, FISH_PRESET_VOICES, PHONON_PREFIX, PHONON_VOICES, PRESET_VOICES, hueFor, phononVoice, type Voice } from "../data/voices";
 import { fetchServerVoices, fetchFishVoices, fetchPhononVoices, hasFish, hasApi, hasOpenAI, hasPhonon, hasOwnServer, API_KIND, OPENAI_ENGINE, FISH_ENGINE, PHONON_ENGINE, type ServerEngine } from "../engine/providers";
-import { archetypeOf, idPath, recordingRevision, studioFetch, studioJson, type Profile } from "../lib/studio";
+import { archetypeOf, idPath, recordingRevision, STUDIO_TIMEOUT, studioFetch, studioJson, type Profile } from "../lib/studio";
 import { setVoiceRevision, setVoiceRevisions } from "../engine/voiceRevisions";
 import { LOCAL_ENGINE } from "../engine/types";
 import { useSettings } from "./settings";
@@ -112,8 +112,8 @@ export const useVoices = create<VoicesState>()((set, get) => ({
     try {
       const { voices, engines } = await fetchServerVoices();
       const [metadata, capabilities] = await Promise.allSettled([
-        studioJson<Profile[]>("/profiles"),
-        studioJson<{ tts: { active: string } }>("/engines"),
+        studioJson<Profile[]>("/profiles", { timeoutMs: STUDIO_TIMEOUT.read }),
+        studioJson<{ tts: { active: string } }>("/engines", { timeoutMs: STUDIO_TIMEOUT.read }),
       ]);
       const profileMap = new Map(metadata.status === "fulfilled" ? metadata.value.map((p) => [p.id, p]) : []);
       if (metadata.status === "fulfilled") {
@@ -139,7 +139,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
     }
   },
   async remove(id) {
-    await studioFetch(`/profiles/${idPath(id)}`, { method: "DELETE" });
+    await studioFetch(`/profiles/${idPath(id)}`, { method: "DELETE", timeoutMs: STUDIO_TIMEOUT.read });
     set({ voices: get().voices.filter((v) => v.id !== id) });
     await get().loadServer();
   },
@@ -148,7 +148,7 @@ export const useVoices = create<VoicesState>()((set, get) => ({
     body.set("ref_audio", recording);
     body.set("ref_text", words.trim());
     if (name?.trim()) body.set("name", name.trim());
-    const profile = await studioJson<Profile>(`/profiles/${idPath(id)}/audio`, { method: "PUT", body });
+    const profile = await studioJson<Profile>(`/profiles/${idPath(id)}/audio`, { method: "PUT", body, timeoutMs: STUDIO_TIMEOUT.work });
     // Adopt the new revision at once so nothing replays the old recording while the list reloads.
     const revision = recordingRevision(profile);
     if (revision) setVoiceRevision(id, revision);

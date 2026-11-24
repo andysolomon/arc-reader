@@ -8,7 +8,6 @@ import { dayLabel } from "../text";
 import { Meter, Segmented } from "../ui";
 import { WordSheet, type PracticeWord } from "./Word";
 
-/** A word from the bank as something to practise. */
 export const bankWord = (w: BankWord): PracticeWord => ({ word: w.word, label: missedLabel(w.missed), tone: "accent", line: "Listen to it, then try just this word." });
 
 /** "Missed once · today"; older misses just say how often. */
