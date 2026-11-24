@@ -40,3 +40,4 @@ export * from "./components/Input";
 export * from "./components/icons";
 
 export { voiceAvatarIdentity, hasCuratedPortrait, voicePortrait, type PortraitVoice } from "./lib/voicePortraits";
+export * from "./components/ImageViewer";
