@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { writePrivate } from "./vite.files";
 import type { Plugin } from "vite";
 import { LlmKeyStore } from "./vite.llm";
 import { AvatarDirector, baseDirection, type AvatarDirection, type AvatarReview } from "./vite.avatar-direction";
@@ -49,12 +50,7 @@ export class AvatarStore {
     }
     void this.drain();
   }
-  private async atomic(name: string, data: string | Buffer) {
-    const temp = join(this.directory, `.${randomUUID()}.tmp`);
-    await writeFile(temp, data, { mode: 0o600 });
-    await rename(temp, join(this.directory, name));
-  }
-  private save(record: AvatarRecord) { return this.atomic(`${record.key}.json`, JSON.stringify(record)); }
+  private save(record: AvatarRecord) { return writePrivate(join(this.directory, `${record.key}.json`), JSON.stringify(record)); }
   async list() {
     await this.init;
     return { configured: this.configured, records: [...this.records.values()].map(({ voice: _voice, ...record }) => record) };
@@ -112,7 +108,7 @@ export class AvatarStore {
           const bytes = Buffer.from(encoded, "base64");
           if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error("OpenAI returned an invalid image. Retry from Voices.");
           const name = `${r.key}-${randomUUID()}.png`;
-          await this.atomic(name, bytes);
+          await writePrivate(join(this.directory, name), bytes);
           r.url = `/api/avatars/images/${name}`;
           r.status = "ready";
           delete r.error;

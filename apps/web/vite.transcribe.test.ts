@@ -62,9 +62,9 @@ describe("video transcripts", () => {
     }
     throw new Error(`unexpected request to ${url}`);
   };
-  const make = (seconds: number, deps: ConstructorParameters<typeof VideoTranscripts>[3] = {}, activity?: SpeechActivity) => {
+  const make = (seconds: number, deps: ConstructorParameters<typeof VideoTranscripts>[3] = {}, activity?: SpeechActivity, at = directory) => {
     post = tweet(seconds);
-    return new VideoTranscripts(directory, { target: TARGET, key: "vs-key" }, activity, {
+    return new VideoTranscripts(at, { target: TARGET, key: "vs-key" }, activity, {
       fetch: upstream, available: async () => true, wait: async () => {},
       sound: async (_video, file) => writeFile(file, Buffer.alloc(seconds * 32000)),
       ...deps,
@@ -118,6 +118,16 @@ describe("video transcripts", () => {
     expect(await make(660).start("20")).toEqual(done);
     expect(calls).toEqual([]);
     expect(JSON.parse(await readFile(join(directory, "20.json"), "utf8"))).toMatchObject({ text: done.text, seconds: 660 });
+  });
+
+  it("keeps a transcript readable only by the server's user", async () => {
+    const kept = join(directory, "transcripts");
+    const transcripts = make(60, {}, undefined, kept);
+    pieces = [[{ start: 0, end: 20, text: " Only for me." }]];
+    await transcripts.start("20");
+    await transcripts.settled();
+    expect((await stat(kept)).mode & 0o777).toBe(0o700);
+    expect((await stat(join(kept, "20.json"))).mode & 0o777).toBe(0o600);
   });
 
   it("joins a transcription already under way and shows how far it has got", async () => {

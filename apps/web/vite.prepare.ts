@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { writePrivate } from "./vite.files";
 import type { Connect, Plugin } from "vite";
 import type { PreparationRequest, PreparationStatus, SharedPreparation } from "./src/engine/preparation";
 import { PHONON_ENGINE, PHONON_WORKER, forPhonon, PreparationWorkers, type PreparationWorker } from "./vite.preparation-workers";
@@ -74,7 +75,8 @@ export class PreparationService {
     const files = await readdir(this.directory);
     for (const file of files) {
       const path = resolve(this.directory, file);
-      const info = await stat(path);
+      const info = await stat(path).catch(() => undefined);
+      if (!info) continue; // a write in flight renamed its temporary file away
       if (Date.now() - info.mtimeMs > RETENTION_MS) { await rm(path, { force: true }); continue; }
       if (/^shared-[a-f0-9]{64}\.json$/.test(file) && files.includes(file.replace(/\.json$/, ".bin"))) this.uploaded.add(file.slice(7, -5));
       if (!file.startsWith("job-") || !file.endsWith(".json")) continue;
@@ -92,15 +94,9 @@ export class PreparationService {
     this.schedule();
   }
 
-  private async atomic(file: string, data: string | Buffer) {
-    const path = resolve(this.directory, file);
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, data, { mode: 0o600 });
-    await rename(temporary, path);
-  }
   private persist(job: Job) {
     const data = JSON.stringify(job);
-    const write = (this.writes.get(job.id) || Promise.resolve()).catch(() => {}).then(() => this.atomic(`job-${job.id}.json`, data));
+    const write = (this.writes.get(job.id) || Promise.resolve()).catch(() => {}).then(() => writePrivate(resolve(this.directory, `job-${job.id}.json`), data));
     this.writes.set(job.id, write);
     void write.finally(() => { if (this.writes.get(job.id) === write) this.writes.delete(job.id); }).catch(() => {});
     return write;
@@ -407,8 +403,8 @@ export class PreparationService {
     const write = (this.writes.get(writeKey) || Promise.resolve()).catch(() => {}).then(async () => {
       if (this.uploaded.has(key)) return;
       const { body, ...metadata } = audio;
-      await this.atomic(`shared-${key}.bin`, body);
-      await this.atomic(`shared-${key}.json`, JSON.stringify(metadata));
+      await writePrivate(resolve(this.directory, `shared-${key}.bin`), body);
+      await writePrivate(resolve(this.directory, `shared-${key}.json`), JSON.stringify(metadata));
       this.uploaded.add(key);
     });
     this.writes.set(writeKey, write);
@@ -460,8 +456,8 @@ export class PreparationService {
           console.warn(`Prepared speech came back garbled (voiced ${voiced.toFixed(2)}); asking again: ${item.text.slice(0, 60)}`);
         }
         const { body, metadata } = best;
-        await this.atomic(`${key}.bin`, body);
-        await this.atomic(`${key}.json`, JSON.stringify(metadata));
+        await writePrivate(resolve(this.directory, `${key}.bin`), body);
+        await writePrivate(resolve(this.directory, `${key}.json`), JSON.stringify(metadata));
         return { body, ...metadata };
       };
       const release = await this.turn(worker);
