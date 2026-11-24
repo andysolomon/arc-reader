@@ -8,6 +8,7 @@
     "build": "pnpm -r --filter './packages/**' build && pnpm --filter @readaloud/web build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "check": "pnpm typecheck && pnpm test",
     "test:e2e": "pnpm --filter @readaloud/web test:e2e",
     "cadence": "pnpm --filter @readaloud/cadence dev",
     "test:e2e:cadence": "pnpm --filter @readaloud/cadence test:e2e",

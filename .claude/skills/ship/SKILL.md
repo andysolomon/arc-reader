@@ -47,16 +47,15 @@ pnpm diagrams:stale   # diagrams whose cited code this branch changed
 
 ## 3. Verify before merging
 
-From `apps/web`:
+From the worktree root:
 
 ```sh
-pnpm typecheck
-pnpm vitest run
+pnpm check   # typecheck and unit tests in every package; CI runs the same command
 ```
 
-`pnpm vitest run` includes `scripts/diagrams.test.ts`, which fails on a broken diagram: an unresolvable code reference, a flow or walkthrough step pointing at nothing, or a BPMN export with warnings.
+It includes `scripts/diagrams.test.ts`, which fails on a broken diagram: an unresolvable code reference, a flow or walkthrough step pointing at nothing, or a BPMN export with warnings.
 
-Then run the Playwright specs that cover the changed area, for example `pnpm playwright test tests/e2e/library.spec.ts`.
+Then run the Playwright specs that cover the changed area from `apps/web`, for example `pnpm playwright test tests/e2e/library.spec.ts`. CI runs every spec on pull requests and pushes to main.
 
 - E2E ports 4173, 3998 and 3999 are shared across worktrees. Check `ss -ltnp | grep -E ':(4173|3998|3999) '` is empty first; if another session holds them, wait or ask.
 - The keyboard spec's "position persists" test can flake in a full parallel run. Rerun it alone before calling it a regression.

@@ -90,7 +90,7 @@ function wavOf(samples: Int16Array, rate: number): Blob {
   head.write("RIFF", 0); head.writeUInt32LE(36 + samples.length * 2, 4); head.write("WAVEfmt ", 8);
   head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22); head.writeUInt32LE(rate, 24);
   head.writeUInt32LE(rate * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34); head.write("data", 36); head.writeUInt32LE(samples.length * 2, 40);
-  return new Blob([head, Buffer.from(samples.buffer, samples.byteOffset, samples.length * 2)], { type: "audio/wav" });
+  return new Blob([new Uint8Array(head), new Uint8Array(samples.slice().buffer)], { type: "audio/wav" });
 }
 
 /** The live coach's state after hearing a take the way the app does: the unsettled audio every few seconds. */
