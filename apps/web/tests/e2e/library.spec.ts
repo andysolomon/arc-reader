@@ -201,6 +201,45 @@ test("shows live server progress before audio is downloaded, then distinguishes 
   } finally { release(); }
 });
 
+// A finding of the model (PreparationQueue.reload-mid-clip.cfg): the reload fails the clip download in
+// flight, and the old page persists the reading as "queued" before it unloads. When this passes, drop test.fail.
+test("a reload while a clip downloads goes back to saving without sending the reading again", async ({ page }) => {
+  test.fail();
+  await seedLibrary(page, [null]);
+  const status = { id: "", state: "running", done: 0, total: 2 };
+  let submissions = 0;
+  await page.route("**/api/preparations", async (route) => {
+    // Nothing is offered for reuse, so a reading sent back to the server is submitted again.
+    if (route.request().method() === "GET") return route.fulfill({ json: { jobs: [] } });
+    if (route.request().method() !== "POST") return route.fallback();
+    submissions++;
+    const response = await route.fetch();
+    status.id = (await response.json()).id;
+    await route.fulfill({ response, json: status });
+  });
+  await page.route("**/api/preparations/*", (route) => route.fulfill({ json: status }));
+  let downloads = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/preparations/*/audio/*", async (route) => {
+    downloads++;
+    await gate;
+    await route.continue();
+  });
+  try {
+    await selectAll(page);
+    await page.getByRole("button", { name: "Prepare selected" }).click();
+    await page.getByRole("dialog", { name: "Prepare audio", exact: true }).getByRole("button", { name: "Prepare 1 reading", exact: true }).click();
+    Object.assign(status, { done: 2, state: "done" });
+    await expect(page.getByRole("img", { name: "Bella: 0% saved on this device", exact: true })).toBeVisible();
+    await expect.poll(() => downloads).toBeGreaterThan(0);
+    await page.reload();
+    release();
+    await expect(page.getByRole("img", { name: "Bella: 100% prepared", exact: true })).toBeVisible();
+    expect(submissions).toBe(1);
+  } finally { release(); }
+});
+
 test("the sidebar shows the audio made for each document and what is being made now, on every screen", async ({ page }) => {
   await seedLibrary(page);
   const status = { id: "", state: "running", done: 0, total: 2, queued: true, worker: undefined as string | undefined };
