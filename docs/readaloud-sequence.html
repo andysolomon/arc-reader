@@ -787,7 +787,7 @@ const SEQS = {
       { op: "loop", id: "rounds", g: "≤ 2 rounds while changes are pending", rows: [
         { f: "LS", to: "DB", t: "call", n: "outbox: batches of ≤ 100 changes or 8 MB", say: "The outbox is read in batches. With nothing queued, an empty request still brings back the server’s document versions, positions and deletions.", code: [SRC + "lib/librarySync.ts#const batches"] },
         { f: "DB", to: "LS", t: "ret", n: "changes" },
-        { f: "LS", to: "SV", t: "call", n: "POST /api/library/sync {changes, view: manifest}", say: "Each batch goes to the app server (20 s timeout). Answers over 1 KB are gzipped, so a quiet poll is a few kilobytes.", code: [SRC + "lib/librarySync.ts#const response = await fetch(\"/api/library/sync"] },
+        { f: "LS", to: "SV", t: "call", n: "POST /api/library/sync {changes, view: manifest}", say: "Each batch goes to the app server (20 s timeout). Answers over 1 KB are gzipped, so a quiet poll is a few kilobytes.", code: [SRC + "lib/librarySync.ts#const response = await request(\"/api/library/sync"] },
         { op: "break", id: "offline", g: "offline, timeout, or an error answer", rows: [
           { f: "SV", to: "LS", t: "ret", n: "fails", say: "The request fails." },
           { f: "LS", to: "UI", t: "async", n: "status: offline · N pending", say: "The Library shows offline with the pending count; the outbox keeps the changes for the next trigger.", code: [SRC + "lib/librarySync.ts#const pending = await db("] },
