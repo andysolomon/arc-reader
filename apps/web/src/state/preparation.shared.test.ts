@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { refreshPreparationCatalog, type SharedPreparation } from "../engine/preparation";
+import type { SharedPreparation } from "../engine/preparation";
 import { cacheKey } from "../engine/providers";
 import { db, docs, type DocRecord } from "../lib/db";
 import { planPassages, segment } from "../lib/segment";
@@ -19,8 +19,9 @@ vi.hoisted(() => {
   vi.stubGlobal("localStorage", local);
 });
 
-vi.mock("../engine/providers", async (original) => ({ ...await original<typeof import("../engine/providers")>(), API_BASE: "/api/vs" }));
-vi.mock("../engine/preparation", async (original) => ({ ...await original<typeof import("../engine/preparation")>(), refreshPreparationCatalog: vi.fn(), sharedAudioRemaining: () => 0 }));
+/** What the web server lists at /api/preparations, the catalogue every device syncs. */
+let listed: SharedPreparation[] = [];
+const serverLists = (jobs: SharedPreparation[]) => { listed = jobs; };
 
 const rec: DocRecord = { id: "doc", title: "Shared doc", text: "First passage.\n\nSecond passage.", voice: null, chars: 30, source: "paste", domain: "Text", createdAt: 0, updatedAt: 0 };
 const reading = (id: string, state: SharedPreparation["state"] = "done"): SharedPreparation => {
@@ -29,6 +30,8 @@ const reading = (id: string, state: SharedPreparation["state"] = "done"): Shared
 };
 
 beforeEach(async () => {
+  listed = [];
+  vi.stubGlobal("fetch", async (url: string) => url === "/api/preparations" ? Response.json({ jobs: listed }) : new Response(null, { status: 404 }));
   localStorage.clear();
   usePreparation.setState({ jobs: [], hiddenShared: [] });
   const database = await db();
@@ -39,16 +42,16 @@ afterEach(() => { vi.useRealTimers(); });
 
 describe("Shared server preparations", () => {
   it("does not list readings that finished before this device was watching", async () => {
-    vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one")]);
+    serverLists([reading("one")]);
     await usePreparation.getState().refreshShared();
     expect(usePreparation.getState().jobs).toEqual([]);
   });
 
   it("shows a reading finishing, then clears it and keeps it hidden across syncs and reloads", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one", "running")]);
+    serverLists([reading("one", "running")]);
     await usePreparation.getState().refreshShared();
-    vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one")]);
+    serverLists([reading("one")]);
     await usePreparation.getState().refreshShared();
     expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["ready"]);
 
@@ -67,7 +70,7 @@ describe("Shared server preparations", () => {
   });
 
   it("keeps failed readings until cleared", async () => {
-    vi.mocked(refreshPreparationCatalog).mockResolvedValue([{ ...reading("one", "error"), error: "Server refused" }]);
+    serverLists([{ ...reading("one", "error"), error: "Server refused" }]);
     await usePreparation.getState().refreshShared();
     expect(usePreparation.getState().jobs.map((j) => j.status)).toEqual(["error"]);
     usePreparation.getState().dismissFinished();
@@ -76,11 +79,11 @@ describe("Shared server preparations", () => {
   });
 
   it("shows new readings and forgets dismissals the server no longer lists", async () => {
-    vi.mocked(refreshPreparationCatalog).mockResolvedValue([reading("one", "error")]);
+    serverLists([reading("one", "error")]);
     await usePreparation.getState().refreshShared();
     usePreparation.getState().dismissFinished();
 
-    vi.mocked(refreshPreparationCatalog).mockResolvedValue([{ ...reading("two", "running"), createdAt: 2 }]);
+    serverLists([{ ...reading("two", "running"), createdAt: 2 }]);
     await usePreparation.getState().refreshShared();
     expect(usePreparation.getState().jobs.map((j) => j.serverId)).toEqual(["two"]);
     expect(usePreparation.getState().hiddenShared).toEqual([]);
