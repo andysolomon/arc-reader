@@ -1,3 +1,4 @@
+import { request, type RequestOptions } from "@readaloud/practice/request";
 import { hash } from "../lib/hash";
 import { audioCache } from "../lib/db";
 
@@ -50,8 +51,8 @@ export const sharedAudioRemaining = () => sharing;
 /** The last list the server sent and its tag; an unchanged list then comes back as 304 with no body. */
 let catalogue: { tag: string; jobs: SharedPreparation[] } | undefined;
 async function fetchCatalogue(): Promise<SharedPreparation[]> {
-  const response = await fetch(BASE, {
-    cache: "no-store", signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+  const response = await request(BASE, {
+    cache: "no-store", timeoutMs: STATUS_TIMEOUT_MS,
     ...(catalogue ? { headers: { "if-none-match": catalogue.tag } } : {}),
   });
   if (response.status === 304 && catalogue) return catalogue.jobs;
@@ -75,9 +76,9 @@ export async function refreshPreparationCatalog(): Promise<SharedPreparation[]> 
   for (const [key, target] of [...uploads].slice(0, 8)) {
     const clip = await audioCache.get(key);
     if (!clip) continue;
-    const response = await fetch(`${BASE}/${target.id}/audio/${target.index}`, {
+    const response = await request(`${BASE}/${target.id}/audio/${target.index}`, {
       method: "PUT", headers: { "content-type": clip.mime, "x-duration": String(clip.duration), ...(clip.words ? { "x-word-timings": JSON.stringify(clip.words) } : {}) },
-      body: clip.blob, signal: AbortSignal.timeout(30_000),
+      body: clip.blob, timeoutMs: CLIP_TIMEOUT_MS,
     });
     if (!response.ok) throw new Error("Could not share saved audio. It remains on this device; sync will retry.");
     sent++;
@@ -91,7 +92,7 @@ export async function refreshPreparationCatalog(): Promise<SharedPreparation[]> 
 /** Move a waiting server reading to the front of its queue; `now` also pauses the reading its machine is on. */
 export function prioritizePreparation(id: string, now = false): Promise<PreparationStatus> {
   return json<PreparationStatus>(`/${id}/priority`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ now }), signal: AbortSignal.timeout(10_000),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ now }), timeoutMs: STATUS_TIMEOUT_MS,
   });
 }
 export function serverPreparedKeys(): string[] {
@@ -154,25 +155,9 @@ const CLIP_TIMEOUT_MS = 30_000;
 /** A submission carries the whole reading's text; allow a slow uplink 10 KB a second. */
 const submitTimeout = (body: string) => Math.max(SUBMIT_TIMEOUT_MS, body.length / 10);
 
-/** Run `request` with a signal that aborts when `outer` does or after `timeout` ms, whichever comes first. */
-async function timed<T>(outer: AbortSignal | null | undefined, timeout: number, request: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  const controller = new AbortController();
-  const cancel = () => controller.abort(outer?.reason);
-  const timer = setTimeout(() => controller.abort(new DOMException("The server did not answer in time.", "TimeoutError")), timeout);
-  if (outer?.aborted) cancel();
-  else outer?.addEventListener("abort", cancel, { once: true });
-  try {
-    return await request(controller.signal);
-  } finally {
-    clearTimeout(timer);
-    outer?.removeEventListener("abort", cancel);
-  }
-}
-
-async function json<T>(path: string, init?: RequestInit, timeout?: number): Promise<T> {
-  if (!timeout) return answer<T>(await fetch(`${BASE}${path}`, init));
-  // The body is read inside the time limit too.
-  return timed(init?.signal, timeout, async (signal) => answer<T>(await fetch(`${BASE}${path}`, { ...init, signal })));
+/** The body is read inside the time limit too. */
+async function json<T>(path: string, init: RequestOptions): Promise<T> {
+  return answer<T>(await request(`${BASE}${path}`, init));
 }
 
 async function answer<T>(response: Response): Promise<T> {
@@ -213,7 +198,7 @@ async function submit(requests: PreparationRequest[], start: number, fingerprint
     for (;;) {
       signal?.throwIfAborted();
       try {
-        status = await json<PreparationStatus>("", { method: "POST", headers: { "Content-Type": "application/json" }, body }, submitTimeout(body));
+        status = await json<PreparationStatus>("", { method: "POST", headers: { "Content-Type": "application/json" }, body, timeoutMs: submitTimeout(body) });
         break;
       } catch (error) {
         signal?.throwIfAborted();
@@ -278,7 +263,7 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
     session.cancelled = true;
     if (sessions.get(fingerprint) === session) sessions.delete(fingerprint);
     save(saved().map((job) => job.id === id ? { ...job, active: false } : job));
-    void fetch(`${BASE}/${id}`, { method: "DELETE", keepalive: true }).catch(() => {});
+    void request(`${BASE}/${id}`, { method: "DELETE", keepalive: true, timeoutMs: STATUS_TIMEOUT_MS }).catch(() => {});
   };
   signal?.addEventListener("abort", cancel, { once: true });
   try {
@@ -289,7 +274,7 @@ export async function prepareAudio(requests: PreparationRequest[], start: number
     for (;;) {
       let status: PreparationStatus;
       try {
-        status = await json<PreparationStatus>(`/${id}`, { signal }, STATUS_TIMEOUT_MS);
+        status = await json<PreparationStatus>(`/${id}`, { signal, timeoutMs: STATUS_TIMEOUT_MS });
       } catch (error) {
         signal?.throwIfAborted();
         // A suspended phone can lose its connection. The job remains on the
@@ -338,14 +323,12 @@ export async function preparedAudio(key: string, signal?: AbortSignal): Promise<
   if (!entry) return null;
   // The clip is read whole inside the time limit, so a connection that stalled while the
   // phone was asleep fails and is retried instead of holding the reading forever.
-  return timed(signal, CLIP_TIMEOUT_MS, async (limited) => {
-    const response = await fetch(`${BASE}/${entry.id}/audio/${entry.keys.indexOf(key)}`, { signal: limited });
-    // The server cache may have expired. Ordinary generation remains available.
-    if (response.status === 404 || response.status === 410) return null;
-    if (!response.ok) {
-      const data = await response.json().catch(() => null) as { error?: string } | null;
-      throw new PreparationHttpError(response.status, data?.error || "Could not fetch prepared audio.");
-    }
-    return new Response(await response.blob(), { status: response.status, headers: response.headers });
-  });
+  const response = await request(`${BASE}/${entry.id}/audio/${entry.keys.indexOf(key)}`, { signal, timeoutMs: CLIP_TIMEOUT_MS });
+  // The server cache may have expired. Ordinary generation remains available.
+  if (response.status === 404 || response.status === 410) return null;
+  if (!response.ok) {
+    const data = await response.json().catch(() => null) as { error?: string } | null;
+    throw new PreparationHttpError(response.status, data?.error || "Could not fetch prepared audio.");
+  }
+  return new Response(await response.blob(), { status: response.status, headers: response.headers });
 }

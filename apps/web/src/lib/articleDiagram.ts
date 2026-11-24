@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import type { DocRecord } from "./db";
 import { articleText, summarySource, type SummaryModel } from "./summary";
 
@@ -207,10 +208,10 @@ export async function drawDiagram(rec: DocRecord, model: SummaryModel, opts: { f
 }
 
 async function complete(rec: DocRecord, model: SummaryModel, messages: { role: string; content: string }[]): Promise<string> {
-  const response = await fetch("/api/llm/v1/chat/completions", {
+  const response = await request("/api/llm/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-opencode-session": `readaloud-diagram-${rec.id}` },
-    signal: AbortSignal.timeout(300_000),
+    timeoutMs: 300_000,
     body: JSON.stringify({ model, max_tokens: 16_000, messages }),
   });
   if (!response.ok) {

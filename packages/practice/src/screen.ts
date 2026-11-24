@@ -1,4 +1,5 @@
 import { BANDS, type Band } from "./bands";
+import { request } from "./request";
 import { practiceHost } from "./host";
 
 /**
@@ -62,11 +63,12 @@ export async function screenPassage(passage: string, signal?: AbortSignal): Prom
   const key = hash(passage);
   const cached = readCache()[key];
   if (cached) return cached;
-  const response = await fetch(`${practiceHost().api}/jev/v1/systemone`, {
+  const response = await request(`${practiceHost().api}/jev/v1/systemone`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(screeningRequest(passage)),
-    signal: signal ?? AbortSignal.timeout(60_000),
+    signal,
+    timeoutMs: 60_000,
   });
   if (!response.ok) throw new Error(`Jev couldn't screen the passage (HTTP ${response.status}).`);
   const screening = interpretScreening(await response.json().catch(() => null));

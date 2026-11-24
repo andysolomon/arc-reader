@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { CoverEntry, CoverLibrary, CoverSummary, DocCovers } from "../lib/coverProtocol";
@@ -48,7 +49,7 @@ export const useCovers = create<CoverState>((set, get) => {
     shelf: {},
     docs: {},
     async refresh() {
-      const response = await fetch("/api/covers/", { signal: AbortSignal.timeout(15_000), ...(shelfTag ? { headers: { "if-none-match": shelfTag } } : {}) });
+      const response = await request("/api/covers/", { timeoutMs: 15_000, ...(shelfTag ? { headers: { "if-none-match": shelfTag } } : {}) });
       if (response.status === 304) return;
       if (!response.ok) throw new Error("Cover service is unavailable.");
       const data = await response.json() as CoverLibrary;
@@ -56,7 +57,7 @@ export const useCovers = create<CoverState>((set, get) => {
       set({ configured: data.configured, paused: data.paused, shelf: data.docs });
     },
     async load(docId) {
-      const response = await fetch(place(docId), { signal: AbortSignal.timeout(15_000) });
+      const response = await request(place(docId), { timeoutMs: 15_000 });
       if (response.status === 404) return null;
       if (!response.ok) throw new Error("Cover service is unavailable.");
       return keep(await response.json() as DocCovers);
@@ -66,8 +67,8 @@ export const useCovers = create<CoverState>((set, get) => {
       const existing = inFlight.get(key);
       if (existing) return existing;
       const task = (async () => {
-        const response = await fetch(`${place(docId)}/ensure`, {
-          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ retry }), signal: AbortSignal.timeout(15_000),
+        const response = await request(`${place(docId)}/ensure`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ retry }), timeoutMs: 15_000,
         });
         // No key on this server, or covers switched off: there is nothing to wait for.
         if (response.status === 503) { set({ configured: false }); return null; }

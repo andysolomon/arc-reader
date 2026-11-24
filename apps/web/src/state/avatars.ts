@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { create } from "zustand";
 import { hasCuratedPortrait, voiceAvatarIdentity, type PortraitVoice } from "@readaloud/ui";
 import { isBundledApp } from "../lib/native";
@@ -21,7 +22,7 @@ export const useAvatars = create<AvatarState>((set, get) => ({
   configured: false,
   entries: {},
   async refresh() {
-    const response = await fetch("/api/avatars/", { signal: AbortSignal.timeout(15_000), cache: "no-store" });
+    const response = await request("/api/avatars/", { timeoutMs: 15_000, cache: "no-store" });
     if (!response.ok) throw new Error("Avatar service is unavailable.");
     const data = await response.json() as { configured: boolean; records: AvatarEntry[] };
     set({ configured: data.configured, entries: Object.fromEntries(data.records.map((r) => [r.identity, r])) });
@@ -31,8 +32,8 @@ export const useAvatars = create<AvatarState>((set, get) => ({
     const existing = inFlight.get(identity);
     if (existing) return existing;
     const task = (async () => {
-      const response = await fetch("/api/avatars/ensure", {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ voice, retry }), signal: AbortSignal.timeout(15_000),
+      const response = await request("/api/avatars/ensure", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ voice, retry }), timeoutMs: 15_000,
       });
       const result = await response.json() as AvatarEntry & { error?: string };
       if (!response.ok) throw new Error(result.error || "Could not create avatar.");

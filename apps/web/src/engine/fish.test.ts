@@ -14,10 +14,9 @@ afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe("Fish Audio", () => {
   it("routes speech to Fish with its reference ID, selected model and fixed synthesis speed", async () => {
     fetchMock.mockResolvedValueOnce(audio());
-    const signal = new AbortController().signal;
-    const chunk = await apiSynthesize({ ...req, signal });
+    const chunk = await apiSynthesize({ ...req, signal: new AbortController().signal });
     expect(fetchMock).toHaveBeenCalledWith("/api/fish/v1/tts", expect.objectContaining({
-      method: "POST", signal,
+      method: "POST",
       headers: { "Content-Type": "application/json", Accept: "audio/mpeg", model: "s2.1-pro" },
       body: JSON.stringify({ text: req.text, reference_id: "voice-123", format: "mp3", prosody: { speed: 1 } }),
     }));

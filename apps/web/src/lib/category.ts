@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import { readingBlocks } from "./codeBlocks";
 import { visualText } from "./visuals";
 import type { DocCategory, DocRecord } from "./db";
@@ -78,15 +79,15 @@ export interface JevChoice { choice: string; confidence?: number; model?: string
 
 /** Ask Jev one Choice question and check the answer is one of the offered choices. */
 export async function askJevChoice(
-  request: { model: string; state: Record<string, string>; questions: Record<string, { type: string; instructions: string; criteria: Record<string, string | null> }> },
+  ask: { model: string; state: Record<string, string>; questions: Record<string, { type: string; instructions: string; criteria: Record<string, string | null> }> },
   messages: { failed: string; missing: string },
 ): Promise<JevChoice> {
-  const [question, { criteria }] = Object.entries(request.questions)[0];
-  const response = await fetch("/api/jev/v1/systemone", {
+  const [question, { criteria }] = Object.entries(ask.questions)[0];
+  const response = await request("/api/jev/v1/systemone", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(60_000),
-    body: JSON.stringify(request),
+    timeoutMs: 60_000,
+    body: JSON.stringify(ask),
   });
   const data = await response.json().catch(() => null) as { model?: string; answers?: Record<string, ChoiceAnswer>; error?: { message?: string }; detail?: unknown } | null;
   if (!response.ok) {

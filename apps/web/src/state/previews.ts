@@ -54,14 +54,14 @@ function run(id: string) {
   const path = `/archetypes/${idPath(id)}/preview`;
   void (async () => {
     try {
-      const state = await studioJson<PreviewSource>(`${path}/state`, { signal: ac.signal, cache: "no-cache" });
+      const state = await studioJson<PreviewSource>(`${path}/state`, { signal: ac.signal, cache: "no-cache", timeoutMs: TIMEOUT_MS });
       if (state.source === "no_model") throw new Error(state.message);
       if (current()) patch(id, { status: state.source === "rendering"
         ? "Generating preview on your machine. The first preview can take a minute or more on CPU; later plays use the saved audio."
         : "Loading saved preview…" });
       // Revalidate the server's saved clip on every open so a repaired
       // preview replaces bad audio without needing a full page reload.
-      const response = await studioFetch(path, { signal: ac.signal, cache: "no-cache" });
+      const response = await studioFetch(path, { signal: ac.signal, cache: "no-cache", timeoutMs: TIMEOUT_MS });
       if (!response.headers.get("content-type")?.startsWith("audio/")) throw new Error("VoiceStudio returned an invalid audio response. Please retry.");
       const clip = await response.blob();
       if (!clip.size) throw new Error("VoiceStudio returned an empty preview. Please retry.");

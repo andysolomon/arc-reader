@@ -1,4 +1,5 @@
 import { configurePractice } from "@readaloud/practice/host";
+import { request } from "@readaloud/practice/request";
 
 /** ReadAloud's API, beside this page wherever it is served: /api at the tailnet address, /cadence/api at the public one. */
 const api = new URL("api", document.baseURI).pathname.replace(/\/$/, "");
@@ -11,11 +12,13 @@ configurePractice({
   api,
   synthesize: (text, signal) => ({
     lang: "en-US",
-    clip: fetch(`${api}/phonon/v1/audio/speech`, {
+    clip: request(`${api}/phonon/v1/audio/speech`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "audio/mpeg, audio/*" },
       body: JSON.stringify({ model: MODEL, input: text, voice: VOICE, response_format: "mp3", speed: 1 }),
       signal,
+      // A piece is about 20 s of speech, which Phonon makes in a few seconds.
+      timeoutMs: 60_000,
     }).then(async (response) => {
       const audio = response.ok ? await response.blob() : null;
       // No usable clip: the browser's own voice says it instead.

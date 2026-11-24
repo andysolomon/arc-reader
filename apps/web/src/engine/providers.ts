@@ -1,3 +1,4 @@
+import { request, type RequestOptions } from "@readaloud/practice/request";
 import { audioCache } from "../lib/db";
 import { hash } from "../lib/hash";
 import { estimateDuration, splitWords } from "../lib/segment";
@@ -80,11 +81,21 @@ function parseWords(raw: unknown): Chunk["words"] | undefined {
   return out.length ? out : undefined;
 }
 
-async function doFetch(url: string, init: RequestInit): Promise<Response> {
+/** A voice or engine list, which a server that is up answers at once. */
+const CATALOGUE_TIMEOUT_MS = 15_000;
+/**
+ * A passage is about 20 s of speech. The slowest voices (cloned, on a CPU) take ten times that
+ * to make it, and the speech server may finish one other request first.
+ */
+const SPEECH_TIMEOUT_MS = 7 * 60_000;
+/** Word timings are optional; a passage plays on its estimated timings without them. */
+const TIMINGS_TIMEOUT_MS = 2 * 60_000;
+
+async function doFetch(url: string, init: RequestOptions): Promise<Response> {
   const authed = withSpeechAuth(url, init);
   let r: Response;
   try {
-    r = await fetch(url, authed);
+    r = await request(url, authed);
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
     throw new ApiUnreachable();
@@ -114,7 +125,7 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
   const base = baseFor(req.engine);
   if (!base) throw new ApiUnreachable("No API configured");
   if (req.profile) {
-    const response = await doFetch(`${base}/engines`, { signal: req.signal });
+    const response = await doFetch(`${base}/engines`, { signal: req.signal, timeoutMs: CATALOGUE_TIMEOUT_MS });
     const capabilities = await response.json() as { tts: { active: string; backends: { id: string; supports_cloning?: boolean }[] } };
     const active = capabilities.tts.backends.find((e) => e.id === capabilities.tts.active);
     if (!active?.supports_cloning) throw new ApiRejected(409, "Select a cloning-capable engine in VoiceStudio to use saved voices. Using the browser voice for now.");
@@ -138,6 +149,7 @@ export async function openaiSpeechSynthesize(req: TtsRequest & { profile?: boole
     headers: { "Content-Type": "application/json", Accept: streamUsage ? "text/event-stream, audio/mpeg" : format === "opus" ? "audio/ogg, audio/opus, audio/*" : "audio/mpeg, audio/*" },
     body: JSON.stringify({ model, input: req.text, voice: phonon ? req.voice.replace(/^phonon:/, "") : accent?.voice ?? req.voice, instructions, response_format: format, speed: 1, ...(omniVoice ? { num_step: 16 } : {}), ...(streamUsage ? { stream_format: "sse" } : {}) }),
     signal: req.signal,
+    timeoutMs: SPEECH_TIMEOUT_MS,
   });
   let r = await speak(opus ? "opus" : "mp3");
   const streamed = r.headers.get("content-type")?.includes("text/event-stream") ? await readSpeechStream(r) : null;
@@ -172,6 +184,7 @@ export async function readaloudSynthesize(req: TtsRequest): Promise<Chunk> {
     headers: { "Content-Type": "application/json", Accept: "audio/mpeg, application/json" },
     body: JSON.stringify({ text: req.text, voice: req.voice, provider: req.engine, format: "mp3" }),
     signal: req.signal,
+    timeoutMs: SPEECH_TIMEOUT_MS,
   });
   const ct = r.headers.get("content-type") ?? "";
   const est = estimateDuration(splitWords(req.text));
@@ -200,6 +213,7 @@ export async function fishSynthesize(req: TtsRequest): Promise<Chunk> {
     headers: { "Content-Type": "application/json", Accept: "audio/mpeg", model: FISH_MODEL },
     body: JSON.stringify({ text: req.text, reference_id: reference, format: "mp3", prosody: { speed: 1 } }),
     signal: req.signal,
+    timeoutMs: SPEECH_TIMEOUT_MS,
   });
   const blob = await r.blob();
   if (!blob.size || (blob.type && !blob.type.startsWith("audio/") && blob.type !== "application/octet-stream")) {
@@ -219,7 +233,7 @@ export interface FishVoice {
 export async function fetchFishVoices(signal?: AbortSignal): Promise<FishVoice[]> {
   if (!hasFish()) return [];
   const r = await doFetch(`${activeFishBase()}/model?page_size=12&language=en&licensed=true&sort_by=score`, {
-    signal, headers: { Accept: "application/json" },
+    signal, timeoutMs: CATALOGUE_TIMEOUT_MS, headers: { Accept: "application/json" },
   });
   const j = await r.json() as { items?: FishVoice[] };
   if (!Array.isArray(j.items)) throw new ApiRejected(502, "Fish Audio returned an invalid voice list");
@@ -229,7 +243,7 @@ export async function fetchFishVoices(signal?: AbortSignal): Promise<FishVoice[]
 /** Voice names the Phonon server offers (GET /v1/audio/voices). */
 export async function fetchPhononVoices(signal?: AbortSignal): Promise<string[]> {
   if (!hasPhonon()) return [];
-  const r = await doFetch(`${activePhononBase()}/v1/audio/voices`, { signal, headers: { Accept: "application/json" } });
+  const r = await doFetch(`${activePhononBase()}/v1/audio/voices`, { signal, timeoutMs: CATALOGUE_TIMEOUT_MS, headers: { Accept: "application/json" } });
   const j = await r.json() as { voices?: unknown };
   if (!Array.isArray(j.voices)) throw new ApiRejected(502, "Phonon returned an invalid voice list");
   return j.voices.filter((v): v is string => typeof v === "string" && !!v);
@@ -551,7 +565,7 @@ export async function fetchWordTimings(audio: Blob, words: string[], signal?: Ab
   form.append("model", "whisper-1");
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "word");
-  const r = await doFetch(`${activeApiBase()}/v1/audio/transcriptions`, { method: "POST", body: form, signal, headers: { "x-stub-text": encodeURIComponent(words.join(" ")) } });
+  const r = await doFetch(`${activeApiBase()}/v1/audio/transcriptions`, { method: "POST", body: form, signal, timeoutMs: TIMINGS_TIMEOUT_MS, headers: { "x-stub-text": encodeURIComponent(words.join(" ")) } });
   const j = (await r.json()) as { words?: { word: string; start: number; end: number }[] };
   const got = (j.words ?? []).filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end));
   return alignWords(got, words);
@@ -601,7 +615,7 @@ export interface ServerEngine {
 
 export async function fetchServerVoices(signal?: AbortSignal): Promise<{ voices: ServerVoice[]; engines: ServerEngine[] }> {
   if (!hasApi() || API_KIND !== "openai") return { voices: [], engines: [] };
-  const r = await doFetch(`${activeApiBase()}/v1/audio/voices`, { signal, headers: { Accept: "application/json" } });
+  const r = await doFetch(`${activeApiBase()}/v1/audio/voices`, { signal, timeoutMs: CATALOGUE_TIMEOUT_MS, headers: { Accept: "application/json" } });
   const j = (await r.json()) as { voices?: ServerVoice[]; engines?: ServerEngine[] };
   return { voices: (j.voices ?? []).map((v) => ({ ...v, id: v.id ?? (v as { voice_id?: string }).voice_id ?? "" })).filter((v) => v.id), engines: j.engines ?? [] };
 }

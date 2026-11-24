@@ -1,4 +1,5 @@
 import { errorMessage } from "./errorMessage";
+import { request } from "./request";
 import { practiceHost } from "./host";
 import type { PreparedTake } from "./audio";
 import { alignTranscript } from "./align";
@@ -80,12 +81,14 @@ export function interpretProsody(data: { answers?: Record<string, Answer> } | nu
 export class JudgeNotConfigured extends Error {}
 
 /** POST a request to /api/decide and return its parsed answers. */
-export async function askJudge(request: unknown, signal?: AbortSignal): Promise<{ answers?: Record<string, Answer> }> {
-  const response = await fetch(`${practiceHost().api}/decide/v1/systemone`, {
+export async function askJudge(question: unknown, signal?: AbortSignal): Promise<{ answers?: Record<string, Answer> }> {
+  const response = await request(`${practiceHost().api}/decide/v1/systemone`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
+    body: JSON.stringify(question),
     signal,
+    // The server gives the model 90 s (vite.decide.ts).
+    timeoutMs: 120_000,
   });
   const data = await response.json().catch(() => null) as { answers?: Record<string, Answer>; error?: { message?: string } | string; detail?: unknown } | null;
   if (!response.ok) {
@@ -101,6 +104,8 @@ export async function askJudge(request: unknown, signal?: AbortSignal): Promise<
 
 const BUSY_RETRIES = 3;
 const BUSY_WAIT_MS = 3000;
+/** A reading of a minute or two, behind whatever the speech server is already working on. */
+const TRANSCRIBE_TIMEOUT_MS = 5 * 60_000;
 
 export interface Transcript {
   text: string;
@@ -118,8 +123,8 @@ export async function transcribeAudio(wav: Blob, mode: "fast" | "accurate", sign
     const body = new FormData();
     body.set("audio", new File([wav], "reading.wav", { type: "audio/wav" }));
     body.set("mode", mode);
-    const request = practiceHost().speechRequest("/transcribe", { method: "POST", body, signal });
-    const response = await fetch(request.url, request.init).catch((error: unknown) => {
+    const speech = practiceHost().speechRequest("/transcribe", { method: "POST", body, signal, timeoutMs: TRANSCRIBE_TIMEOUT_MS });
+    const response = await request(speech.url, speech.init).catch((error: unknown) => {
       if (signal?.aborted) throw error;
       throw new Error("Couldn't reach the speech server to check the reading. Please try again.");
     });

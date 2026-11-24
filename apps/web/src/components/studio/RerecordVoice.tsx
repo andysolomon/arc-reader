@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@readaloud/ui";
 import { useVoices } from "../../state/voices";
-import { idPath, studioJson, type Profile } from "../../lib/studio";
+import { idPath, STUDIO_TIMEOUT, studioJson, type Profile } from "../../lib/studio";
 import { Field, ErrorNotice, Recorder, LocalAudio, SavedVoiceAvatar, fieldClass, panelClass, useOperation } from "./shared";
 import { ReadingScriptCard, ScriptedReferenceNote, useScriptedReference } from "./ReadingScript";
 
@@ -19,7 +19,7 @@ export function RerecordVoice({ id }: { id: string }) {
 
   useEffect(() => {
     const ac = new AbortController();
-    studioJson<Profile>(`/profiles/${idPath(id)}`, { signal: ac.signal }).then((p) => {
+    studioJson<Profile>(`/profiles/${idPath(id)}`, { signal: ac.signal, timeoutMs: STUDIO_TIMEOUT.read }).then((p) => {
       setProfile(p); setName(p.name);
     }).catch((e: Error) => { if (!ac.signal.aborted) setLoadError(e.message); });
     return () => ac.abort();

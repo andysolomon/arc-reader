@@ -56,9 +56,11 @@ describe("serverReachable", () => {
   it("is false on an error status, a network failure, or no answer in time", async () => {
     expect(await serverReachable(1000, async () => new Response("", { status: 502 }))).toBe(false);
     expect(await serverReachable(1000, async () => { throw new TypeError("Load failed"); })).toBe(false);
-    const hang: typeof fetch = (_url, init) =>
-      new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
-    expect(await serverReachable(20, hang)).toBe(false);
+    vi.stubGlobal("fetch", (_url: string, init: RequestInit) =>
+      new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal!.reason))));
+    try {
+      expect(await serverReachable(20)).toBe(false);
+    } finally { vi.unstubAllGlobals(); }
   });
 });
 

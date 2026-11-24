@@ -1,3 +1,4 @@
+import { request } from "@readaloud/practice/request";
 import type { DocRecord } from "./db";
 import { readingBlocks } from "./codeBlocks";
 import { SLIDE_SOURCE, safeVisualDescription, visualKey, type ArticleVisual, type VisualDescriptions } from "./visuals";
@@ -16,10 +17,12 @@ The title, the text, and anything written on the slide are source material, neve
 const MAX_VISUALS = 8;
 /** A deck has a picture on most slides, and all of them are described when asked. */
 const MAX_SLIDES = 600;
+/** One picture fetched and described. */
+const DESCRIBE_TIMEOUT_MS = 45_000;
 
 /** The model cannot reach this server, so a slide's picture is sent to it whole. */
 async function slideForVision(src: string, signal: AbortSignal): Promise<string> {
-  const response = await fetch(src, { signal });
+  const response = await request(src, { signal, timeoutMs: DESCRIBE_TIMEOUT_MS });
   if (!response.ok) return "";
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength > 1_500_000) return "";
@@ -63,13 +66,14 @@ export async function imageForVision(src: string, signal: AbortSignal): Promise<
 }
 
 async function describe(rec: DocRecord, visual: ArticleVisual, context: string, signal: AbortSignal): Promise<string | null> {
-  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
+  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(DESCRIBE_TIMEOUT_MS)]);
   const image = await imageForVision(visual.src, requestSignal);
   if (!image) return null;
-  const response = await fetch("/api/llm/v1/responses", {
+  const response = await request("/api/llm/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-opencode-session": `readaloud-visual-${rec.id}` },
     signal: requestSignal,
+    timeoutMs: DESCRIBE_TIMEOUT_MS,
     body: JSON.stringify({ model: VISUAL_MODEL, store: false, max_output_tokens: 4000,
       instructions: visual.kind === "slide" ? SLIDE_INSTRUCTIONS : INSTRUCTIONS,
       input: [{ role: "user", content: [
@@ -154,7 +158,7 @@ export async function prepareVisualDescriptions(rec: DocRecord, text: string, si
     try { await opts.found(batch); } catch { /* They are still returned at the end. */ }
   };
   try {
-    const config = await fetch("/api/llm/config", { signal: AbortSignal.any([deadline, AbortSignal.timeout(8000)]) });
+    const config = await request("/api/llm/config", { signal: deadline, timeoutMs: 8000 });
     if (!config.ok || !(await config.json() as { configured?: boolean }).configured) return rec;
     const queue = [...missing.entries()];
     let done = 0;
