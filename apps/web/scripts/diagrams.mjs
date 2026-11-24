@@ -23,6 +23,8 @@ export const PAGES = ["docs/readaloud-bpmn.html", "docs/readaloud-sequence.html"
 const SRC = "apps/web/src/";
 // The spellings used on the pages: SRC + "engine/engine.ts#…", "apps/web/vite.prepare.ts#…", "packages/practice/src/pcm.ts#…" and "compose.yaml#…".
 const REF = /(SRC \+ "|"(?=apps\/|packages\/|compose\.yaml#))([\w./-]+)#((?:[^"\\\n]|\\.)+)"/g;
+// The old spelling, SRC + "engine/engine.ts:447": a number that went stale whenever code above it moved.
+const NUMBERED = /(SRC \+ "|"(?=apps\/|packages\/|compose\.yaml:))([\w./-]+):(\d+)"/g;
 
 const read = (path) => readFileSync(resolve(ROOT, path), "utf8");
 
@@ -41,10 +43,11 @@ function lineOf(lines, anchor) {
   return { line: at + 1 };
 }
 
-/** `html` with every code reference turned into "file:line", and the references that name no line. */
+/** `html` with every code reference turned into "file:line", and the references that name no line or carry a number. */
 export function pinRefs(html, root = ROOT) {
+  const problems = [...html.matchAll(NUMBERED)].map(([, open, path, n]) =>
+    `${(open === '"' ? "" : SRC) + path}:${n}: a line number goes stale when code above it moves. Cite how the line it describes starts instead: ${open}${path}#<start of that line>"`);
   const files = new Map();
-  const problems = [];
   let count = 0;
   const pinned = html.replace(REF, (whole, open, path, quoted) => {
     count++;

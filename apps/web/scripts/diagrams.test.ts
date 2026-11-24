@@ -13,8 +13,8 @@ const BpmnModdle = (moddle as any).default?.default ?? (moddle as any).default ?
 describe("diagram code references", () => {
   it.each(PAGES)("%s: each names a line the code still has", (page) => {
     const { problems, count } = pinRefs(readFileSync(resolve(ROOT, page), "utf8"));
-    expect(count).toBeGreaterThan(100);
     expect(problems).toEqual([]);
+    expect(count).toBeGreaterThan(100);
   });
 
   const root = mkdtempSync(join(tmpdir(), "diagram-refs-"));
@@ -38,6 +38,13 @@ describe("diagram code references", () => {
     code("class E {", "  private chunkFor(passage: number) {}", "}");
     expect(pinRefs(page, root).problems[0]).toBe("apps/web/src/engine/engine.ts#private ensureChunk(: no line starts with “private ensureChunk(”. Change the text after # to the start of the line this describes.");
     expect(pinRefs(`[SRC + "engine/gone.ts#x"]`, root).problems).toEqual(["apps/web/src/engine/gone.ts#x: the file no longer exists. Point the reference at the file that has this code now."]);
+  });
+
+  it("written as line numbers fail, saying how to cite the line instead", () => {
+    expect(pinRefs(`code: [SRC + "state/preparation.ts:204", "compose.yaml:82", SRC + "main.tsx"]`, root).problems).toEqual([
+      `apps/web/src/state/preparation.ts:204: a line number goes stale when code above it moves. Cite how the line it describes starts instead: SRC + "state/preparation.ts#<start of that line>"`,
+      `compose.yaml:82: a line number goes stale when code above it moves. Cite how the line it describes starts instead: "compose.yaml#<start of that line>"`,
+    ]);
   });
 });
 
