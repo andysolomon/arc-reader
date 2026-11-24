@@ -1,363 +1,344 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installBrowser, mixed, noise, replies, RATE, serve, speech, undecodable, voice, type Sent } from "./fakeSpeech";
 import { ApiRejected, ApiUnreachable } from "./types";
-import { apiSynthesize, openaiSpeechSynthesize, synthesize, cacheKey, localChunk, startsFromWords } from "./providers";
-import { clipVoicedShare, joinClips } from "./audio";
-import { addUsage } from "../lib/usage";
-import { audioCache } from "../lib/db";
-import { preparedAudio } from "./preparation";
+import { alignWords, apiSynthesize, BUSY_RETRY_CAP_MS, cacheKey, localChunk, openaiSpeechSynthesize, prepareInBackground, startsFromWords, synthesize, type SynthOptions } from "./providers";
+import { GARBLED_BELOW, voicedShare } from "./voicing";
+import { encodeWav } from "./audio";
 import { setVoiceRevision, setVoiceRevisions, voiceIdOfKeyPart } from "./voiceRevisions";
-import { readFileSync } from "node:fs";
-import { canPlayWebmOpus, oggToWebm, readOggOpus, readWebmOpus } from "../lib/webmOpus";
+import { audioCache, type AudioRecord } from "../lib/db";
+import { getUsageSnapshot } from "../lib/usage";
 
-vi.mock("../lib/db", () => ({ audioCache: { get: vi.fn(async () => undefined), put: vi.fn(async () => undefined) } }));
-vi.mock("./preparation", () => ({ preparedAudio: vi.fn(async () => null) }));
-vi.mock("./audio", async (importOriginal) => ({ ...await importOriginal<typeof import("./audio")>(), joinClips: vi.fn(async () => null), clipVoicedShare: vi.fn(async () => undefined) }));
-vi.mock("../lib/usage", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/usage")>(), addUsage: vi.fn() }));
-// Node has no audio element, so devices here can't play WebM unless a test says so.
-vi.mock("../lib/webmOpus", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/webmOpus")>(), canPlayWebmOpus: vi.fn(() => false) }));
+// VITE_API_BASE=/api/vs and the other bases come from vitest.config.ts. Node has no audio
+// element, so this device can't play WebM (providers.webm.test.ts covers one that can).
+const browser = installBrowser();
+let server = serve(replies());
+beforeEach(async () => {
+  browser.clearStorage();
+  setVoiceRevisions({});
+  await audioCache.clear();
+  server = serve(replies());
+});
 
-const voicedOgg = readFileSync(new URL("../../tests/fixtures/voiced.opus", import.meta.url));
+const bodyOf = (sent: Sent) => sent.body as Record<string, unknown>;
+const mp3 = () => new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { headers: { "content-type": "audio/mpeg" } });
+const usage = () => getUsageSnapshot().rows;
+const saved = (req: Parameters<typeof cacheKey>[0]) => audioCache.get(cacheKey(req));
+const store = (req: Parameters<typeof cacheKey>[0], samples: Float32Array | Blob, extra: Partial<AudioRecord> = {}) => audioCache.put({
+  key: cacheKey(req), blob: samples instanceof Blob ? samples : encodeWav(samples, RATE), mime: "audio/wav", duration: 1, createdAt: 0, ...extra,
+});
 
-// VITE_API_BASE=/api/vs comes from vitest.config.ts
-describe("openaiSpeechSynthesize", () => {
-  const fetchMock = vi.fn();
-  beforeEach(() => {
-    fetchMock.mockReset();
-    vi.stubGlobal("fetch", fetchMock);
+/** The web server holds a finished reading of these passages, with `clip` as each one's audio. */
+async function preparedOnServer(requests: SynthOptions[], clip: () => Response, then: (sent: Sent) => Response = replies()) {
+  const job = { id: `job-${Math.random().toString(36).slice(2)}`, state: "done", done: requests.length, total: requests.length };
+  server = serve((sent) => {
+    if (sent.url === "/api/preparations") return Response.json(job, { status: 202 });
+    if (sent.url === `/api/preparations/${job.id}`) return Response.json(job);
+    if (sent.url.startsWith(`/api/preparations/${job.id}/audio/`)) return clip();
+    return then(sent);
   });
-  afterEach(() => vi.unstubAllGlobals());
+  await prepareInBackground(requests, 0);
+}
 
-  it("posts the OpenAI shape at 1× and returns audio with an estimated duration when decode is unavailable", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(64)], { type: "audio/mpeg" }), { status: 200, headers: { "content-type": "audio/mpeg" } }));
+describe("speaking through the OpenAI-compatible API", () => {
+  it("posts the OpenAI shape at 1× and estimates the duration of audio it cannot decode", async () => {
+    server = serve(replies(undecodable()));
     const c = await openaiSpeechSynthesize({ text: "Hello there, world.", voice: "expr-voice-2-f", engine: "kittentts" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/vs/v1/audio/speech");
-    expect(JSON.parse(String(init.body))).toEqual({ model: "kittentts", input: "Hello there, world.", voice: "expr-voice-2-f", response_format: "mp3", speed: 1 });
-    expect(c.source).toBe("api");
-    expect(c.mime).toBe("audio/mpeg");
+    expect(server.sent.map((s) => s.url)).toEqual(["/api/vs/v1/audio/speech"]);
+    expect(bodyOf(server.sent[0])).toEqual({ model: "kittentts", input: "Hello there, world.", voice: "expr-voice-2-f", response_format: "mp3", speed: 1 });
+    expect(c).toMatchObject({ source: "api", mime: "audio/mpeg" });
     expect(c.duration).toBeCloseTo((3 + 1.2) / 2.83);
   });
 
-  it("asks VoiceStudio for Opus and keeps it as WebM on a device that plays WebM", async () => {
-    vi.mocked(canPlayWebmOpus).mockReturnValueOnce(true);
-    fetchMock.mockResolvedValueOnce(new Response(voicedOgg, { status: 200, headers: { "content-type": "audio/ogg" } }));
-    const c = await openaiSpeechSynthesize({ text: "Hello there.", voice: "expr-voice-2-f", engine: "kittentts" });
-    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toMatchObject({ response_format: "opus" });
-    expect(c.mime).toBe("audio/webm");
-    const packets = (stream: ReturnType<typeof readOggOpus>) => stream!.packets.map((p) => Buffer.from(p).toString("base64"));
-    expect(packets(readWebmOpus(new Uint8Array(await c.audio!.arrayBuffer())))).toEqual(packets(readOggOpus(voicedOgg)));
-  });
-
-  it("asks again for MP3 when the Opus reply is not an Ogg file", async () => {
-    vi.mocked(canPlayWebmOpus).mockReturnValueOnce(true);
-    fetchMock.mockResolvedValueOnce(new Response("not ogg", { status: 200, headers: { "content-type": "audio/ogg" } }))
-      .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    const c = await openaiSpeechSynthesize({ text: "Hello there.", voice: "expr-voice-2-f", engine: "kittentts" });
-    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)).response_format)).toEqual(["opus", "mp3"]);
-    expect(c.mime).toBe("audio/mpeg");
-  });
-
-  it("keeps OpenAI on MP3 even on a device that plays WebM", async () => {
-    vi.mocked(canPlayWebmOpus).mockReturnValue(true);
-    try {
-      fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-      await openaiSpeechSynthesize({ text: "Hello there.", voice: "nova", engine: "openai", openaiModel: "tts-1" });
-      expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toMatchObject({ response_format: "mp3" });
-    } finally {
-      vi.mocked(canPlayWebmOpus).mockReturnValue(false);
-    }
+  it("measures the duration of audio it can decode", async () => {
+    server = serve(replies(speech(voice(1.5))));
+    expect((await openaiSpeechSynthesize({ text: "Hello there.", voice: "v", engine: "kittentts" })).duration).toBeCloseTo(1.5);
   });
 
   it("sends cloned profiles with the active-engine alias", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    fetchMock.mockReset();
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ tts: { active: "omnivoice", backends: [{ id: "omnivoice", supports_cloning: true }] } })))
-      .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" })));
+    server = serve(replies(Response.json({ tts: { active: "omnivoice", backends: [{ id: "omnivoice", supports_cloning: true }] } }), speech()));
     await openaiSpeechSynthesize({ text: "x", voice: "prof-1", engine: "omnivoice", profile: true });
-    expect(JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body))).toMatchObject({ model: "tts-1", num_step: 16 });
+    expect(server.sent.map((s) => s.url)).toEqual(["/api/vs/engines", "/api/vs/v1/audio/speech"]);
+    expect(bodyOf(server.generated()[0])).toMatchObject({ model: "tts-1", voice: "prof-1", num_step: 16 });
   });
 
   it.each(["omnivoice", "omnivoice-subprocess"])("uses the normal 16-step preset for %s", async (engine) => {
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" })));
+    server = serve(replies(speech()));
     await openaiSpeechSynthesize({ text: "Hello there.", voice: "default", engine });
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
-    expect(body).toMatchObject({ model: engine, num_step: 16 });
+    expect(bodyOf(server.generated()[0])).toMatchObject({ model: engine, num_step: 16 });
   });
 
-  it("refuses to silently substitute a preset for a cloned profile", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ tts: { active: "kittentts", backends: [{ id: "kittentts", supports_cloning: false }] } })));
+  // A cloned voice is someone's real voice: reading it in a stock voice instead must never happen quietly.
+  it("never reads a cloned voice in a preset voice when the active engine cannot clone", async () => {
+    const noCloning = () => Response.json({ tts: { active: "kittentts", backends: [{ id: "kittentts", supports_cloning: false }] } });
+    server = serve(replies(noCloning(), noCloning()));
     await expect(openaiSpeechSynthesize({ text: "x", voice: "prof-1", engine: "kittentts", profile: true })).rejects.toThrow("cloning-capable");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const onRejected = vi.fn();
+    const c = await synthesize({ text: "Read this in my voice.", voice: "prof-1", engine: "kittentts", profile: true, onRejected });
+    expect(server.generated()).toEqual([]);
+    expect(onRejected).toHaveBeenCalledWith(expect.stringContaining("cloning-capable"));
+    expect(c).toMatchObject({ source: expect.stringMatching(/local|estimate/) });
+    expect(c.audio).toBeUndefined();
+    expect(await saved({ text: "Read this in my voice.", voice: "prof-1", engine: "kittentts" })).toBeUndefined();
+    expect(usage()).toEqual([]);
   });
 
-  it("preserves model-license errors instead of blaming the API key", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ detail: { message: "Review model terms first" } }), { status: 403 }));
+  it("never reads a cloned voice on an engine other than the one it was saved for", async () => {
+    server = serve(replies(Response.json({ tts: { active: "cosyvoice", backends: [{ id: "cosyvoice", supports_cloning: true }] } })));
+    await expect(openaiSpeechSynthesize({ text: "x", voice: "prof-1", engine: "omnivoice", profile: true })).rejects.toThrow("engine changed");
+    expect(server.generated()).toEqual([]);
+  });
+
+  it("passes a model-licence refusal to the reader word for word instead of blaming the API key", async () => {
+    const licence = () => Response.json({ detail: { message: "Review model terms first" } }, { status: 403 });
+    server = serve(replies(licence(), licence()));
     await expect(openaiSpeechSynthesize({ text: "x", voice: "v", engine: "omnivoice" })).rejects.toThrow("Review model terms first");
+    const onRejected = vi.fn();
+    await synthesize({ text: "x", voice: "v", engine: "omnivoice", onRejected });
+    expect(onRejected).toHaveBeenCalledExactlyOnceWith("Review model terms first");
   });
 
-  it("maps network failures and gateway errors to ApiUnreachable", async () => {
-    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  it("treats network failures and gateway errors as an unreachable server", async () => {
+    server = serve(replies(new TypeError("Failed to fetch"), new Response("{}", { status: 502 })));
     await expect(openaiSpeechSynthesize({ text: "x", voice: "v", engine: "kittentts" })).rejects.toBeInstanceOf(ApiUnreachable);
-    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 502 }));
     await expect(openaiSpeechSynthesize({ text: "x", voice: "v", engine: "kittentts" })).rejects.toBeInstanceOf(ApiUnreachable);
   });
 
-  it("maps 401 and 4xx to ApiRejected with the server's message", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 401 }));
+  it("treats 401 and other 4xx as a refusal, with the server's own message", async () => {
+    server = serve(replies(new Response("{}", { status: 401 }), Response.json({ error: { message: "Engine 'nope' is not available" } }, { status: 400 })));
     await expect(openaiSpeechSynthesize({ text: "x", voice: "v", engine: "kittentts" })).rejects.toBeInstanceOf(ApiRejected);
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "Engine 'nope' is not available" } }), { status: 400, headers: { "content-type": "application/json" } }));
     await expect(openaiSpeechSynthesize({ text: "x", voice: "v", engine: "nope" })).rejects.toThrow("Engine 'nope' is not available");
   });
 
-  it("synthesize falls back to the local chunk and reports offline / rejected", async () => {
+  it("falls back to the browser voice and says whether the server was down or refused the key", async () => {
     const onOffline = vi.fn(), onRejected = vi.fn();
-    fetchMock.mockRejectedValueOnce(new TypeError("down"));
-    const a = await synthesize({ text: "a b c", voice: "v", engine: "kittentts", onOffline, onRejected });
-    expect(a.source).toMatch(/local|estimate/);
+    server = serve(replies(new TypeError("down"), new Response("{}", { status: 403 })));
+    expect((await synthesize({ text: "a b c", voice: "v", engine: "kittentts", onOffline, onRejected })).source).toMatch(/local|estimate/);
     expect(onOffline).toHaveBeenCalledTimes(1);
-    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 403 }));
     await synthesize({ text: "a b c", voice: "v", engine: "kittentts", onOffline, onRejected });
-    expect(onRejected).toHaveBeenCalledWith("The speech server rejected the API key");
+    expect(onRejected).toHaveBeenCalledExactlyOnceWith("The speech server rejected the API key");
   });
 
-  it("synthesize rethrows when the caller refuses the browser-voice fallback", async () => {
+  it("fails instead of quietly switching to the browser voice when the caller refuses that fallback", async () => {
     const onOffline = vi.fn();
-    fetchMock.mockRejectedValueOnce(new TypeError("down"));
+    server = serve(replies(new TypeError("down")));
     await expect(synthesize({ text: "a b c", voice: "v", engine: "kittentts", fallbackLocal: false, onOffline })).rejects.toBeInstanceOf(ApiUnreachable);
     expect(onOffline).not.toHaveBeenCalled();
   });
+});
 
-  it("cache keys include the engine", async () => {
-    expect(cacheKey({ text: "t", voice: "v", engine: "kittentts" })).not.toBe(cacheKey({ text: "t", voice: "v", engine: "supertonic3" }));
+describe("the audio cache", () => {
+  const req = { text: "Hello there.", voice: "v", engine: "kittentts" };
+
+  it("saves a new clip and plays it back later without asking the server again", async () => {
+    server = serve(replies(speech(voice(1))));
+    const first = await synthesize(req);
+    expect(first.source).toBe("api");
+    expect(await saved(req)).toMatchObject({ mime: "audio/wav", duration: 1 });
+    const again = await synthesize(req);
+    expect(again).toMatchObject({ source: "cache", duration: 1 });
+    expect(await again.audio!.arrayBuffer()).toEqual(await first.audio!.arrayBuffer());
+    expect(server.generated()).toHaveLength(1);
+    expect(usage()).toEqual([expect.objectContaining({ provider: "voicestudio", model: "kittentts", requests: 1 })]);
   });
 
-  it("cache keys follow a re-recorded clone's recording, keeping first-recording keys unchanged", () => {
-    const first = cacheKey({ text: "t", voice: "ab12cd34", engine: "omnivoice" });
-    expect(first).toBe(`omnivoice|ab12cd34|${first.split("|")[2]}`);
+  it("never plays one engine's clip for another", async () => {
+    server = serve(replies(speech(), speech()));
+    await synthesize(req);
+    expect((await synthesize({ ...req, engine: "supertonic3" })).source).toBe("api");
+    expect(server.generated().map((s) => bodyOf(s).model)).toEqual(["kittentts", "supertonic3"]);
+  });
+
+  it("keeps OpenAI clips under the steady model they were saved with, and generates again for tts-1", async () => {
+    const nova = { text: "t", voice: "nova", engine: "openai" };
+    server = serve(replies(mp3(), mp3(), mp3()));
+    await synthesize(nova);
+    expect((await synthesize({ ...nova, openaiModel: "gpt-4o-mini-tts" })).source).toBe("cache");
+    expect((await synthesize({ ...nova, openaiModel: "tts-1" })).source).toBe("api");
+    // Accent voices always use the steady model, whatever is chosen.
+    const accent = { ...nova, voice: "coral~georgia" };
+    await synthesize(accent);
+    expect((await synthesize({ ...accent, openaiModel: "tts-1" })).source).toBe("cache");
+    expect(server.generated().map((s) => bodyOf(s).model)).toEqual(["gpt-4o-mini-tts", "tts-1", "gpt-4o-mini-tts"]);
+  });
+
+  it("stops replaying a re-recorded clone's old clips, and replays them again if the re-recording is undone", async () => {
+    const clone = { text: "t", voice: "ab12cd34", engine: "omnivoice" };
+    server = serve(replies(speech(), speech()));
+    await synthesize(clone);
     setVoiceRevision("ab12cd34", "9f8e7d6c");
-    const second = cacheKey({ text: "t", voice: "ab12cd34", engine: "omnivoice" });
-    expect(second).not.toBe(first);
-    expect(voiceIdOfKeyPart(second.split("|")[1])).toBe("ab12cd34");
-    // Accent ids keep their own separator.
+    expect((await synthesize(clone)).source).toBe("api");
+    // The library finds saved voices by reading them back out of the cache's keys.
+    expect(new Set((await audioCache.keys()).map((key) => voiceIdOfKeyPart(String(key).split("|")[1])))).toEqual(new Set(["ab12cd34"]));
     expect(voiceIdOfKeyPart("coral~georgia")).toBe("coral~georgia");
     setVoiceRevisions({});
-    expect(cacheKey({ text: "t", voice: "ab12cd34", engine: "omnivoice" })).toBe(first);
-  });
-
-  it("cache keys separate OpenAI models, keeping the steady model on the key its clips already use", () => {
-    const legacy = cacheKey({ text: "t", voice: "nova", engine: "openai" });
-    expect(cacheKey({ text: "t", voice: "nova", engine: "openai", openaiModel: "gpt-4o-mini-tts" })).toBe(legacy);
-    expect(cacheKey({ text: "t", voice: "nova", engine: "openai", openaiModel: "tts-1" })).not.toBe(legacy);
-    // Accent voices always use the steady model, whatever is chosen.
-    expect(cacheKey({ text: "t", voice: "coral~georgia", engine: "openai", openaiModel: "tts-1" })).toBe(cacheKey({ text: "t", voice: "coral~georgia", engine: "openai" }));
+    expect((await synthesize(clone)).source).toBe("cache");
+    expect(server.generated()).toHaveLength(2);
   });
 });
 
-describe("alignWords", () => {
-  it("accepts an exact count match", async () => {
-    const { alignWords } = await import("./providers");
-    expect(alignWords([{ word: "Hi", start: 0, end: 0.2 }, { word: "there.", start: 0.2, end: 0.5 }], ["Hi", "there."])).toEqual([{ start: 0, end: 0.2 }, { start: 0.2, end: 0.5 }]);
-  });
-  it("merges split tokens by normalized text and rejects mismatches", async () => {
-    const { alignWords } = await import("./providers");
-    expect(alignWords([{ word: "to", start: 0, end: 0.1 }, { word: "-day", start: 0.1, end: 0.3 }, { word: "works", start: 0.3, end: 0.6 }], ["to-day", "works"])).toEqual([{ start: 0, end: 0.3 }, { start: 0.3, end: 0.6 }]);
-    expect(alignWords([{ word: "something", start: 0, end: 1 }], ["entirely", "different"])).toBeNull();
-  });
-});
-
-describe("apiSynthesize queue", () => {
-  const fetchMock = vi.fn();
-  beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock); });
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("runs speech requests one at a time", async () => {
-    const { apiSynthesize } = await import("./providers");
+describe("the VoiceStudio queue", () => {
+  it("sends speech requests one at a time", async () => {
     let inFlight = 0, maxInFlight = 0;
-    fetchMock.mockImplementation(async () => {
-      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+    server = serve(async () => {
+      maxInFlight = Math.max(maxInFlight, ++inFlight);
       await new Promise((r) => setTimeout(r, 5));
       inFlight--;
-      return new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 });
+      return speech();
     });
     await Promise.all([1, 2, 3].map((i) => apiSynthesize({ text: `s${i}`, voice: "v", engine: "kittentts" })));
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(server.generated()).toHaveLength(3);
     expect(maxInFlight).toBe(1);
   });
 
   it("does not wait out a long Retry-After: live listening retries within seconds", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Cancelled at the end, so a request still waiting can't hold the queue for later tests.
+    const listening = new AbortController();
     try {
-      const { apiSynthesize, BUSY_RETRY_CAP_MS } = await import("./providers");
-      fetchMock
-        .mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "30" } }))
-        .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-      const pending = apiSynthesize({ text: "x", voice: "v", engine: "kittentts" });
+      server = serve(replies(new Response("{}", { status: 429, headers: { "retry-after": "30" } }), speech()));
+      const pending = apiSynthesize({ text: "x", voice: "v", engine: "kittentts", signal: listening.signal });
+      pending.catch(() => {});
       await vi.advanceTimersByTimeAsync(BUSY_RETRY_CAP_MS - 1);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(server.generated()).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(1);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(server.generated()).toHaveLength(2);
       expect((await pending).source).toBe("api");
     } finally {
+      listening.abort();
       vi.useRealTimers();
     }
   });
 
-  it("retries a 429 with backoff instead of failing", async () => {
-    const { apiSynthesize } = await import("./providers");
-    fetchMock
-      .mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "0" } }))
-      .mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    const c = await apiSynthesize({ text: "x", voice: "v", engine: "kittentts" });
-    expect(c.source).toBe("api");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("OpenAI engine routing", () => {
-  const fetchMock = vi.fn();
-  beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock); });
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("sends OpenAI voices to the OpenAI base with the OpenAI model", async () => {
-    const { openaiSpeechSynthesize } = await import("./providers");
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    await openaiSpeechSynthesize({ text: "x", voice: "nova", engine: "openai" });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/oa/v1/audio/speech");
-    expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-4o-mini-tts", voice: "nova" });
-    expect(JSON.parse(String(init.body))).not.toHaveProperty("num_step");
+  it("asks again after a 429 instead of failing, and bills only the request that worked", async () => {
+    server = serve(replies(new Response("", { status: 429, headers: { "retry-after": "0.001" } }), mp3()));
+    expect((await apiSynthesize({ text: "Hello there.", voice: "nova", engine: "openai" })).source).toBe("api");
+    expect(server.generated()).toHaveLength(2);
+    expect(usage()).toEqual([expect.objectContaining({ provider: "openai", requests: 1 })]);
   });
 
-  it("asks gpt-4o-mini-tts for one steady delivery on every request", async () => {
-    const { openaiSpeechSynthesize } = await import("./providers");
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    await openaiSpeechSynthesize({ text: "x", voice: "sage", engine: "openai" });
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
-    expect(body.instructions).toMatch(/same calm tone, pace, pitch and volume/);
-    expect(body.instructions).toMatch(/exactly as written/);
-  });
-
-  it("sends accent voices as their base voice with accent instructions ahead of the steady delivery", async () => {
-    const { openaiSpeechSynthesize } = await import("./providers");
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    await openaiSpeechSynthesize({ text: "x", voice: "coral~georgia", engine: "openai" });
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
-    expect(body).toMatchObject({ model: "gpt-4o-mini-tts", voice: "coral" });
-    expect(body.instructions).toMatch(/Georgia Southern accent.*same calm tone/);
-  });
-
-  it("uses tts-1 when it is chosen, without instructions or token streaming", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    await openaiSpeechSynthesize({ text: "x", voice: "nova", engine: "openai", openaiModel: "tts-1" });
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
-    expect(body).toMatchObject({ model: "tts-1", voice: "nova" });
-    expect(body).not.toHaveProperty("instructions");
-    expect(body).not.toHaveProperty("stream_format");
-  });
-
-  it("keeps accent voices on the steady model when tts-1 is chosen", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    await openaiSpeechSynthesize({ text: "x", voice: "coral~georgia", engine: "openai", openaiModel: "tts-1" });
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
-    expect(body.model).toBe("gpt-4o-mini-tts");
-    expect(body.instructions).toMatch(/Georgia Southern accent/);
-  });
-
-  it("leaves VoiceStudio and tts-1 requests without instructions", async () => {
-    const { openaiSpeechSynthesize } = await import("./providers");
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    await openaiSpeechSynthesize({ text: "x", voice: "expr-voice-2-f", engine: "kittentts" });
-    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).not.toHaveProperty("instructions");
-  });
-
-  it("does not queue OpenAI requests behind VoiceStudio ones", async () => {
-    const { apiSynthesize } = await import("./providers");
+  it("does not queue OpenAI requests behind each other", async () => {
     let inFlight = 0, maxInFlight = 0;
-    fetchMock.mockImplementation(async () => {
-      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+    server = serve(async () => {
+      maxInFlight = Math.max(maxInFlight, ++inFlight);
       await new Promise((r) => setTimeout(r, 5));
       inFlight--;
-      return new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 });
+      return mp3();
     });
     await Promise.all([1, 2, 3].map((i) => apiSynthesize({ text: `s${i}`, voice: "nova", engine: "openai" })));
     expect(maxInFlight).toBe(3);
   });
 });
 
-describe("generation accounting", () => {
-  const req = { text: "Hello there.", voice: "nova", engine: "openai" };
-  const fetchMock = vi.fn();
-  beforeEach(() => { vi.clearAllMocks(); vi.stubGlobal("fetch", fetchMock); });
-  afterEach(() => vi.unstubAllGlobals());
+describe("OpenAI requests", () => {
+  const sentFor = async (req: Parameters<typeof openaiSpeechSynthesize>[0]) => {
+    server = serve(replies(mp3()));
+    await openaiSpeechSynthesize(req);
+    return server.generated()[0];
+  };
 
-  it("requests speech events and records the model plus reported tokens once", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(
+  it("go to the OpenAI base with the OpenAI model", async () => {
+    const sent = await sentFor({ text: "x", voice: "nova", engine: "openai" });
+    expect(sent.url).toBe("/api/oa/v1/audio/speech");
+    expect(sent.body).toMatchObject({ model: "gpt-4o-mini-tts", voice: "nova" });
+    expect(sent.body).not.toHaveProperty("num_step");
+  });
+
+  it("ask gpt-4o-mini-tts for one steady delivery every time", async () => {
+    const { instructions } = bodyOf(await sentFor({ text: "x", voice: "sage", engine: "openai" }));
+    expect(instructions).toMatch(/same calm tone, pace, pitch and volume/);
+    expect(instructions).toMatch(/exactly as written/);
+  });
+
+  it("send accent voices as their base voice with accent instructions ahead of the steady delivery", async () => {
+    const body = bodyOf(await sentFor({ text: "x", voice: "coral~georgia", engine: "openai" }));
+    expect(body).toMatchObject({ model: "gpt-4o-mini-tts", voice: "coral" });
+    expect(body.instructions).toMatch(/Georgia Southern accent.*same calm tone/);
+  });
+
+  it("use tts-1 when it is chosen, without instructions or token streaming", async () => {
+    const body = bodyOf(await sentFor({ text: "x", voice: "nova", engine: "openai", openaiModel: "tts-1" }));
+    expect(body).toMatchObject({ model: "tts-1", voice: "nova" });
+    expect(body).not.toHaveProperty("instructions");
+    expect(body).not.toHaveProperty("stream_format");
+  });
+
+  it("keep accent voices on the steady model when tts-1 is chosen", async () => {
+    const body = bodyOf(await sentFor({ text: "x", voice: "coral~georgia", engine: "openai", openaiModel: "tts-1" }));
+    expect(body.model).toBe("gpt-4o-mini-tts");
+    expect(body.instructions).toMatch(/Georgia Southern accent/);
+  });
+
+  it("are the only ones with instructions", async () => {
+    server = serve(replies(speech()));
+    await openaiSpeechSynthesize({ text: "x", voice: "expr-voice-2-f", engine: "kittentts" });
+    expect(server.generated()[0].body).not.toHaveProperty("instructions");
+  });
+});
+
+describe("what the usage page bills", () => {
+  const req = { text: "Hello there.", voice: "nova", engine: "openai" };
+
+  it("records the model and the tokens OpenAI reports, once per generation", async () => {
+    server = serve(replies(new Response(
       'data: {"type":"speech.audio.delta","audio":"AQID"}\n\ndata: {"type":"speech.audio.done","usage":{"input_tokens":4,"output_tokens":50}}\n\n',
       { headers: { "content-type": "text/event-stream" } },
-    ));
-    const chunk = await synthesize(req);
-    expect(chunk.source).toBe("api");
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: "gpt-4o-mini-tts", stream_format: "sse" });
-    expect(addUsage).toHaveBeenCalledTimes(1);
-    expect(addUsage).toHaveBeenCalledWith(expect.objectContaining({ engine: "openai", model: "gpt-4o-mini-tts", text: req.text, tokens: { inputTokens: 4, outputTokens: 50 } }));
+    )));
+    expect((await synthesize(req)).source).toBe("api");
+    expect(server.generated()[0].body).toMatchObject({ model: "gpt-4o-mini-tts", stream_format: "sse" });
+    const [row, ...rest] = usage();
+    expect(rest).toEqual([]);
+    expect(row).toMatchObject({ provider: "openai", model: "gpt-4o-mini-tts", requests: 1, characters: req.text.length, inputTokens: 4, outputTokens: 50 });
+    expect(row.costUsd).toBeCloseTo((4 * 0.6 + 50 * 12) / 1e6, 12);
   });
 
-  it("records tts-1 generations under tts-1", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
+  it("records tts-1 generations under tts-1, priced per character", async () => {
+    server = serve(replies(mp3()));
     await synthesize({ ...req, openaiModel: "tts-1" });
-    expect(addUsage).toHaveBeenCalledWith(expect.objectContaining({ engine: "openai", model: "tts-1", text: req.text }));
+    expect(usage()).toEqual([expect.objectContaining({ provider: "openai", model: "tts-1", requests: 1, pricing: "$15 / 1M characters" })]);
+    expect(usage()[0].costUsd).toBeCloseTo(req.text.length * 15 / 1e6, 12);
   });
 
-  it("uses prepared audio without synthesizing or recording another generation", async () => {
+  it("plays audio the web server prepared without generating or billing it again, and keeps it", async () => {
     const local = { text: "Prepared passage.", voice: "v", engine: "kittentts" };
-    vi.mocked(preparedAudio).mockResolvedValueOnce(new Response("audio", { headers: { "content-type": "audio/mpeg", "x-duration": "3" } }));
+    await preparedOnServer([local], () => speech(voice(3)));
     const chunk = await synthesize(local);
-    expect(chunk).toMatchObject({ source: "cache", duration: 3 });
-    expect(await chunk.audio?.text()).toBe("audio");
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(addUsage).not.toHaveBeenCalled();
-    expect(audioCache.put).toHaveBeenCalledWith(expect.objectContaining({ key: cacheKey(local), duration: 3 }));
+    expect(chunk).toMatchObject({ source: "cache" });
+    expect(chunk.duration).toBeCloseTo(3);
+    expect(server.generated()).toEqual([]);
+    expect(usage()).toEqual([]);
+    expect((await saved(local))?.duration).toBeCloseTo(3);
   });
 
   it("generates its own MP3 on a device that can't play the server's WebM", async () => {
     const local = { text: "Prepared passage.", voice: "v", engine: "kittentts" };
-    vi.mocked(preparedAudio).mockResolvedValueOnce(new Response(oggToWebm(voicedOgg) as Uint8Array<ArrayBuffer>, { headers: { "content-type": "audio/webm" } }));
-    fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-    const chunk = await synthesize(local);
-    expect(chunk).toMatchObject({ source: "api", mime: "audio/mpeg" });
-    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toMatchObject({ response_format: "mp3" });
+    await preparedOnServer([local], () => new Response(new Uint8Array(32), { headers: { "content-type": "audio/webm" } }), replies(mp3()));
+    expect(await synthesize(local)).toMatchObject({ source: "api", mime: "audio/mpeg" });
+    expect(server.generated()[0].body).toMatchObject({ response_format: "mp3" });
   });
 
-  it("records only a successful retry", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "0.001" } }))
-      .mockResolvedValueOnce(new Response(new Blob(["audio"], { type: "audio/mpeg" })));
-    await apiSynthesize(req);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(addUsage).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not count cache playback, local speech, failed requests, or cancellations", async () => {
-    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob(["audio"]), mime: "audio/mpeg", duration: 1, createdAt: 0 });
+  it("does not bill cache playback, the browser voice, refused requests or cancellations", async () => {
+    server = serve(replies(mp3(), new Response("", { status: 401 })));
+    await synthesize(req);
+    const billed = usage();
+    expect(billed).toEqual([expect.objectContaining({ requests: 1 })]);
     expect((await synthesize(req)).source).toBe("cache");
     await synthesize({ ...req, forceLocal: true });
-    fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
-    await synthesize(req);
+    await synthesize({ ...req, text: "Refused." });
     const ac = new AbortController(); ac.abort();
-    await expect(synthesize({ ...req, signal: ac.signal })).rejects.toMatchObject({ name: "AbortError" });
-    expect(addUsage).not.toHaveBeenCalled();
+    await expect(synthesize({ ...req, text: "Cancelled.", signal: ac.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(usage()).toEqual(billed);
+    expect(server.generated()).toHaveLength(2);
   });
 
-  it("does not count truncated streams or empty audio", async () => {
-    fetchMock.mockResolvedValueOnce(new Response('data: {"type":"speech.audio.delta","audio":"AQID"}\n\n', { headers: { "content-type": "text/event-stream" } }))
-      .mockResolvedValueOnce(new Response(""));
+  it("does not bill truncated streams or empty audio", async () => {
+    server = serve(replies(new Response('data: {"type":"speech.audio.delta","audio":"AQID"}\n\n', { headers: { "content-type": "text/event-stream" } }), new Response("")));
     await synthesize(req);
     await synthesize(req);
-    expect(addUsage).not.toHaveBeenCalled();
+    expect(usage()).toEqual([]);
   });
 });
 
-describe("passage clips", () => {
+describe("passages", () => {
   it("a local passage speaks sentence by sentence, each with its own estimate", () => {
     const c = localChunk("a b. c d e.", [["a", "b."], ["c", "d", "e."]]);
     expect(c.starts).toEqual([0, (2 + 1.2) / 2.83]);
@@ -371,148 +352,123 @@ describe("passage clips", () => {
     expect(startsFromWords(words.slice(0, 2), [["a", "b"], ["c", "d"]])).toBeNull();
   });
 
-  it("stores and replays sentence starts with the cached clip, and shares a one-sentence clip without them", async () => {
-    const fetchMock = vi.fn(async () => new Response(new Blob([new Uint8Array(64)], { type: "audio/mpeg" }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const put = vi.mocked(audioCache.put);
-    put.mockClear();
+  it("aligns transcript words to the text, merging split tokens and rejecting mismatches", () => {
+    expect(alignWords([{ word: "Hi", start: 0, end: 0.2 }, { word: "there.", start: 0.2, end: 0.5 }], ["Hi", "there."])).toEqual([{ start: 0, end: 0.2 }, { start: 0.2, end: 0.5 }]);
+    expect(alignWords([{ word: "to", start: 0, end: 0.1 }, { word: "-day", start: 0.1, end: 0.3 }, { word: "works", start: 0.3, end: 0.6 }], ["to-day", "works"])).toEqual([{ start: 0, end: 0.3 }, { start: 0.3, end: 0.6 }]);
+    expect(alignWords([{ word: "something", start: 0, end: 1 }], ["entirely", "different"])).toBeNull();
+  });
+
+  it("saves sentence starts with the clip and plays them back from the cache, and leaves them off one-sentence clips", async () => {
     const parts = [["One", "two."], ["Three", "four", "five", "six."]];
-    const c = await synthesize({ text: "One two. Three four five six.", voice: "v", engine: "kittentts", parts, words: parts.flat() });
-    // No decoder under jsdom: word-share estimate over the estimated duration.
-    expect(c.starts).toHaveLength(2);
-    expect(c.starts![0]).toBe(0);
-    expect(c.starts![1]).toBeCloseTo(c.duration * (2 / 6));
-    await new Promise((r) => setTimeout(r, 0));
-    expect(put).toHaveBeenCalledTimes(1);
-    expect(put.mock.calls[0][0]).toMatchObject({ starts: c.starts });
-
-    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: "k", blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 3, starts: [0, 1.2], loudness: -20, createdAt: 0 });
-    const cached = await synthesize({ text: "One two. Three four five six.", voice: "v", engine: "kittentts", parts });
-    expect(cached).toMatchObject({ source: "cache", starts: [0, 1.2], loudness: -20 });
-
-    const single = await synthesize({ text: "Only one.", voice: "v", engine: "kittentts", parts: [["Only", "one."]] });
-    expect(single.starts).toBeUndefined();
-    vi.unstubAllGlobals();
+    const passage = { text: "One two. Three four five six.", voice: "v", engine: "kittentts", parts };
+    server = serve(() => undecodable());
+    const c = await synthesize({ ...passage, words: parts.flat() });
+    // Undecodable audio: sentence starts follow each sentence's share of the words.
+    expect(c.starts).toEqual([0, expect.closeTo(c.duration * (2 / 6))]);
+    expect((await saved(passage))?.starts).toEqual(c.starts);
+    expect(await synthesize(passage)).toMatchObject({ source: "cache", starts: c.starts });
+    expect(server.generated()).toHaveLength(1);
+    expect((await synthesize({ text: "Only one.", voice: "v", engine: "kittentts", parts: [["Only", "one."]] })).starts).toBeUndefined();
   });
 });
 
 describe("sentence clips cached before passages", () => {
   const parts = [["One", "two."], ["Three", "four."]];
-  const opts = { text: "One two. Three four.", voice: "nova", engine: "openai", parts, sentences: ["One two.", "Three four."] };
-  const sentenceKeys = new Set(opts.sentences.map((text) => cacheKey({ ...opts, text })));
-  const fetchMock = vi.fn(async () => new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.stubGlobal("fetch", fetchMock);
-    vi.mocked(audioCache.get).mockImplementation(async (key: string) => sentenceKeys.has(key)
-      ? { key, blob: new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), mime: "audio/mpeg", duration: 1.5, words: [{ start: 0.3, end: 0.6 }, { start: 0.7, end: 1.1 }], createdAt: 0 }
-      : undefined);
-  });
-  afterEach(() => {
-    vi.mocked(audioCache.get).mockReset().mockResolvedValue(undefined);
-    vi.unstubAllGlobals();
+  const passage = { text: "One two. Three four.", voice: "nova", engine: "openai", parts, sentences: ["One two.", "Three four."] };
+  const sentence = (text: string) => ({ ...passage, text });
+  /** A sentence clip as saved before passages: 0.3 s of silence, then two words. */
+  const sentenceClip = () => { const s = new Float32Array(Math.round(0.3 * RATE) + RATE); s.set(voice(1), Math.round(0.3 * RATE)); return s; };
+  const words = [{ start: 0.3, end: 0.6 }, { start: 0.7, end: 1.1 }];
+
+  it("are joined instead of paying for the passage again", async () => {
+    for (const text of passage.sentences) await store(sentence(text), sentenceClip(), { words });
+    const c = await synthesize(passage);
+    expect(server.sent).toEqual([]);
+    expect(usage()).toEqual([]);
+    expect(await saved(passage)).toBeUndefined();
+    expect(c).toMatchObject({ source: "cache", mime: "audio/wav", starts: [0, expect.any(Number)] });
+    expect(c.duration).toBeGreaterThan(1.5);
+    expect(c.duration).toBeLessThan(2.6);
+    // The second sentence's first word sounds just after the sentence starts, its leading silence cut.
+    expect(c.words).toHaveLength(4);
+    expect(c.words![2].start).toBeCloseTo(c.starts![1] + 0.05, 1);
   });
 
-  it("joins them instead of paying for the passage again", async () => {
-    const audio = new Blob([new Uint8Array(44)], { type: "audio/wav" });
-    vi.mocked(joinClips).mockResolvedValueOnce({ audio, duration: 2.6, starts: [0, 1.4], trims: [0, 0.25], lead: 0.3, tail: 0.4, loudness: -18 });
-    const c = await synthesize(opts);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(addUsage).not.toHaveBeenCalled();
-    expect(audioCache.put).not.toHaveBeenCalled();
-    expect(c).toMatchObject({ source: "cache", audio, mime: "audio/wav", duration: 2.6, starts: [0, 1.4], loudness: -18 });
-    // The second clip's words move by its place in the passage, less what was cut from its front.
-    expect(c.words![2].start).toBeCloseTo(0.3 - 0.25 + 1.4);
-  });
-
-  it("generates the passage when a sentence is missing or the clips cannot be decoded", async () => {
-    await synthesize(opts);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    vi.mocked(audioCache.get).mockImplementation(async (key: string) => key === [...sentenceKeys][0]
-      ? { key, blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 1, createdAt: 0 } : undefined);
-    await synthesize(opts);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(joinClips).toHaveBeenCalledTimes(1);
+  it("are not used when a sentence is missing or the clips cannot be decoded", async () => {
+    server = serve(() => mp3());
+    await store(sentence(passage.sentences[0]), sentenceClip());
+    expect((await synthesize(passage)).source).toBe("api");
+    await audioCache.clear();
+    for (const text of passage.sentences) await store(sentence(text), new Blob([new Uint8Array(8)], { type: "audio/mpeg" }));
+    expect((await synthesize(passage)).source).toBe("api");
+    expect(server.generated()).toHaveLength(2);
   });
 });
 
 describe("garbled speech", () => {
-  const fetchMock = vi.fn(async () => new Response(new Blob([new Uint8Array(8)], { type: "audio/mpeg" }), { status: 200 }));
-  const voiced = vi.mocked(clipVoicedShare);
-  beforeEach(() => {
-    fetchMock.mockClear();
-    vi.stubGlobal("fetch", fetchMock);
-    vi.mocked(audioCache.put).mockClear();
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-  });
-  afterEach(() => {
-    voiced.mockReset();
-    voiced.mockResolvedValue(undefined);
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
+  beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); });
+  const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
 
   it("asks again when a take is mostly unvoiced noise", async () => {
-    voiced.mockResolvedValueOnce(0.05).mockResolvedValueOnce(0.8);
-    const c = await apiSynthesize({ text: "When writing an evaluator.", voice: "v", engine: "omnivoice" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(c.voiced).toBe(0.8);
+    server = serve(replies(speech(noise()), speech(voice())));
+    const c = await apiSynthesize(req);
+    expect(server.generated()).toHaveLength(2);
+    expect(c.voiced).toBeGreaterThan(GARBLED_BELOW);
   });
 
   it("keeps the best take after the retries run out", async () => {
-    voiced.mockResolvedValueOnce(0.05).mockResolvedValueOnce(0.12).mockResolvedValueOnce(0.02);
-    const c = await apiSynthesize({ text: "12", voice: "v", engine: "omnivoice" });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(c.voiced).toBe(0.12);
+    const takes = [noise(0.6, 1), mixed(0.03, 0.6), noise(0.6, 7)];
+    const shares = takes.map((t) => voicedShare(t, RATE)!);
+    expect(Math.max(...shares)).toBeLessThan(GARBLED_BELOW);
+    server = serve(replies(...takes.map((t) => speech(t))));
+    const c = await apiSynthesize({ ...req, text: "12" });
+    expect(server.generated()).toHaveLength(3);
+    expect(c.voiced).toBeCloseTo(Math.max(...shares));
+    expect(c.voiced).toBe(shares[1]);
   });
 
   it("accepts a take that cannot be measured", async () => {
+    server = serve(replies(undecodable()));
     const c = await apiSynthesize({ text: "Hello.", voice: "v", engine: "kittentts" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(server.generated()).toHaveLength(1);
     expect(c.voiced).toBeUndefined();
   });
 
   it("does not check or retry OpenAI speech", async () => {
-    voiced.mockResolvedValue(0.01);
+    server = serve(replies(speech(noise())));
     const c = await apiSynthesize({ text: "Hello.", voice: "nova", engine: "openai" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(voiced).not.toHaveBeenCalled();
+    expect(server.generated()).toHaveLength(1);
     expect(c.voiced).toBeUndefined();
   });
 
-  it("regenerates a garbled clip cached before voicing was checked, and stores the clean take", async () => {
-    const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
-    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 3, loudness: -20, createdAt: 0 });
-    voiced.mockResolvedValueOnce(0.07).mockResolvedValueOnce(0.7);
-    const c = await synthesize(req);
-    expect(c.source).toBe("api");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(audioCache.put).toHaveBeenCalledWith(expect.objectContaining({ key: cacheKey(req), voiced: 0.7 }));
+  it("generates again for a garbled clip cached before voicing was checked, and keeps the clean take", async () => {
+    await store(req, noise());
+    server = serve(replies(speech(voice())));
+    expect((await synthesize(req)).source).toBe("api");
+    expect(server.generated()).toHaveLength(1);
+    expect((await saved(req))?.voiced).toBeGreaterThan(GARBLED_BELOW);
   });
 
-  it("marks a clean legacy cached clip as checked without regenerating it", async () => {
-    const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
-    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 3, loudness: -20, createdAt: 0 });
-    voiced.mockResolvedValueOnce(0.6);
-    const c = await synthesize(req);
-    expect(c.source).toBe("cache");
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(audioCache.put).toHaveBeenCalledWith(expect.objectContaining({ voiced: 0.6 }));
+  it("marks a clean clip cached before voicing was checked, without generating it again", async () => {
+    await store(req, voice());
+    expect((await synthesize(req)).source).toBe("cache");
+    expect(server.sent).toEqual([]);
+    expect((await saved(req))?.voiced).toBeGreaterThan(GARBLED_BELOW);
   });
 
-  it("does not re-measure a cached clip already checked", async () => {
-    const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
-    vi.mocked(audioCache.get).mockResolvedValueOnce({ key: cacheKey(req), blob: new Blob([new Uint8Array(8)]), mime: "audio/mpeg", duration: 3, loudness: -20, voiced: 0.6, createdAt: 0 });
-    await synthesize(req);
-    expect(voiced).not.toHaveBeenCalled();
+  it("trusts a cached clip's earlier check instead of measuring it again", async () => {
+    // Noise that was judged clean when it was saved: measuring it again would replace it.
+    await store(req, noise(), { voiced: 0.6 });
+    expect((await synthesize(req)).source).toBe("cache");
+    expect(server.sent).toEqual([]);
   });
 
   it("replaces a garbled prepared clip with a fresh take", async () => {
-    const req = { text: "Write an evaluator.", voice: "v", engine: "omnivoice" };
-    vi.mocked(preparedAudio).mockResolvedValueOnce(new Response("audio", { headers: { "content-type": "audio/mpeg", "x-duration": "3" } }));
-    voiced.mockResolvedValueOnce(0.07).mockResolvedValueOnce(0.7);
+    await preparedOnServer([req], () => speech(noise()), replies(speech(voice())));
     const c = await synthesize(req);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(c).toMatchObject({ source: "api", voiced: 0.7 });
+    expect(server.generated()).toHaveLength(1);
+    expect(c.source).toBe("api");
+    expect(c.voiced).toBeGreaterThan(GARBLED_BELOW);
   });
 });
