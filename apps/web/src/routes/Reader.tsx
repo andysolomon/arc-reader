@@ -22,7 +22,7 @@ import { DocumentDetails } from "../components/DocumentDetails";
 import { DocumentLinks } from "../components/DocumentLinks";
 import { VideoTranscript } from "../components/VideoTranscript";
 import { docLinks, linksRead } from "../state/links";
-import { BookOffer, ChapterNav, MissingChapters, chapterLabel, useOpenChapter } from "../components/BookChapters";
+import { BookOffer, ChapterNav, MissingChapters, chapterLabel, useChapters } from "../components/BookChapters";
 import { neighbours } from "../state/books";
 import { useLibrary } from "../state/library";
 import { useFavorites } from "../state/favorites";
@@ -65,7 +65,7 @@ export function Reader() {
   const read = usePlayer(linksRead);
   const [linksOpen, setLinksOpen] = useState(false);
   const library = useLibrary((s) => s.items);
-  const openChapter = useOpenChapter();
+  const chapters = useChapters();
 
   // Pull the shared library first so deep links also work on a new device.
   useEffect(() => {
@@ -246,7 +246,7 @@ export function Reader() {
               </button>
             )}
             {ended && next && (
-              <button type="button" onClick={() => openChapter(next)} className="ml-auto inline-flex min-w-0 items-center gap-1.5 border-0 bg-transparent p-0 font-medium text-accent hover:text-fg">
+              <button type="button" onClick={() => chapters.listen(next)} className="ml-auto inline-flex min-w-0 items-center gap-1.5 border-0 bg-transparent p-0 font-medium text-accent hover:text-fg">
                 <span className="truncate">Next: {next.rec.title}</span>
                 <ArrowRight size={13} strokeWidth={1.5} className="shrink-0" aria-hidden />
               </button>

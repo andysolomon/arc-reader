@@ -1,33 +1,6 @@
 import { expect, test, type Page } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
-import { libraryOption } from "./helpers";
-
-async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null]) {
-  await page.goto("/library");
-  await page.getByRole("heading", { name: "Library", exact: true }).waitFor();
-  await page.evaluate(async (voices) => {
-    const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("readaloud");
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    await new Promise<void>((resolve, reject) => {
-      const tx = database.transaction("docs", "readwrite");
-      for (const [index, voice] of voices.entries()) {
-        const id = ["First", "Second", "Third", "Fourth"][index] ?? `Extra ${index + 1}`;
-        tx.objectStore("docs").put({
-          id, title: `${id} document`, text: `${id} paragraph.\n\nMore ${id.toLowerCase()} text.`, voice,
-          source: "paste", domain: "Pasted text", chars: 40, createdAt: 1, updatedAt: 1,
-        });
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    database.close();
-  }, voiceIds);
-  await page.reload();
-  await expect(page.locator('[data-screen="library"] li').getByRole("button", { name: / document$/ })).toHaveCount(voiceIds.length);
-}
+import { libraryOption, seedLibrary } from "./helpers";
 
 /** Rows carry no checkboxes: Select starts picking, and the bar that appears picks every document shown. */
 async function selectAll(page: Page, name = "Select all") {

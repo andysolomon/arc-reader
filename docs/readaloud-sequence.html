@@ -368,9 +368,9 @@ const SEQS = {
       { f: "UI", to: "DB", t: "call", n: "useLibrary.create() → docs.put", say: "The text becomes a Library document in IndexedDB.",
         d: "A DocRecord: title, text, source, domain, page metadata, hyperlinks and an optional per-document voice. A chapter of a book also records the book, its number and the chapter count, and the Reader offers to add the chapters still missing; the app server adds those (/api/books/import), saving each straight into the shared library, so they keep arriving with the app closed. The same transaction queues it in the outbox, so it syncs to other devices (see Sync library). If a TypeSafe key is set, Jev quietly suggests a shelf.", code: [SRC + "state/library.ts#async create(", SRC + "lib/db.ts#const docs"] },
       { f: "DB", to: "UI", t: "ret", n: "DocRecord" },
-      { f: "UI", to: "PL", t: "call", n: "openDocument → open(rec, {autoplay})", say: "The document is handed to the player; the Reader opens at /read/:id.",
-        d: "open() resolves the voice: the document’s own, else the default from Settings. Autoplay is only set after a user gesture (Listen, Fetch, a Library tap); a pasted link opens paused; shared readings follow the “Auto-play on share” setting.",
-        code: [SRC + "lib/openDoc.ts#export async function openDocument(", SRC + "state/player.ts#async open("] },
+      { f: "UI", to: "PL", t: "call", n: "listenTo → open(rec, {autoplay})", say: "The document is handed to the player; the Reader opens at /read/:id.",
+        d: "open() resolves the voice: the document’s own, else the default from Settings. Only a listen gesture (Listen, Enter on a link, pasted text, a Library row’s Play) goes through listenTo, which plays; a pasted link, an upload or a Library tap goes through openDocument, which opens paused. Shared readings follow the “Auto-play on share” setting.",
+        code: [SRC + "lib/openDoc.ts#export const listenTo = (", SRC + "lib/openDoc.ts#export const openDocument = (", SRC + "state/player.ts#async open(rec, opts = {}) {"] },
       { op: "opt", id: "patois", g: "the voice is Jamaican Patois and the text isn’t rewritten yet", rows: [
         { op: "loop", id: "chunks", g: "each bounded chunk of the text", rows: [
           { f: "PL", to: "SV", t: "call", n: "POST /api/oa/v1/chat/completions", say: "The text is rewritten into Jamaican Patois, chunk by chunk…",
@@ -405,10 +405,10 @@ const SEQS = {
           code: [SRC + "state/player.ts#if (hasActivePreparation(", SRC + "state/player.ts#async prerender("] },
       ] },
       { f: "PL", to: "UI", t: "ret", n: "opened → navigate to /read/:id", say: "open() returns and the Reader opens at /read/:id.",
-        d: "With autoplay, open() has already called engine.play() without awaiting it; the first passage is generated while the Reader appears.", code: [SRC + "lib/openDoc.ts#navigate("] },
+        d: "From listenTo, open() has already called engine.play() without awaiting it; the first passage is generated while the Reader appears.", code: [SRC + "lib/openDoc.ts#navigate(`/read/${rec.id}`"] },
       { op: "alt", id: "start", ops: [
-        { g: "autoplay: Listen, Fetch, or a share with auto-play on", rows: [
-          { f: "PL", to: "EN", t: "async", n: "engine.play() (not awaited)", say: "Listen was a user gesture, so the browser lets audio start.", code: [SRC + "state/player.ts#if (opts.autoplay", SRC + "engine/engine.ts#async play("] },
+        { g: "listenTo: Listen, Enter on a link, pasted text, or a share with auto-play on", rows: [
+          { f: "PL", to: "EN", t: "async", n: "engine.play() (not awaited)", say: "Listen was a user gesture, so the browser lets audio start.", code: [SRC + "state/player.ts#if (opts.autoplay) void engine.play();", SRC + "engine/engine.ts#async play() {"] },
         ] },
         { g: "else", rows: [
           { f: "U", to: "UI", t: "async", n: "press play, or tap a sentence", say: "The Reader opened paused. The listener presses play, or taps a sentence to read from there." },

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 export const THEMES = ["dark", "light", "tokyo-night", "catppuccin", "gruvbox", "nord", "everforest", "kanagawa"] as const;
 export type Theme = (typeof THEMES)[number];
@@ -41,4 +41,32 @@ export async function prepareFromPlayer(page: Page) {
 export async function libraryOption(page: Page, name: "Newest first" | "Shortest first" | "Longest first" | "List" | "Cards") {
   await page.getByRole("button", { name: "Sort and view", exact: true }).click();
   await page.getByRole("menuitemradio", { name, exact: true }).click();
+}
+
+/** Put documents straight into the browser's library, one per voice ("First document", "Second document", …), and show the Library. */
+export async function seedLibrary(page: Page, voiceIds: (string | null)[] = [null, null]) {
+  await page.goto("/library");
+  await page.getByRole("heading", { name: "Library", exact: true }).waitFor();
+  await page.evaluate(async (voices) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("readaloud");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = database.transaction("docs", "readwrite");
+      for (const [index, voice] of voices.entries()) {
+        const id = ["First", "Second", "Third", "Fourth"][index] ?? `Extra ${index + 1}`;
+        tx.objectStore("docs").put({
+          id, title: `${id} document`, text: `${id} paragraph.\n\nMore ${id.toLowerCase()} text.`, voice,
+          source: "paste", domain: "Pasted text", chars: 40, createdAt: 1, updatedAt: 1,
+        });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    database.close();
+  }, voiceIds);
+  await page.reload();
+  await expect(page.locator('[data-screen="library"] li').getByRole("button", { name: / document$/ })).toHaveCount(voiceIds.length);
 }
