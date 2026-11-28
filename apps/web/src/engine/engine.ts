@@ -88,6 +88,15 @@ const TAIL_KEEP_SECONDS = 0.25;
 const MIN_GAIN = 0.5;
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
+/** Let iOS drain the outgoing clip before replacing its source during continuous playback. */
+function canTrimPlaybackTail(): boolean {
+  if (isNativeApp()) return false;
+  if (typeof navigator === "undefined") return true;
+  const { userAgent, maxTouchPoints } = navigator;
+  const ios = /iPhone|iPad|iPod/.test(userAgent) || (/Macintosh/.test(userAgent) && maxTouchPoints > 1);
+  return !ios;
+}
+
 /**
  * Passage-level playback engine with sentence-level position.
  * - One request and one audio element per passage (a run of sentences, see planPassages);
@@ -99,6 +108,7 @@ const now = () => (typeof performance !== "undefined" ? performance.now() : Date
  *   clock runs on the estimate (2.83 words/s × speed) or follows Web Speech boundaries.
  */
 export class PlaybackEngine {
+  private readonly trimPlaybackTail = canTrimPlaybackTail();
   private doc: EngineDoc | null = null;
   private durations: number[] = [];
   private passageList: Passage[] = [];
@@ -757,6 +767,7 @@ export class PlaybackEngine {
   private updateAudio(): boolean {
     if (!this.audio || this.audio.paused || this.audio.readyState < 2) return false;
     this.readAudioPosition();
+    if (!this.trimPlaybackTail) return false;
     const c = this.current!;
     if (c.tail && c.tail > TAIL_KEEP_SECONDS && this.audio.currentTime >= c.duration - c.tail + TAIL_KEEP_SECONDS) {
       this.finishPassage();

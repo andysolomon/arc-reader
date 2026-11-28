@@ -146,6 +146,36 @@ describe("prepared audio playback", () => {
     e.unload();
   });
 
+  it("lets an iPhone finish the outgoing clip before starting the next one", async () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15", maxTouchPoints: 5 });
+    synth.mockResolvedValueOnce(chunk({ source: "cache", duration: 10, tail: 0.69 }))
+      .mockResolvedValue(chunk({ source: "cache", duration: 10, lead: 0.03 }));
+    const { e, onError } = make();
+    e.load(doc(2));
+    e.setSpeed(1.5);
+    await e.prepare();
+    await e.play();
+    const audio = elements[0];
+    const firstSource = audio.src;
+    gesture = false;
+    audio.currentTime = 9.6;
+    audio.ontimeupdate?.();
+    await tick();
+    expect(audio.src).toBe(firstSource);
+    expect(e.getSnapshot()).toMatchObject({ index: 0, offset: 9.6, playing: true });
+
+    audio.finish();
+    await tick();
+    audio.onloadedmetadata?.();
+    expect(audio.src).not.toBe(firstSource);
+    expect(audio.currentTime).toBe(0);
+    expect(audio.playbackRate).toBe(1.5);
+    expect(e.getSnapshot()).toMatchObject({ index: 1, offset: 0, playing: true });
+    expect(onError).not.toHaveBeenCalled();
+    expect(elements).toHaveLength(1);
+    e.unload();
+  });
+
   it("freezes progress while the audio element is buffering", async () => {
     const { e } = make();
     e.load(doc(1));
